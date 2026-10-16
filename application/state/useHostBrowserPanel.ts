@@ -19,6 +19,7 @@ export function useHostBrowserPanel(options: BrowserPanelOptions) {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const opened = useRef(false);
+  const mountedBrowserId = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const { browserId, isVisible } = options;
@@ -65,9 +66,18 @@ export function useHostBrowserPanel(options: BrowserPanelOptions) {
     return () => { cancelled = true; };
   }, [attempt, browserId, isVisible]);
 
-  useEffect(() => () => {
-    opened.current = false;
-    void netcattyBridge.get()?.closeHostBrowserPanel?.(browserId).catch(() => {});
+  useEffect(() => {
+    mountedBrowserId.current = browserId;
+    return () => {
+      opened.current = false;
+      mountedBrowserId.current = null;
+      // StrictMode replays setup immediately. Do not destroy its pending URL
+      // or native browser unless the owning panel actually remains unmounted.
+      queueMicrotask(() => {
+        if (mountedBrowserId.current === browserId) return;
+        void netcattyBridge.get()?.closeHostBrowserPanel?.(browserId).catch(() => {});
+      });
+    };
   }, [browserId]);
 
   return { elementRef, error, retry: () => setAttempt((value) => value + 1) };
