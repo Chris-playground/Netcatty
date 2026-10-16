@@ -78,6 +78,32 @@ const STAT_SFTP_TIMEOUT_MS = 10_000;
 export const PREFLIGHT_STAT_CONCURRENCY = 8;
 export const PREFLIGHT_STAT_MAX_FILES = 128;
 
+// Deferred size discovery issues one statLocal per single-file transfer whose
+// plan is still unknown, and those discoveries run before (and outside) the
+// transfer scheduler that bounds file streaming. A large multi-file selection
+// would otherwise launch thousands of simultaneous local stat IPC calls, so
+// limit how many can be in flight. A queued call frees its slot after the
+// stat timeout below, so a hung filesystem cannot drain the pool permanently.
+const STAT_LOCAL_CONCURRENCY = PREFLIGHT_STAT_CONCURRENCY;
+let statLocalInFlight = 0;
+const statLocalGrantQueue: Array<() => void> = [];
+
+const STAT_LOCAL_RELEASE: () => void = () => {
+  statLocalInFlight--;
+  statLocalGrantQueue.shift()?.();
+};
+
+/** Resolve to a release function once a bounded statLocal slot is available. */
+const acquireStatLocalSlot = (): Promise<() => void> =>
+  new Promise((resolve) => {
+    const grant = () => {
+      statLocalInFlight++;
+      resolve(STAT_LOCAL_RELEASE);
+    };
+    if (statLocalInFlight < STAT_LOCAL_CONCURRENCY) grant();
+    else statLocalGrantQueue.push(grant);
+  });
+
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
   if (latched) ref.current.add(taskId);
@@ -653,8 +679,29 @@ export const useSftpTransfers = ({
         if (task.totalBytes > 0 || !!task.sourceLastModified) return null;
 
         if (sourcePane.connection?.isLocal) {
-          const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
-          if (stat) {
+          // statLocal is an unbounded IPC + filesystem call: a stalled network
+          // mount or an unplugged removable drive can leave it pending forever.
+          // Bound it like the remote branch and settle early once the task is
+          // cancelled, since a marked task cannot settle the IPC itself. The
+          // slot is acquired first so a large multi-file selection cannot run
+          // every deferred discovery stat at once (the transfer scheduler only
+          // bounds streaming, not this pre-transfer phase).
+          const releaseStatSlot = await acquireStatLocalSlot();
+          let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+          let cancelTimer: ReturnType<typeof setInterval> | undefined;
+          try {
+            const stat = await Promise.race([
+              Promise.resolve(netcattyBridge.get()?.statLocal?.(task.sourcePath)),
+              new Promise<undefined>((resolve) => {
+                timeoutTimer = setTimeout(() => resolve(undefined), STAT_SFTP_TIMEOUT_MS);
+              }),
+              new Promise<undefined>((resolve) => {
+                cancelTimer = setInterval(() => {
+                  if (cancelledTasksRef.current.has(task.id)) resolve(undefined);
+                }, 250);
+              }),
+            ]);
+            if (!stat) return null;
             if (!task.sourceLastModified && stat.lastModified) {
               task.sourceLastModified = stat.lastModified;
             }
@@ -664,8 +711,11 @@ export const useSftpTransfers = ({
               });
             }
             return { size: stat.size, lastModified: stat.lastModified, plan: true };
+          } finally {
+            if (timeoutTimer) clearTimeout(timeoutTimer);
+            if (cancelTimer) clearInterval(cancelTimer);
+            releaseStatSlot();
           }
-          return null;
         }
 
         if (sourceSftpId) {
