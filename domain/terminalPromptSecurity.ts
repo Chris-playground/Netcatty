@@ -195,18 +195,16 @@ export function isUntrustedTerminalInputPrompt(
   value: string,
   options: ConfirmedPromptOptions = {},
 ): boolean {
-  // Vim redraws its Ex prompt at column one without emitting a newline.
-  // Keep that row boundary only on the alternate screen; primary-screen
-  // custom authentication prompts must remain fail-closed.
-  const promptInput = options.alternateScreen
-    ? value.replace(ALTERNATE_ROW_START_PATTERN, "\n")
-    : value;
-  const prompt = lastLogicalLine(promptInput).trim();
+  const prompt = lastLogicalLine(value).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
-  // Vim command-mode entry on the alternate screen. A bare `:` on the
-  // primary screen stays fail-closed (`sudo -p ':'`).
-  if (options.alternateScreen && /^:\s*$/.test(prompt)) return false;
+  // Only Vim's bare Ex prompt may use cursor row boundaries. Preserve the
+  // original text for sensitivity checks and every other prompt classifier.
+  // A bare ':' on the primary screen stays fail-closed (`sudo -p ':'`).
+  if (options.alternateScreen) {
+    const alternatePrompt = lastLogicalLine(value.replace(ALTERNATE_ROW_START_PATTERN, "\n")).trim();
+    if (/^:\s*$/.test(alternatePrompt)) return false;
+  }
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
   // Mid-command punctuation after a real shell prompt must keep broadcasting
   // (#2709). Standalone `Label:` / `Custom>` challenges still fail closed.

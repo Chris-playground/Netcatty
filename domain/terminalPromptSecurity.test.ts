@@ -172,3 +172,20 @@ test('Vim row-start cursor positioning separates the alternate-screen colon prom
     assert.equal(classify('Password\u001b[51;9H:', { alternateScreen: true }), true);
   }
 });
+
+test('alternate-screen row changes do not discard sensitive prompts in the same output chunk', () => {
+  for (const classify of [isUntrustedTerminalInputPrompt, sharedPromptSecurity.isUntrustedTerminalInputPrompt]) {
+    assert.equal(classify('\u001b[5;1HPassword:\u001b[24;1HReady', { alternateScreen: true }), true);
+    assert.equal(classify('\u001b[5;1HToken:\u001b[24;1HReady', { alternateScreen: true }), true);
+    for (const label of ['Password:', 'Token: ']) {
+      for (const status of ['Ready', ':', 'alice@host:~$ ']) {
+        const chunk = `\u001b[?1049h\u001b[5;1H${label}\u001b[24;1H${status}`;
+        assert.equal(classify(chunk, { alternateScreen: true }), true, `${label} / ${status}`);
+        assert.equal(classify(chunk, { alternateScreen: false }), true, `${label} / ${status}`);
+      }
+    }
+    // Non-bare-colon classifications retain the original logical line.
+    assert.equal(classify('Custom authentication>\u001b[24;1HReady', { alternateScreen: true }), false);
+    assert.equal(classify('user@host:~$ lsof -i:\u001b[24;1Hmore:', { alternateScreen: true }), false);
+  }
+});
