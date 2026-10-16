@@ -214,11 +214,11 @@ export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
 
 /**
  * Returns true only when the payload contains synced vault entities.
- * Settings and chat history are ignored: neither proves that the vault's
+ * Settings, chat history, and browser bookmarks are ignored: none proves that the vault's
  * hosts and keys survived local data loss.
  */
 export function hasCloudSyncEntityData(payload: SyncPayload): boolean {
-  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS.filter((key) => key !== 'aiSessions'));
+  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS.filter((key) => key !== 'aiSessions' && key !== 'browserBookmarks'));
 }
 
 export function shouldPromptCloudVaultRecovery(
