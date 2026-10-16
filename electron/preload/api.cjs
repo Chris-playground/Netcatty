@@ -13,6 +13,16 @@ function createPreloadApi(ctx) {
   const globalSftpTransferListeners = ctx.globalSftpTransferListeners || new Set();
   const pluginContributionsChangedListeners = ctx.pluginContributionsChangedListeners || new Set();
   const uploadStageControllers = new Map();
+  const hostBrowserPanelListeners = new Set();
+  const pendingHostBrowserPanels = [];
+  // TerminalLayer mounts lazily; retain incoming requests until it subscribes.
+  ctx.ipcRenderer?.on?.("netcatty:host-browser:request-panel", (_event, request) => {
+    if (!hostBrowserPanelListeners.size) {
+      pendingHostBrowserPanels.push(request);
+      return;
+    }
+    for (const listener of hostBrowserPanelListeners) listener(request);
+  });
   // Lightweight test contexts may omit this map; default so closeSession never throws.
   if (!ctx.moshSessionReadyListeners) {
     ctx.moshSessionReadyListeners = new Map();
@@ -1310,9 +1320,9 @@ function createPreloadApi(ctx) {
   openHostBrowserUrl: (options) => ipcRenderer.invoke("netcatty:host-browser:panel-url", options),
   requestHostBrowserPanel: (request) => ipcRenderer.invoke("netcatty:host-browser:request-panel", request),
   onHostBrowserPanelRequest: (callback) => {
-    const listener = (_event, request) => callback(request);
-    ipcRenderer.on("netcatty:host-browser:request-panel", listener);
-    return () => ipcRenderer.removeListener("netcatty:host-browser:request-panel", listener);
+    hostBrowserPanelListeners.add(callback);
+    for (const request of pendingHostBrowserPanels.splice(0)) callback(request);
+    return () => hostBrowserPanelListeners.delete(callback);
   },
   openHostBrowser: (options) => ipcRenderer.invoke("netcatty:host-browser:open", options),
   getHostBrowserBookmarks: () => ipcRenderer.invoke("netcatty:host-browser:bookmarks:get-all"),
