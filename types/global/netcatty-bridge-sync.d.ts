@@ -104,8 +104,11 @@ declare global {
     openSettingsWindow?(): Promise<boolean>;
     setHostBrowserPanelLayout?(options: { browserId: string; visible: boolean; theme?: 'dark' | 'light'; themeTokens?: Record<string, string>; bounds?: { x: number; y: number; width: number; height: number } }): Promise<boolean>;
     closeHostBrowserPanel?(browserId: string): Promise<boolean>;
+    openHostBrowserUrl?(options: { browserId: string; url: string }): Promise<boolean>;
+    requestHostBrowserPanel?(request: { host: import('../../domain/models').Host; sessionId?: string; url?: string }): Promise<boolean>;
+    onHostBrowserPanelRequest?(callback: (request: { host: import('../../domain/models').Host; sessionId?: string; url?: string }) => void): () => void;
     focusHostBrowser?(hostId: string): Promise<boolean>;
-    openHostBrowser?(options: { browserId?: string; embedded?: boolean; hostId: string; label: string; theme: 'dark' | 'light'; themeTokens?: Record<string, string>; connectionOptions: PortForwardOptions }): Promise<{ reused: boolean }>;
+    openHostBrowser?(options: { browserId?: string; embedded?: boolean; local?: boolean; hostId: string; label: string; theme: 'dark' | 'light'; themeTokens?: Record<string, string>; connectionOptions?: PortForwardOptions }): Promise<{ reused: boolean }>;
     getHostBrowserBookmarks?(): Promise<import('../../domain/browserBookmark').BrowserBookmark[]>;
     applyHostBrowserBookmarks?(items: import('../../domain/browserBookmark').BrowserBookmark[]): Promise<boolean>;
     onHostBrowserBookmarksChanged?(callback: () => void): () => void;

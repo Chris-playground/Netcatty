@@ -65,7 +65,8 @@ function normalizeBrowserUrl(input) {
   const raw = String(input || "").trim();
   if (!raw || raw.length > 2048) throw new Error("Enter a valid web address");
   const isLocal = /^(localhost|127\.\d+\.\d+\.\d+|\[[0-9a-f:]+\])(?::\d+)?(?:\/|$)/i.test(raw);
-  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `${isLocal ? "http" : "https"}://${raw}`;
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^[^/:]+:\d+(?:[/?#]|$)/.test(raw);
+  const candidate = hasScheme ? raw : `${isLocal ? "http" : "https"}://${raw}`;
   const url = new URL(candidate);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only HTTP and HTTPS pages can open here");
   if (!url.hostname || url.username || url.password) throw new Error("Enter a valid web address without credentials");
@@ -205,7 +206,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     const tab = record.tabs.get(record.activeTabId);
     if (record.embedded && !record.visible) return;
     const panelWidth = record.embedded ? record.bounds.width / (record.zoom || 1) : record.win.getContentSize()[0];
-    if (tab && tab.url && record.route === "connected" && !(record.panelOpen && panelWidth <= 540)) {
+    if (tab && tab.url && record.route === "connected" && !record.overlayOpen && !(record.panelOpen && panelWidth <= 540)) {
       record.container.addChildView(tab.view);
       resizeView(record);
     }
@@ -237,7 +238,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
       devTools: false,
       navigateOnDragDrop: false,
     } });
-    const tab = { id: randomUUID(), view, url: "", title: "New tab", loading: false, canGoBack: false, canGoForward: false, faviconUrls: [] };
+    const tab = { id: randomUUID(), view, url: initialUrl || "", title: "New tab", loading: false, canGoBack: false, canGoForward: false, faviconUrls: [] };
     record.tabs.set(tab.id, tab);
     const contents = view.webContents;
     contents.on("before-input-event", (event, input) => {
@@ -283,6 +284,19 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     const tunnelId = record.tunnelId;
     record.tunnelId = null;
     void portForwardingBridge.stopPortForward(null, { tunnelId }).catch(() => {});
+  };
+  const flushPanelUrls = (record) => {
+    const layout = panelLayouts.get(record.id);
+    if (record.route !== "connected" || !layout?.pendingUrls?.length) return;
+    const urls = layout.pendingUrls.splice(0);
+    for (const url of urls) {
+      const tab = record.tabs.get(record.activeTabId);
+      if (tab && !tab.url) {
+        tab.url = url;
+        displayTab(record);
+        void tab.view.webContents.loadURL(url).catch(() => {});
+      } else if (record.tabs.size < MAX_TABS) addTab(record, url);
+    }
   };
   const closeRecord = (record) => {
     if (windows.get(record.id) !== record) return;
@@ -351,6 +365,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     record.route = "connected";
     record.error = null;
     displayTab(record);
+    flushPanelUrls(record);
   };
   const startRoute = async (record) => {
     const generation = ++record.routeGeneration;
@@ -358,6 +373,15 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     displayTab(record);
     if (!await setRouteProxy(record, generation, DEAD_PROXY)) return;
     stopTunnel(record);
+    if (record.local) {
+      await record.pageSession.setProxy({ mode: "direct" });
+      if (windows.get(record.id) !== record || record.routeGeneration !== generation) return;
+      record.route = "connected";
+      record.error = null;
+      displayTab(record);
+      flushPanelUrls(record);
+      return;
+    }
     const tunnelId = `host-browser-${randomUUID()}`;
     record.tunnelId = tunnelId;
     const sender = record.sourceWebContents && !record.sourceWebContents.isDestroyed()
@@ -438,9 +462,27 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     const bounds = input.bounds;
     if (input.visible && (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
       || bounds.width < 0 || bounds.height < 0)) throw new Error("Invalid browser panel bounds");
-    panelLayouts.set(id, { sender: event.sender, visible: input.visible === true, bounds,
+    panelLayouts.set(id, { sender: event.sender, visible: input.visible === true, bounds, pendingUrls: previous?.pendingUrls ?? [],
       theme: input.theme === "light" || input.theme === "dark" ? input.theme : undefined, themeTokens: validThemeTokens(input.themeTokens) });
     if (record) applyPanelLayout(record);
+    return true;
+  };
+  const openPanelUrl = (event, input) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner || owner.webContents !== event.sender) throw new Error("Untrusted browser panel owner");
+    const id = input?.browserId;
+    if (typeof id !== "string" || !id || id.length > 512) throw new Error("Invalid browser identity");
+    const url = normalizeBrowserUrl(input.url);
+    const record = windows.get(id);
+    const layout = panelLayouts.get(id);
+    if ((record && record.sourceWebContents !== event.sender) || (layout && layout.sender !== event.sender)) {
+      throw new Error("Browser belongs to another terminal window");
+    }
+    const next = layout ?? { sender: event.sender, visible: false, pendingUrls: [] };
+    if ((record?.tabs.size ?? 0) + next.pendingUrls.length >= MAX_TABS) throw new Error("Too many open tabs");
+    next.pendingUrls.push(url);
+    panelLayouts.set(id, next);
+    if (record) flushPanelUrls(record);
     return true;
   };
   const closePanel = (event, id) => {
@@ -457,8 +499,9 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     if (!BrowserWindow.fromWebContents(event.sender)) throw new Error("Browser opener is unavailable");
     const hostId = typeof input?.hostId === "string" ? input.hostId : "";
     const label = typeof input?.label === "string" ? input.label.slice(0, 120) : "";
-    if (!hostId || hostId.length > 256 || !label || input?.connectionOptions?.hostId !== hostId
-      || input.connectionOptions?.type !== "dynamic") throw new Error("Invalid host browser request");
+    const local = input?.local === true;
+    if (!hostId || hostId.length > 256 || !label || (!local && (input?.connectionOptions?.hostId !== hostId
+      || input.connectionOptions?.type !== "dynamic"))) throw new Error("Invalid host browser request");
     const embedded = input?.embedded === true;
     const id = embedded ? input.browserId : hostId;
     if (typeof id !== "string" || !id || id.length > 512) throw new Error("Invalid browser identity");
@@ -492,10 +535,10 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     pageSession.setPermissionRequestHandler?.((_contents, _permission, callback) => callback(false));
     pageSession.setDevicePermissionHandler?.(() => false);
     if (embedded && !panelLayouts.has(id)) return { reused: false };
-    const record = { id, hostId, embedded, visible: false, bounds: { x: 0, y: 0, width: 1, height: 1 },
+    const record = { id, hostId, embedded, local, visible: false, bounds: { x: 0, y: 0, width: 1, height: 1 },
       label, theme: input?.theme === "light" ? "light" : "dark",
       themeTokens: validThemeTokens(input?.themeTokens),
-      pageSession, route: "connecting", error: null, panelOpen: false,
+      pageSession, route: "connecting", error: null, panelOpen: false, overlayOpen: false,
       tunnelId: null, connectionOptions: input.connectionOptions, sourceWebContents: event.sender,
       routeGeneration: 0, proxyQueue: Promise.resolve(), tabs: new Map(), downloads: new Map(),
       downloadsView: null, downloadsPanelOpen: false, activeTabId: null, win: null };
@@ -609,6 +652,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
   };
   ipcMain.handle("netcatty:host-browser:panel-layout", updatePanelLayout);
   ipcMain.handle("netcatty:host-browser:panel-close", closePanel);
+  ipcMain.handle("netcatty:host-browser:panel-url", openPanelUrl);
   ipcMain.handle("netcatty:host-browser:open", open);
   ipcMain.handle("netcatty:host-browser:focus", focus);
   ipcMain.handle("netcatty:host-browser:snapshot", (event) => snapshot(getOwned(event)));
@@ -693,6 +737,11 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     if (command?.type === "window-close") { record.win.close(); return null; }
     const tab = record.tabs.get(command?.tabId || record.activeTabId);
     switch (command?.type) {
+      case "set-overlay":
+        record.overlayOpen = command.open === true;
+        if (record.overlayOpen) closeDownloadsPanel(record);
+        displayTab(record);
+        break;
       case "window-minimize": record.win.minimize(); break;
       case "window-maximize":
         if (record.win.isMaximized()) record.win.unmaximize();
@@ -763,7 +812,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
       }
     }
   });
-  return { focus, open, updatePanelLayout, closePanel, closeAll: () => {
+  return { focus, open, updatePanelLayout, closePanel, openPanelUrl, closeAll: () => {
     unsubscribeTunnelStatus();
     for (const record of [...windows.values()]) { closeRecord(record); if (!record.embedded && !record.win.isDestroyed()) record.win.destroy(); }
   } };

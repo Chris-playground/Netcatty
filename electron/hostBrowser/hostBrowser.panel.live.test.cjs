@@ -80,17 +80,24 @@ async function main() {
     return owner.contentView.children.find((view) => view.children.some((child) => child instanceof WebContentsView
       && child.webContents.getURL().endsWith("browser.html")));
   };
+  manager.openPanelUrl(event, { browserId: "workspace:session-a", url: a.url });
   const rootA = await open("workspace:session-a", a);
   const chromeA = rootA.children[0].webContents;
   const snapshotA = () => chromeA.executeJavaScript("window.hostBrowser.snapshot()");
   assert.equal((await snapshotA()).embedded, true);
   assert.equal(await chromeA.executeJavaScript("document.querySelector('#route') === null"), true);
   assert.equal(await chromeA.executeJavaScript("document.documentElement.scrollWidth <= innerWidth"), true);
-  await chromeA.executeJavaScript(`window.hostBrowser.command({type:'navigate',url:${JSON.stringify(a.url)}})`);
   await waitFor(async () => (await snapshotA()).tabs[0].title, "Host A");
   const chromeBottom = await chromeA.executeJavaScript("document.querySelector('.chrome').getBoundingClientRect().bottom");
   const pageA = rootA.children.find((child) => child instanceof WebContentsView && child.webContents.getURL() === a.url);
   assert.equal(pageA.getBounds().y, chromeBottom, "page must meet the compact toolbar without a gap or overlap");
+  await chromeA.executeJavaScript("document.querySelector('.tab').dispatchEvent(new MouseEvent('contextmenu', {bubbles:true,clientX:30,clientY:20}))");
+  await waitFor(() => rootA.children.includes(pageA), false);
+  await chromeA.executeJavaScript("document.querySelector('#tab-icon-change').click()");
+  assert.equal(rootA.children.includes(pageA), false, "web content must not cover the icon editor");
+  assert.equal(await chromeA.executeJavaScript("document.querySelector('#tab-icon-editor').hidden"), false);
+  await chromeA.executeJavaScript("document.querySelector('#tab-icon-cancel').click()");
+  await waitFor(() => rootA.children.includes(pageA), true);
   layout("workspace:session-a", false);
   assert.equal(owner.contentView.children.includes(rootA), false);
   await waitFor(() => owner.webContents.isFocused(), true);
@@ -121,12 +128,27 @@ async function main() {
   assert.equal(downloads.getBounds().y, chromeBottom, "downloads must start below the compact toolbar");
   const otherOwner = new BrowserWindow({ show: false });
   assert.throws(() => manager.updatePanelLayout({ sender: otherOwner.webContents }, { browserId: "workspace:session-a", visible: false }), /another terminal window/);
+  assert.throws(() => manager.openPanelUrl({ sender: otherOwner.webContents }, { browserId: "workspace:session-a", url: a.url }), /another terminal window/);
+  assert.throws(() => manager.openPanelUrl(event, { browserId: "workspace:session-a", url: "file:///etc/passwd" }), /HTTP and HTTPS/);
   otherOwner.destroy();
   assert.ok(a.connections() > 0 && b.connections() > 0);
   manager.closePanel(event, "workspace:session-a");
   await waitFor(() => chromeA.isDestroyed(), true);
   assert.equal(owner.isDestroyed(), false, "closing browser must keep the terminal window alive");
+  const localSite = http.createServer((_request, response) => response.end('<title>Local browser</title><h1>Local browser</h1>'));
+  await new Promise((resolve) => localSite.listen(0, "127.0.0.1", resolve));
+  manager.openPanelUrl(event, { browserId: "local:session", url: `http://127.0.0.1:${localSite.address().port}/` });
+  layout("local:session", true);
+  await manager.open(event, { browserId: "local:session", embedded: true, local: true,
+    hostId: "local", label: "Local terminal", theme: "light" });
+  const localRoot = owner.contentView.children.find((view) => view.children.some((child) => child instanceof WebContentsView
+    && child.webContents.getURL().endsWith("browser.html")));
+  const localChrome = localRoot.children[0].webContents;
+  await waitFor(async () => (await localChrome.executeJavaScript("window.hostBrowser.snapshot()")).tabs[0].title, "Local browser");
+  assert.equal((await localChrome.executeJavaScript("window.hostBrowser.snapshot()")).tabs.length, 1, "first terminal link reuses the blank tab");
   manager.closeAll();
+  localSite.closeAllConnections();
+  localSite.close();
   assert.equal(owner.isDestroyed(), false);
   assert.deepEqual(ownerEvents.map((name) => owner.listenerCount(name)), beforeListeners);
   owner.destroy();

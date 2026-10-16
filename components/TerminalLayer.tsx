@@ -1,4 +1,5 @@
 import { subscribeHostBrowserPanelRequests } from '../application/state/hostBrowserPanelRequests';
+import { openHostBrowserPanelUrl } from '../application/hostBrowser';
 import { captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { pruneComposeBarHistory } from '../application/state/composeBarHistoryStore';
 import { FolderTree, History, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
@@ -1987,7 +1988,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('browser');
   }, [handleSwitchSidePanelTab]);
 
-  useEffect(() => subscribeHostBrowserPanelRequests(({ host, sessionId }) => {
+  useEffect(() => subscribeHostBrowserPanelRequests(({ host, sessionId, url }) => {
     const session = sessionsRef.current.find((candidate) => sessionId
       ? candidate.id === sessionId : candidate.hostId === host.id);
     let tabId: string | null = null;
@@ -2000,6 +2001,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (typeof opened === 'string') tabId = opened;
     }
     if (!tabId) return;
+    if (url) {
+      void openHostBrowserPanelUrl(`${tabId}:${session?.id ?? tabId}`, url)
+        .catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)));
+    }
     setBrowserMountedTabIds((previous) => addMountedSidePanelTabId(previous, tabId));
     setSidePanelOpenTabs((previous) => new Map(previous).set(tabId, 'browser'));
   }), [onConnectToHost, setSidePanelOpenTabs]);

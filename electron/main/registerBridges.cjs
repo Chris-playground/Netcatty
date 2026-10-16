@@ -473,6 +473,16 @@ function createBridgeRegistrar(context) {
         app,
         portForwardingBridge,
       });
+      ipcMain.handle("netcatty:host-browser:request-panel", (event, request) => {
+        const senderWindow = BrowserWindow.fromWebContents(event.sender);
+        const mainWindow = getWindowManager().getMainWindow?.();
+        if (!senderWindow || senderWindow.webContents !== event.sender || !mainWindow || mainWindow.isDestroyed()
+          || typeof request?.host?.id !== "string") throw new Error("Browser opener is unavailable");
+        mainWindow.webContents.send("netcatty:host-browser:request-panel", request);
+        mainWindow.show();
+        mainWindow.focus();
+        return true;
+      });
       app.once?.("will-quit", () => hostBrowserManager.closeAll());
     }
     terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });

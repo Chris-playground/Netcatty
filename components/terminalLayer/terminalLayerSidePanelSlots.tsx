@@ -263,7 +263,7 @@ function SidePanelBrowserSlot({ tabId, ctx, isVisible }: {
   const sessionHosts = ctx.sessionHostsMap as Map<string, Host>;
   const authHosts = ctx.sftpAuthHostBySessionId as Map<string, Host>;
   const currentHost = current ? authHosts.get(current.id) ?? sessionHosts.get(current.id) : null;
-  const supportsBrowser = currentHost && ['ssh', 'mosh'].includes(currentHost.protocol ?? 'ssh');
+  const supportsBrowser = currentHost && ['ssh', 'mosh', 'local'].includes(currentHost.protocol ?? 'ssh');
   return (
     <div className={sidePanelHiddenPanelClassName(!isVisible)} data-section="terminal-browser-panel">
       {workspace && supportsBrowser && <div className="h-8 shrink-0 border-b border-border/50 px-3 flex items-center text-xs text-muted-foreground truncate">
@@ -273,7 +273,7 @@ function SidePanelBrowserSlot({ tabId, ctx, isVisible }: {
         {!supportsBrowser && <p className="p-4 text-sm text-muted-foreground">{ctx.t('terminal.browser.sshOnly')}</p>}
         {[...retainedSessionIds.current].map((sessionId) => {
           const host = authHosts.get(sessionId) ?? sessionHosts.get(sessionId);
-          if (!host || !['ssh', 'mosh'].includes(host.protocol ?? 'ssh')) return null;
+          if (!host || !['ssh', 'mosh', 'local'].includes(host.protocol ?? 'ssh')) return null;
           const visible = isVisible && current?.id === sessionId;
           return <div key={sessionId} className={visible ? 'absolute inset-0 overflow-hidden' : 'hidden'}>
             <HostBrowserSidePanel

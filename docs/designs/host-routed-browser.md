@@ -49,6 +49,16 @@ The feature is complete only after a packaged desktop build demonstrates:
   dedicated SSH connections. Renderer menus, dialogs, and magnified panes must
   never be covered by a hidden browser view.
 
+### Terminal links
+
+HTTP(S) links in SSH/Mosh and local terminals open in the Netcatty sidebar by
+default. Settings > Terminal > Behavior > Open terminal links in can select the
+system default browser instead; the choice applies immediately to existing
+terminals. SSH contexts keep the host route; local terminal contexts use an
+explicit direct session. A failed SSH route never becomes a local route.
+Detached terminal windows forward browser requests to the main window's sidebar.
+Other terminal protocols keep their existing system-browser behavior.
+
 ### Browsing surface
 
 - The sidebar can be resized or magnified. The trusted top chrome has a tab

@@ -29,6 +29,12 @@ export async function openHostBrowser(options: OpenHostBrowserOptions): Promise<
   requestHostBrowserPanel({ host: options.host, sessionId: options.sessionId });
 }
 
+export async function openHostBrowserPanelUrl(browserId: string, url: string): Promise<void> {
+  const bridge = netcattyBridge.get();
+  if (!bridge?.openHostBrowserUrl) throw new Error('The host browser is unavailable in this build');
+  await bridge.openHostBrowserUrl({ browserId, url });
+}
+
 export function mountHostBrowser(options: OpenHostBrowserOptions & { browserId: string }): Promise<void> {
   const { host, hosts, keys, identities, knownHosts, terminalSettings } = options;
   const existing = pendingOpens.get(options.browserId);
@@ -38,7 +44,8 @@ export function mountHostBrowser(options: OpenHostBrowserOptions & { browserId: 
     if (!bridge?.setHostBrowserPanelLayout || !bridge.openHostBrowser || !bridge.startPortForward) {
       throw new Error('The host browser is unavailable in this build');
     }
-    const result = await startPortForward({
+    const local = host.protocol === 'local';
+    const result = local ? { success: true, connectionOptions: undefined } : await startPortForward({
         id: `host-browser-${crypto.randomUUID()}`,
         label: `Browser: ${host.label || host.hostname}`,
         type: 'dynamic',
@@ -49,12 +56,13 @@ export function mountHostBrowser(options: OpenHostBrowserOptions & { browserId: 
         createdAt: Date.now(),
     }, host, hosts, keys, identities, () => {}, false, terminalSettings,
     knownHosts, { dedicatedTransport: true, prepareOnly: true });
-    if (!result.success || !result.connectionOptions) {
+    if (!result.success || (!local && !result.connectionOptions)) {
       throw new Error(result.error || 'Could not prepare the browser connection');
     }
     await bridge.openHostBrowser({
       browserId: options.browserId,
       embedded: true,
+      local,
       hostId: host.id,
       label: host.label || host.hostname,
       theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',

@@ -1307,6 +1307,13 @@ function createPreloadApi(ctx) {
   focusHostBrowser: (hostId) => ipcRenderer.invoke("netcatty:host-browser:focus", hostId),
   setHostBrowserPanelLayout: (options) => ipcRenderer.invoke("netcatty:host-browser:panel-layout", options),
   closeHostBrowserPanel: (browserId) => ipcRenderer.invoke("netcatty:host-browser:panel-close", browserId),
+  openHostBrowserUrl: (options) => ipcRenderer.invoke("netcatty:host-browser:panel-url", options),
+  requestHostBrowserPanel: (request) => ipcRenderer.invoke("netcatty:host-browser:request-panel", request),
+  onHostBrowserPanelRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on("netcatty:host-browser:request-panel", listener);
+    return () => ipcRenderer.removeListener("netcatty:host-browser:request-panel", listener);
+  },
   openHostBrowser: (options) => ipcRenderer.invoke("netcatty:host-browser:open", options),
   getHostBrowserBookmarks: () => ipcRenderer.invoke("netcatty:host-browser:bookmarks:get-all"),
   applyHostBrowserBookmarks: (items) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:apply", items),

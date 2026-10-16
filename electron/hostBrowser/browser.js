@@ -27,6 +27,10 @@ async function command(type, extra = {}) {
   return false;
 }
 
+function syncChromeOverlay() {
+  void command("set-overlay", { open: !$("tab-icon-menu").hidden || !$("tab-icon-editor").hidden });
+}
+
 function tabIcon(tab) {
   if (tab.iconDataUrl) {
     const image = document.createElement("img");
@@ -103,6 +107,7 @@ function render(next) {
       menu.style.left = `${Math.min(event.clientX, window.innerWidth - 170)}px`;
       menu.style.top = `${Math.min(event.clientY, window.innerHeight - 90)}px`;
       menu.hidden = false;
+      syncChromeOverlay();
     });
     item.append(title, close);
     tabs.append(item);
@@ -346,13 +351,15 @@ $("tab-icon-change").addEventListener("click", () => {
   $("tab-icon-color").value = tab?.iconColor || "#247969";
   $("tab-icon-image").value = "";
   $("tab-icon-text").focus();
+  syncChromeOverlay();
 });
 $("tab-icon-reset").addEventListener("click", () => {
   $("tab-icon-menu").hidden = true;
+  syncChromeOverlay();
   void command("reset-icon", { tabId: editingTabId });
 });
-$("tab-icon-cancel").addEventListener("click", () => { $("tab-icon-editor").hidden = true; });
-$("tab-icon-editor-close").addEventListener("click", () => { $("tab-icon-editor").hidden = true; });
+$("tab-icon-cancel").addEventListener("click", () => { $("tab-icon-editor").hidden = true; syncChromeOverlay(); });
+$("tab-icon-editor-close").addEventListener("click", () => { $("tab-icon-editor").hidden = true; syncChromeOverlay(); });
 $("tab-icon-save").addEventListener("click", async () => {
   try {
     const dataUrl = await readImageFile($("tab-icon-image").files[0]);
@@ -360,11 +367,15 @@ $("tab-icon-save").addEventListener("click", async () => {
     if (!dataUrl && !glyph) throw new Error("Enter icon text or choose an image");
     if (await command("set-icon", { tabId: editingTabId, dataUrl, glyph, color: $("tab-icon-color").value })) {
       $("tab-icon-editor").hidden = true;
+      syncChromeOverlay();
     }
   } catch (error) { showNotice(error?.message || "Could not save icon"); }
 });
 document.addEventListener("click", (event) => {
-  if (!$("tab-icon-menu").contains(event.target)) $("tab-icon-menu").hidden = true;
+  if (!$("tab-icon-menu").hidden && !$("tab-icon-menu").contains(event.target)) {
+    $("tab-icon-menu").hidden = true;
+    syncChromeOverlay();
+  }
 });
 
 $("back").addEventListener("click", () => void command("back"));
