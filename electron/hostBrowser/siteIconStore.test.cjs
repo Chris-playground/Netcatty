@@ -17,12 +17,12 @@ test("website icons persist per host and user overrides survive automatic update
   first.set("host-a", "https://example.com/page", { mode: "auto", dataUrl: favicon });
   assert.equal(first.get("host-a", "https://example.com/other").dataUrl, favicon);
   assert.equal(first.get("host-b", "https://example.com/page"), null);
-  first.set("host-a", "https://example.com/page", { mode: "custom", glyph: "✦", color: "#123456" });
+  first.set("host-a", "https://example.com/page", { mode: "custom", glyph: "\u2726", color: "#123456" });
   first.set("host-a", "https://example.com/page", { mode: "auto", dataUrl: favicon });
   const reopened = createSiteIconStore(app);
   assert.deepEqual(reopened.get("host-a", "https://example.com/page"), {
     hostId: "host-a", origin: "https://example.com", mode: "custom",
-    dataUrl: null, glyph: "✦", color: "#123456",
+    dataUrl: null, glyph: "\u2726", color: "#123456",
   });
   reopened.reset("host-a", "https://example.com/page");
   assert.equal(createSiteIconStore(app).get("host-a", "https://example.com/page"), null);

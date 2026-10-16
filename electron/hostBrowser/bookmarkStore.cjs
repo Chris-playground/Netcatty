@@ -17,7 +17,7 @@ function normalizeBookmark(raw, previous = null) {
   const hostId = scope === "host" ? String(raw.hostId || "").slice(0, 256) : null;
   if (scope === "host" && !hostId) throw new Error("Host bookmark is missing its host");
   const title = String(raw.title || url.hostname).trim().slice(0, 120);
-  const icon = String(raw.icon || title[0] || "◇").trim().slice(0, 4);
+  const icon = String(raw.icon || title[0] || "\u25c7").trim().slice(0, 4);
   const color = /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color : "#247969";
   const now = Date.now();
   return {
@@ -26,7 +26,7 @@ function normalizeBookmark(raw, previous = null) {
     url: url.href,
     scope,
     hostId,
-    icon: icon || "◇",
+    icon: icon || "\u25c7",
     iconMode: raw.iconMode === "custom" ? "custom" : "auto",
     iconDataUrl: raw.iconDataUrl === null ? null
       : validImageDataUrl(raw.iconDataUrl) ? raw.iconDataUrl

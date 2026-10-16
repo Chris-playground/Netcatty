@@ -114,7 +114,7 @@ async function main() {
   assert.equal(await page.executeJavaScript("getComputedStyle(document.body).getPropertyValue('--primary').trim()"), "170 80% 40%");
   assert.equal((await snapshot()).tabs.length, 1);
   await page.executeJavaScript("document.getElementById('add-app').click()");
-  await page.executeJavaScript("document.querySelector('[data-icon-mode=text]').click();document.getElementById('bookmark-title').value='My app';document.getElementById('bookmark-url').value='http://example.invalid:3000';document.getElementById('bookmark-icon').value='✦';document.getElementById('bookmark-form').requestSubmit()");
+  await page.executeJavaScript("document.querySelector('[data-icon-mode=text]').click();document.getElementById('bookmark-title').value='My app';document.getElementById('bookmark-url').value='http://example.invalid:3000';document.getElementById('bookmark-icon').value='\u2726';document.getElementById('bookmark-form').requestSubmit()");
   await wait(300);
   assert.equal(await page.executeJavaScript("document.querySelectorAll('.app-tile').length"), 1);
   await page.executeJavaScript("document.querySelector('.bookmark-row button[title=Edit]').click()");
@@ -146,7 +146,7 @@ async function main() {
   assert.equal((await snapshot()).tabs[0].title, "Host route verified");
   for (let i = 0; i < 50 && !(await snapshot()).tabs[0].iconDataUrl; i += 1) await wait(100);
   assert.match((await snapshot()).tabs[0].iconDataUrl || "", /^data:image\/png;base64,/);
-  assert.equal(await page.executeJavaScript("document.querySelector('.app-tile .app-icon').textContent"), "✦");
+  assert.equal(await page.executeJavaScript("document.querySelector('.app-tile .app-icon').textContent"), "\u2726");
   assert.match(createSiteIconStore(app).get("live-host", "http://example.invalid:3000/")?.dataUrl || "", /^data:image\/png;base64,/);
   await page.executeJavaScript("document.getElementById('downloads-menu').click()");
   for (let i = 0; i < 30 && !(await snapshot()).downloadsPanelOpen; i += 1) await wait(100);
@@ -193,9 +193,9 @@ async function main() {
   for (let i = 0; i < 20 && (await snapshot()).downloadsPanelOpen; i += 1) await wait(100);
   assert.equal((await snapshot()).downloadsPanelOpen, false);
   await page.executeJavaScript("document.querySelector('.tab').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:80,clientY:25}))");
-  await page.executeJavaScript("document.getElementById('tab-icon-change').click();document.getElementById('tab-icon-text').value='✦';document.getElementById('tab-icon-save').click()");
-  for (let i = 0; i < 30 && (await snapshot()).tabs[0].iconGlyph !== "✦"; i += 1) await wait(100);
-  assert.equal((await snapshot()).tabs[0].iconGlyph, "✦");
+  await page.executeJavaScript("document.getElementById('tab-icon-change').click();document.getElementById('tab-icon-text').value='\u2726';document.getElementById('tab-icon-save').click()");
+  for (let i = 0; i < 30 && (await snapshot()).tabs[0].iconGlyph !== "\u2726"; i += 1) await wait(100);
+  assert.equal((await snapshot()).tabs[0].iconGlyph, "\u2726");
   assert.equal(createSiteIconStore(app).get("live-host", "http://example.invalid:3000/")?.mode, "custom");
   await page.executeJavaScript("document.querySelector('.tab').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:80,clientY:25}));document.getElementById('tab-icon-reset').click()");
   for (let i = 0; i < 50 && !(await snapshot()).tabs[0].iconDataUrl; i += 1) await wait(100);

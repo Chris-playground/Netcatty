@@ -41,7 +41,7 @@ function tabIcon(tab) {
   }
   const glyph = document.createElement("span");
   glyph.className = "tab-glyph";
-  glyph.textContent = tab.iconGlyph || (tab.url ? "◌" : "");
+  glyph.textContent = tab.iconGlyph || (tab.url ? "\u25cc" : "");
   if (tab.iconGlyph && tab.iconColor) glyph.style.color = tab.iconColor;
   return glyph;
 }
@@ -58,7 +58,7 @@ function render(next) {
     else document.body.style.removeProperty(`--${name}`);
   }
   document.body.dataset.platform = next.platform;
-  $("window-maximize").textContent = next.isMaximized ? "❐" : "□";
+  $("window-maximize").textContent = next.isMaximized ? "\u2750" : "\u25a1";
   $("window-maximize").title = next.isMaximized ? "Restore" : "Maximize";
   const connected = next.route === "connected";
   $("downloads-menu").setAttribute("aria-expanded", String(Boolean(next.downloadsPanelOpen)));
@@ -93,7 +93,7 @@ function render(next) {
     close.className = "tab-close";
     close.type = "button";
     close.title = "Close tab";
-    close.textContent = "×";
+    close.textContent = "\u00d7";
     close.addEventListener("click", (event) => { event.stopPropagation(); void command("close-tab", { tabId: tab.id }); });
     item.addEventListener("click", () => void command("activate", { tabId: tab.id }));
     item.addEventListener("keydown", (event) => {
@@ -181,12 +181,12 @@ function renderBookmarks() {
     const edit = document.createElement("button");
     edit.className = "icon-button";
     edit.title = "Edit";
-    edit.textContent = "✎";
+    edit.textContent = "\u270e";
     edit.addEventListener("click", () => editBookmark(item));
     const remove = document.createElement("button");
     remove.className = "icon-button";
     remove.title = "Delete";
-    remove.textContent = "×";
+    remove.textContent = "\u00d7";
     remove.addEventListener("click", async () => {
       try { await api.removeBookmark(item.id); await refreshBookmarks(); }
       catch (error) { showNotice(error?.message || "Could not delete bookmark"); }
@@ -224,7 +224,7 @@ function editBookmark(item = null) {
   editingBookmarkSiteIcon = item?.siteIconDataUrl || null;
   $("bookmark-form-heading").textContent = item ? "Edit app" : "Add app";
   editingBookmarkMode = editingBookmarkImageDataUrl ? "image" : item?.iconMode === "custom" ? "text" : "website";
-  $("bookmark-image-name").textContent = editingBookmarkImageDataUrl ? "Custom image saved" : "PNG, JPEG, WebP, GIF or ICO · max 64 KB";
+  $("bookmark-image-name").textContent = editingBookmarkImageDataUrl ? "Custom image saved" : "PNG, JPEG, WebP, GIF or ICO \u00b7 max 64 KB";
   renderBookmarkFormOptions();
   $("bookmark-title").focus();
 }
@@ -248,7 +248,7 @@ function renderBookmarkFormOptions() {
   } else {
     preview.style.backgroundColor = editingBookmarkMode === "text" ? $("bookmark-color").value : "hsl(var(--secondary))";
     preview.style.color = editingBookmarkMode === "text" ? "white" : "hsl(var(--muted-foreground))";
-    preview.textContent = editingBookmarkMode === "text" ? ($("bookmark-icon").value || "A") : "◌";
+    preview.textContent = editingBookmarkMode === "text" ? ($("bookmark-icon").value || "A") : "\u25cc";
   }
   $("bookmark-color-swatch").style.backgroundColor = $("bookmark-color").value;
 }

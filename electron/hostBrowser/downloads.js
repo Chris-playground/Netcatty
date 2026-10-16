@@ -39,11 +39,11 @@ function size(bytes) {
 
 function statusText(item) {
   if (item.missing) return "File moved or deleted";
-  if (item.status === "waiting") return "Choose where to save…";
+  if (item.status === "waiting") return "Choose where to save\u2026";
   if (item.status === "progressing") return item.total
-    ? `${size(item.received)} of ${size(item.total)} · ${Math.min(100, Math.round(item.received * 100 / item.total))}%`
-    : `${size(item.received)} · Downloading…`;
-  if (item.status === "completed") return `${size(item.total || item.received)} · Completed`;
+    ? `${size(item.received)} of ${size(item.total)} \u00b7 ${Math.min(100, Math.round(item.received * 100 / item.total))}%`
+    : `${size(item.received)} \u00b7 Downloading\u2026`;
+  if (item.status === "completed") return `${size(item.total || item.received)} \u00b7 Completed`;
   if (item.status === "cancelled") return "Cancelled";
   return "Interrupted";
 }
