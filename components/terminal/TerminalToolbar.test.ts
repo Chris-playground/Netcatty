@@ -76,6 +76,13 @@ test("browser action remains available when an SSH terminal is disconnected", ()
   assert.doesNotMatch(serial, /aria-label="Open Browser"/);
 });
 
+test("browser action is available for supported local and mosh terminals", () => {
+  for (const protocol of ['local', 'mosh'] as const) {
+    const markup = renderToolbar({ ...sshHost, protocol }, "connected", { onOpenBrowser: () => {} });
+    assert.match(markup, /aria-label="Open Browser"/);
+  }
+});
+
 test("keeps Scripts visible before the terminal overflow menu", () => {
   const markup = renderToolbar(sshHost);
 

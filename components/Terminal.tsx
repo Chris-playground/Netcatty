@@ -4216,7 +4216,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onSnippetClick={(snippet) => { void executeSnippet(snippet); }}
       onDeleteSnippets={onDeleteSnippets}
       onOpenSFTP={handleOpenSFTP}
-      onOpenBrowser={(!host.protocol || host.protocol === 'ssh') ? () => { void handleOpenHostBrowser(); } : undefined}
+      onOpenBrowser={(!host.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol)) ? () => { void handleOpenHostBrowser(); } : undefined}
       onSendYmodem={isSerialConnection ? handleSendYmodem : undefined}
       onReceiveYmodem={isSerialConnection ? handleReceiveYmodem : undefined}
       onOpenScripts={onOpenScripts ?? (() => {})}

@@ -243,7 +243,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       'terminalSettings',
     ];
     if (!hidesSftp) ids.push('sftp');
-    if (onOpenBrowser && (!host?.protocol || host.protocol === 'ssh')) ids.push('browser');
+    if (onOpenBrowser && (!host?.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol))) ids.push('browser');
     if (isSerialTerminal) {
       ids.push('ymodemSend', 'ymodemReceive');
     }
