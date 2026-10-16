@@ -59,6 +59,7 @@ import {
   readCommandBlocklistSetting,
 } from './state/commandBlocklistSettings';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
+import { applyHostBrowserBookmarks, collectHostBrowserBookmarks, getCachedHostBrowserBookmarks } from './hostBrowserBookmarks';
 import {
   clampTerminalFontSizeValue,
   nextTerminalFontSizeSyncVersion,
@@ -1077,6 +1078,7 @@ function buildVaultSyncPayload(
   vault: SyncableVaultData,
   portForwardingRules?: PortForwardingRule[],
 ): SyncPayload {
+  const browserBookmarks = getCachedHostBrowserBookmarks();
   return {
     hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
@@ -1089,6 +1091,7 @@ function buildVaultSyncPayload(
     noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
+    ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
     settings: collectSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -1163,6 +1166,7 @@ export async function buildCloudSyncPayload(
   },
 ): Promise<SyncPayload> {
   const aiSessions = collectAiSessionsForSync();
+  const browserBookmarks = await collectHostBrowserBookmarks();
   const base: SyncPayload = {
     hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
@@ -1176,6 +1180,7 @@ export async function buildCloudSyncPayload(
     groupConfigs: vault.groupConfigs,
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
     ...(aiSessions !== undefined ? { aiSessions } : {}),
+    ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
     settings: await collectCloudSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -1226,6 +1231,8 @@ export async function buildLocalVaultPayloadAsync(
   portForwardingRules?: PortForwardingRule[],
 ): Promise<SyncPayload> {
   const base = buildLocalVaultPayload(vault, portForwardingRules);
+  const browserBookmarks = await collectHostBrowserBookmarks();
+  if (browserBookmarks !== undefined) base.browserBookmarks = browserBookmarks;
   const {
     collectPluginSyncSidecarsFromHost,
     isPluginSidecarHostUnavailableError,
@@ -1399,6 +1406,9 @@ async function preparePayloadApply(
     // rules, clear local state".
     if (sanitizedPayload.portForwardingRules !== undefined && importers.importPortForwardingRules) {
       importers.importPortForwardingRules(sanitizedPayload.portForwardingRules);
+    }
+    if (sanitizedPayload.browserBookmarks !== undefined) {
+      await applyHostBrowserBookmarks(sanitizedPayload.browserBookmarks);
     }
 
     // AI chat sessions merge append-only: a cloud snapshot may be missing

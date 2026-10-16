@@ -102,6 +102,11 @@ declare global {
 
     // Settings window
     openSettingsWindow?(): Promise<boolean>;
+    focusHostBrowser?(hostId: string): Promise<boolean>;
+    openHostBrowser?(options: { hostId: string; label: string; theme: 'dark' | 'light'; themeTokens?: Record<string, string>; connectionOptions: PortForwardOptions }): Promise<{ reused: boolean }>;
+    getHostBrowserBookmarks?(): Promise<import('../../domain/browserBookmark').BrowserBookmark[]>;
+    applyHostBrowserBookmarks?(items: import('../../domain/browserBookmark').BrowserBookmark[]): Promise<boolean>;
+    onHostBrowserBookmarksChanged?(callback: () => void): () => void;
     closeSettingsWindow?(): Promise<void>;
 
     // Cross-window settings sync

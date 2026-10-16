@@ -1304,6 +1304,15 @@ function createPreloadApi(ctx) {
   
   // Open URL in default browser
   openExternal: (url) => ipcRenderer.invoke("netcatty:openExternal", url),
+  focusHostBrowser: (hostId) => ipcRenderer.invoke("netcatty:host-browser:focus", hostId),
+  openHostBrowser: (options) => ipcRenderer.invoke("netcatty:host-browser:open", options),
+  getHostBrowserBookmarks: () => ipcRenderer.invoke("netcatty:host-browser:bookmarks:get-all"),
+  applyHostBrowserBookmarks: (items) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:apply", items),
+  onHostBrowserBookmarksChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("netcatty:host-browser:bookmarks-changed", listener);
+    return () => ipcRenderer.removeListener("netcatty:host-browser:bookmarks-changed", listener);
+  },
   openPath: (path) => ipcRenderer.invoke("netcatty:openPath", path),
 
   // App info

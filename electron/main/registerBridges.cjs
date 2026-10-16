@@ -466,6 +466,15 @@ function createBridgeRegistrar(context) {
     });
     transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     portForwardingBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    if (electronModule.WebContentsView && electronModule.session?.fromPartition) {
+      const { createHostBrowserManager } = require("../hostBrowser/hostBrowserManager.cjs");
+      const hostBrowserManager = createHostBrowserManager({
+        electron: electronModule,
+        app,
+        portForwardingBridge,
+      });
+      app.once?.("will-quit", () => hostBrowserManager.closeAll());
+    }
     terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });
 
     const scriptBridge = require("../bridges/scriptBridge.cjs");

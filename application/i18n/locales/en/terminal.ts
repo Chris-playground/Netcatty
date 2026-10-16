@@ -20,6 +20,7 @@ export const enTerminalMessages: Messages = {
   'terminal.networkDevice.tip.enabled': 'Network Device Mode enabled for {host}',
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Open SFTP',
+  'terminal.browser.open': 'Open Browser',
   'terminal.toolbar.availableAfterConnect': 'Available after connect',
   'terminal.toolbar.sendYmodem': 'Send with YMODEM',
   'terminal.toolbar.receiveYmodem': 'Receive with YMODEM',
@@ -531,6 +532,7 @@ export const enTerminalMessages: Messages = {
   'cloudSync.conflict.entity.customGroups': 'Groups',
   'cloudSync.conflict.entity.snippetPackages': 'Snippet packages',
   'cloudSync.conflict.entity.portForwardingRules': 'Port forwarding',
+  'cloudSync.conflict.entity.browserBookmarks': 'Browser bookmarks',
   'cloudSync.conflict.entity.groupConfigs': 'Group settings',
   'cloudSync.conflict.entity.settings': 'Settings',
   'cloudSync.conflict.keepLocal': 'Overwrite cloud (keep local)',
