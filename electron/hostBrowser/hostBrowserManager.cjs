@@ -96,7 +96,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     record.chromeContents.send("netcatty:host-browser:state", snapshot(record));
   };
   const notifyDownloads = (record) => {
-    if (record.win.isDestroyed()) return;
+    if (record.win.isDestroyed() || record.chromeContents.isDestroyed()) return;
     const downloads = downloadStore.list(record.hostId);
     if (record.downloadsPanelOpen) positionDownloadsView(record);
     record.chromeContents.send("netcatty:host-browser:downloads-changed", downloads);

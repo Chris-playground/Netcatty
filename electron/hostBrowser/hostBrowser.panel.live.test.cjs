@@ -135,7 +135,14 @@ async function main() {
   manager.closePanel(event, "workspace:session-a");
   await waitFor(() => chromeA.isDestroyed(), true);
   assert.equal(owner.isDestroyed(), false, "closing browser must keep the terminal window alive");
-  const localSite = http.createServer((_request, response) => response.end('<title>Local browser</title><h1>Local browser</h1>'));
+  const localSite = http.createServer((request, response) => {
+    if (request.url === '/slow.bin') {
+      response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': 1048576 });
+      response.write(Buffer.alloc(16384));
+      return;
+    }
+    response.end('<title>Local browser</title><h1>Local browser</h1>');
+  });
   await new Promise((resolve) => localSite.listen(0, "127.0.0.1", resolve));
   manager.openPanelUrl(event, { browserId: "local:session", url: `http://127.0.0.1:${localSite.address().port}/` });
   layout("local:session", true);
@@ -146,6 +153,20 @@ async function main() {
   const localChrome = localRoot.children[0].webContents;
   await waitFor(async () => (await localChrome.executeJavaScript("window.hostBrowser.snapshot()")).tabs[0].title, "Local browser");
   assert.equal((await localChrome.executeJavaScript("window.hostBrowser.snapshot()")).tabs.length, 1, "first terminal link reuses the blank tab");
+  const localPage = localRoot.children.find((child) => child instanceof WebContentsView && child !== localRoot.children[0]);
+  let activeDownload;
+  localPage.webContents.session.once('will-download', (_downloadEvent, item) => {
+    activeDownload = item;
+    item.setSavePath(path.join(app.getPath('userData'), 'closing-download.bin'));
+  });
+  localPage.webContents.downloadURL(`http://127.0.0.1:${localSite.address().port}/slow.bin`);
+  await waitFor(() => Boolean(activeDownload), true);
+  let cancelled = false;
+  activeDownload.once('done', (_downloadEvent, status) => { cancelled = status === 'cancelled'; });
+  manager.closePanel(event, 'local:session');
+  await waitFor(() => cancelled, true);
+  await waitFor(() => localChrome.isDestroyed(), true);
+  assert.equal(owner.isDestroyed(), false, 'closing during a download must keep the terminal alive');
   manager.closeAll();
   localSite.closeAllConnections();
   localSite.close();
