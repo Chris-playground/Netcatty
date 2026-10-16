@@ -90,14 +90,15 @@ for (const protocol of ['local', 'ssh']) {
   });
 }
 
-test('host-only browser requests skip hidden sessions', () => {
+test('host-only browser requests skip hidden and unsupported sessions', () => {
   const requestStart = source.indexOf('useEffect(() => subscribeHostBrowserPanelRequests(');
   const requestEnd = source.indexOf('useEffect(() => {', requestStart);
   assert.ok(requestStart > 0 && requestEnd > requestStart);
   const requestCode = ts.transpile(source.slice(requestStart, requestEnd), { target: ts.ScriptTarget.ES2022 });
   const hidden = { id: 'hidden', hostId: 'host', hiddenFromTabs: true };
+  const unsupported = { id: 'telnet', hostId: 'host', protocol: 'telnet' };
   const visible = { id: 'visible', hostId: 'host' };
-  for (const sessions of [[hidden, visible], [hidden]]) {
+  for (const sessions of [[hidden, unsupported, visible], [hidden, unsupported]]) {
     let active: string | undefined;
     let mounted: string[] = [];
     let opened = new Map<string, string>();
@@ -111,7 +112,7 @@ test('host-only browser requests skip hidden sessions', () => {
       setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
       setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
     });
-    const expected = sessions.length === 2 ? 'visible' : 'new-visible';
+    const expected = sessions.includes(visible) ? 'visible' : 'new-visible';
     assert.deepEqual(mounted, [expected]);
     assert.equal(opened.get(expected), 'browser');
     assert.notEqual(active, 'hidden');

@@ -33,7 +33,7 @@ export function resolveTerminalSidePanelAutoOpen({
   sftpAvailable: boolean;
 }): TerminalSidePanelAutoOpenTab | null {
   if (!enabled) return null;
-  if (selectedTab === "sftp" && !sftpAvailable) return null;
+  if ((selectedTab === "sftp" || selectedTab === "browser") && !sftpAvailable) return null;
   return selectedTab;
 }
 
