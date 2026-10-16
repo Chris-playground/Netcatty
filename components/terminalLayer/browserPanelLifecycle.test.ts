@@ -89,3 +89,31 @@ for (const protocol of ['local', 'ssh']) {
     assert.deepEqual(Array.from(mounted), ['terminal']);
   });
 }
+
+test('host-only browser requests skip hidden sessions', () => {
+  const requestStart = source.indexOf('useEffect(() => subscribeHostBrowserPanelRequests(');
+  const requestEnd = source.indexOf('useEffect(() => {', requestStart);
+  assert.ok(requestStart > 0 && requestEnd > requestStart);
+  const requestCode = ts.transpile(source.slice(requestStart, requestEnd), { target: ts.ScriptTarget.ES2022 });
+  const hidden = { id: 'hidden', hostId: 'host', hiddenFromTabs: true };
+  const visible = { id: 'visible', hostId: 'host' };
+  for (const sessions of [[hidden, visible], [hidden]]) {
+    let active: string | undefined;
+    let mounted: string[] = [];
+    let opened = new Map<string, string>();
+    vm.runInNewContext(requestCode, {
+      useEffect: (callback: () => void) => callback(),
+      subscribeHostBrowserPanelRequests: (callback: (request: unknown) => void) => callback({ host: { id: 'host' } }),
+      sessionsRef: { current: sessions },
+      activeTabStore: { setActiveTabId: (tabId: string) => { active = tabId; } },
+      onConnectToHost: () => 'new-visible',
+      addMountedSidePanelTabId: (previous: string[], tabId: string) => [...previous, tabId],
+      setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
+      setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
+    });
+    const expected = sessions.length === 2 ? 'visible' : 'new-visible';
+    assert.deepEqual(mounted, [expected]);
+    assert.equal(opened.get(expected), 'browser');
+    assert.notEqual(active, 'hidden');
+  }
+});

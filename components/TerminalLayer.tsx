@@ -1995,7 +1995,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   useEffect(() => subscribeHostBrowserPanelRequests(({ host, sessionId, url }) => {
     const session = sessionsRef.current.find((candidate) => sessionId
-      ? candidate.id === sessionId : candidate.hostId === host.id);
+      ? candidate.id === sessionId : !candidate.hiddenFromTabs && candidate.hostId === host.id);
     let tabId: string | null = null;
     if (session) {
       tabId = session.workspaceId ?? session.id;
