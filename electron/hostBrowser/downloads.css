@@ -5,7 +5,7 @@ body { margin: 0; padding: 6px; overflow: hidden; background: transparent; color
 button { font: inherit; cursor: pointer; }
 button:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 1px; }
 [hidden] { display: none !important; }
-.panel { max-height: 458px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid hsl(var(--border) / .65); border-radius: 10px; background: hsl(var(--background)); box-shadow: 0 12px 40px #0005; }
+.panel { max-height: 458px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid hsl(var(--border) / .65); border-radius: 10px; background: hsl(var(--background)); }
 .panel-header { height: 52px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 15px 0 18px; }
 h1 { margin: 0; font-size: 14px; font-weight: 650; }
 .header-actions { display: flex; gap: 2px; }
