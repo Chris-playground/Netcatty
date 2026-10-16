@@ -58,8 +58,6 @@ const { app, BrowserWindow, Menu, protocol, shell, clipboard, session, ipcMain }
 if (!app || !BrowserWindow) {
   throw new Error("Failed to load Electron runtime. Ensure the app is launched with the Electron binary.");
 }
-// Website views must not establish a direct UDP path around their SSH proxy.
-app.commandLine?.appendSwitch?.("force-webrtc-ip-handling-policy", "disable_non_proxied_udp");
 
 const path = require("node:path");
 const os = require("node:os");

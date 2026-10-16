@@ -243,6 +243,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     const tab = { id: randomUUID(), view, url: initialUrl || "", title: "New tab", loading: false, canGoBack: false, canGoForward: false, faviconUrls: [] };
     record.tabs.set(tab.id, tab);
     const contents = view.webContents;
+    contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
     contents.on("before-input-event", (event, input) => {
       const modifier = process.platform === "darwin" ? input.meta : input.control;
       if (input.type !== "keyDown" || !modifier) return;

@@ -8,6 +8,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
+const dgram = require("node:dgram");
 const ts = require("typescript");
 const React = require("react");
 const { create, act } = require("react-test-renderer");
@@ -21,6 +22,24 @@ function loadModule(file, globals) {
   const context = { exports: {}, ...globals };
   vm.runInNewContext(ts.transpile(source, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }), context);
   return context.exports;
+}
+
+async function probeWebRtcUdp(contents) {
+  const socket = dgram.createSocket('udp4');
+  let packets = 0;
+  socket.on('message', () => { packets += 1; });
+  await new Promise((resolve) => socket.bind(0, '127.0.0.1', resolve));
+  try {
+    await contents.executeJavaScript(`(async () => {
+      const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:${socket.address().port}' }] });
+      try {
+        peer.createDataChannel('route-check');
+        await peer.setLocalDescription(await peer.createOffer());
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      } finally { peer.close(); }
+    })()`);
+    return packets;
+  } finally { socket.close(); }
 }
 
 async function main() {
@@ -77,11 +96,17 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.equal(loadedTitle, "First click opened", "the first-click page must actually finish loading");
+    const page = root.children.find((view) => view instanceof WebContentsView && view.webContents.getURL() === url).webContents;
+    assert.equal(page.getWebRTCIPHandlingPolicy(), 'disable_non_proxied_udp');
+    page.setWebRTCIPHandlingPolicy('default');
+    assert.ok(await probeWebRtcUdp(page) > 0, 'the control must demonstrate direct UDP traffic');
+    page.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+    assert.equal(await probeWebRtcUdp(page), 0, 'browser pages must not bypass their route with direct WebRTC UDP');
     await act(async () => renderer.unmount());
     renderer = null;
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(owner.contentView.children.includes(root), false, "a real unmount must still release the native browser");
-    console.log(JSON.stringify({ ok: true, firstClickOpenedUrl: true, strictMode: true, cleanup: true }));
+    console.log(JSON.stringify({ ok: true, firstClickOpenedUrl: true, strictMode: true, webRtcUdpBlocked: true, cleanup: true }));
   } finally {
     if (renderer) await act(async () => renderer.unmount());
     manager.closeAll(); owner.destroy(); site.closeAllConnections(); site.close();
