@@ -4191,6 +4191,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const handleOpenHostBrowser = useCallback(async () => {
     try {
       await openHostBrowser({
+        sessionId,
         host,
         hosts: [host, ...resolvedChainHosts],
         keys,
@@ -4201,7 +4202,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not open the host browser');
     }
-  }, [host, resolvedChainHosts, keys, identities, terminalSettings, knownHosts]);
+  }, [sessionId, host, resolvedChainHosts, keys, identities, terminalSettings, knownHosts]);
 
   const renderControls = useCallback((opts?: { showClose?: boolean; restorePaneLayout?: boolean }) => (
     <TerminalToolbar

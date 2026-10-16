@@ -468,6 +468,8 @@ export const zhTWVaultMessages: Messages = {
 
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': '開啟 SFTP',
+  'terminal.browser.title': '瀏覽器',
+  'terminal.browser.sshOnly': '請聚焦 SSH 終端以開啟瀏覽器。',
   'terminal.browser.open': '開啟瀏覽器',
   'terminal.toolbar.availableAfterConnect': '連線後可用',
   'terminal.toolbar.sendYmodem': 'YMODEM 傳送',

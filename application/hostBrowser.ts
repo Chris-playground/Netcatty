@@ -1,10 +1,12 @@
 import type { Host, Identity, KnownHost, SSHKey, TerminalSettings } from '../domain/models';
 import { netcattyBridge } from '../infrastructure/services/netcattyBridge';
 import { startPortForward } from '../infrastructure/services/portForwardingService';
+import { requestHostBrowserPanel } from './state/hostBrowserPanelRequests';
 import { isValidHslToken } from './state/settingsStateDefaults';
 
 interface OpenHostBrowserOptions {
   host: Host;
+  sessionId?: string;
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
@@ -15,7 +17,7 @@ interface OpenHostBrowserOptions {
 const pendingOpens = new Map<string, Promise<void>>();
 const browserThemeTokens = ['background', 'foreground', 'secondary', 'muted', 'muted-foreground', 'border', 'primary', 'primary-foreground'] as const;
 
-function currentBrowserThemeTokens(): Record<string, string> {
+export function currentBrowserThemeTokens(): Record<string, string> {
   const style = getComputedStyle(document.documentElement);
   return Object.fromEntries(browserThemeTokens.flatMap((token) => {
     const value = style.getPropertyValue(`--${token}`).trim();
@@ -23,19 +25,22 @@ function currentBrowserThemeTokens(): Record<string, string> {
   }));
 }
 
-export function openHostBrowser(options: OpenHostBrowserOptions): Promise<void> {
+export async function openHostBrowser(options: OpenHostBrowserOptions): Promise<void> {
+  requestHostBrowserPanel({ host: options.host, sessionId: options.sessionId });
+}
+
+export function mountHostBrowser(options: OpenHostBrowserOptions & { browserId: string }): Promise<void> {
   const { host, hosts, keys, identities, knownHosts, terminalSettings } = options;
-  const existing = pendingOpens.get(host.id);
+  const existing = pendingOpens.get(options.browserId);
   if (existing) return existing;
   const opening = (async () => {
     const bridge = netcattyBridge.get();
-    if (!bridge?.focusHostBrowser || !bridge.openHostBrowser || !bridge.startPortForward) {
+    if (!bridge?.setHostBrowserPanelLayout || !bridge.openHostBrowser || !bridge.startPortForward) {
       throw new Error('The host browser is unavailable in this build');
     }
-    if (await bridge.focusHostBrowser(host.id)) return;
     const result = await startPortForward({
         id: `host-browser-${crypto.randomUUID()}`,
-        label: `Browser via ${host.label || host.hostname}`,
+        label: `Browser: ${host.label || host.hostname}`,
         type: 'dynamic',
         hostId: host.id,
         localPort: 0,
@@ -48,6 +53,8 @@ export function openHostBrowser(options: OpenHostBrowserOptions): Promise<void> 
       throw new Error(result.error || 'Could not prepare the browser connection');
     }
     await bridge.openHostBrowser({
+      browserId: options.browserId,
+      embedded: true,
       hostId: host.id,
       label: host.label || host.hostname,
       theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
@@ -55,9 +62,9 @@ export function openHostBrowser(options: OpenHostBrowserOptions): Promise<void> 
       connectionOptions: result.connectionOptions,
     });
   })();
-  pendingOpens.set(host.id, opening);
+  pendingOpens.set(options.browserId, opening);
   void opening.finally(() => {
-    if (pendingOpens.get(host.id) === opening) pendingOpens.delete(host.id);
+    if (pendingOpens.get(options.browserId) === opening) pendingOpens.delete(options.browserId);
   }).catch(() => {});
   return opening;
 }

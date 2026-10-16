@@ -45,7 +45,8 @@ function tabIcon(tab) {
 function render(next) {
   const activeTabChanged = state?.activeTabId !== next.activeTabId;
   state = next;
-  document.title = `Browser via ${next.label}`;
+  document.title = "Browser";
+  document.body.dataset.embedded = String(Boolean(next.embedded));
   document.body.classList.toggle("dark", next.theme !== "light");
   for (const name of ["background", "foreground", "secondary", "muted", "muted-foreground", "border", "primary", "primary-foreground"]) {
     const value = next.themeTokens?.[name];
@@ -56,8 +57,6 @@ function render(next) {
   $("window-maximize").textContent = next.isMaximized ? "❐" : "□";
   $("window-maximize").title = next.isMaximized ? "Restore" : "Maximize";
   const connected = next.route === "connected";
-  $("route-label").textContent = `${connected ? "Via" : next.route === "connecting" ? "Connecting to" : "Disconnected from"} ${next.label}`;
-  $("route").classList.toggle("disconnected", !connected);
   $("downloads-menu").setAttribute("aria-expanded", String(Boolean(next.downloadsPanelOpen)));
   const tabs = $("tabs");
   tabs.replaceChildren();
@@ -266,7 +265,7 @@ $("window-minimize").addEventListener("click", () => void command("window-minimi
 $("window-maximize").addEventListener("click", () => void command("window-maximize"));
 $("window-close").addEventListener("click", () => void command("window-close"));
 $("window-drag-region").addEventListener("dblclick", (event) => {
-  if (state?.platform !== "darwin" && !event.target.closest("button, .tab")) void command("window-maximize");
+  if (!state?.embedded && state?.platform !== "darwin" && !event.target.closest("button, .tab")) void command("window-maximize");
 });
 $("retry").addEventListener("click", () => void command("retry"));
 $("bookmarks-menu").addEventListener("click", () => {

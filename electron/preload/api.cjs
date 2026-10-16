@@ -1305,6 +1305,8 @@ function createPreloadApi(ctx) {
   // Open URL in default browser
   openExternal: (url) => ipcRenderer.invoke("netcatty:openExternal", url),
   focusHostBrowser: (hostId) => ipcRenderer.invoke("netcatty:host-browser:focus", hostId),
+  setHostBrowserPanelLayout: (options) => ipcRenderer.invoke("netcatty:host-browser:panel-layout", options),
+  closeHostBrowserPanel: (browserId) => ipcRenderer.invoke("netcatty:host-browser:panel-close", browserId),
   openHostBrowser: (options) => ipcRenderer.invoke("netcatty:host-browser:open", options),
   getHostBrowserBookmarks: () => ipcRenderer.invoke("netcatty:host-browser:bookmarks:get-all"),
   applyHostBrowserBookmarks: (items) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:apply", items),

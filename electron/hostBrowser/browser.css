@@ -24,7 +24,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 720px; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--font-sans); }
+body { margin: 0; min-width: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--font-sans); }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: .45; }
@@ -61,11 +61,6 @@ button:disabled { cursor: default; opacity: .45; }
 .address-form { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; margin: 0 8px; padding: 0 11px; border: 1px solid hsl(var(--border) / .65); border-radius: 6px; background: hsl(var(--secondary) / .5); }
 .address-form:focus-within { border-color: hsl(var(--primary) / .7); }
 .address-form input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: hsl(var(--foreground)); font-size: 12px; }
-.route { display: flex; align-items: center; gap: 6px; max-width: 190px; min-width: 0; margin-right: 6px; color: hsl(var(--muted-foreground)); font-size: 11px; white-space: nowrap; }
-.route span:last-child { overflow: hidden; text-overflow: ellipsis; }
-.route-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
-.route.disconnected .route-dot { background: #ef4444; }
-.route.disconnected { color: hsl(var(--foreground)); }
 .downloads-button { position: relative; }
 .downloads-button[aria-expanded="true"] { background: hsl(var(--foreground) / .08); color: hsl(var(--foreground)); }
 .download-indicator { display: none; position: absolute; right: 3px; top: 3px; width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--primary)); }
@@ -90,7 +85,7 @@ p { margin: 5px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; line-
 .image-icon { background: transparent; object-fit: contain; }
 .app-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 
-.bookmark-panel { position: fixed; z-index: 5; top: 80px; right: 0; bottom: 0; width: 360px; padding: 18px 14px; border-left: 1px solid hsl(var(--border) / .6); background: hsl(var(--background)); }
+.bookmark-panel { position: fixed; z-index: 5; top: 80px; right: 0; bottom: 0; width: min(360px, 100%); padding: 18px 14px; border-left: 1px solid hsl(var(--border) / .6); background: hsl(var(--background)); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; font-size: 13px; }
 .add-bookmark { width: 100%; height: 34px; margin: 17px 0 13px; border: 0; border-radius: 6px; background: hsl(var(--secondary)); color: hsl(var(--foreground)); font-size: 12px; }
 .add-bookmark:hover { background: hsl(var(--muted)); }
@@ -147,3 +142,17 @@ p { margin: 5px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; line-
 .tab-icon-editor label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: hsl(var(--muted-foreground)); }
 .tab-icon-editor input { width: 100%; height: 34px; padding: 6px 8px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--background)); color: hsl(var(--foreground)); }
 .notice { position: fixed; z-index: 7; bottom: 18px; left: 50%; transform: translateX(-50%); max-width: 80%; padding: 9px 13px; border-radius: 6px; background: hsl(var(--foreground)); color: hsl(var(--background)); font-size: 12px; }
+
+[data-embedded="true"] .tab-bar { padding-left: 6px; -webkit-app-region: no-drag; }
+[data-embedded="true"] .window-controls { display: none; }
+[data-embedded="true"] .tabs { flex: 1; }
+[data-embedded="true"] .tab { flex: 1 1 140px; min-width: 80px; }
+[data-embedded="true"] .drag-space { display: none; }
+[data-embedded="true"] .nav-bar { padding: 0 4px; gap: 0; }
+[data-embedded="true"] .address-form { margin: 0 4px; padding: 0 7px; }
+[data-embedded="true"] .home { padding: 24px 16px; }
+@media (max-width: 540px) {
+  .bookmark-panel-open .home { visibility: hidden; }
+  .bookmark-panel { width: 100%; }
+  .tab-icon-editor { max-width: calc(100vw - 16px); }
+}

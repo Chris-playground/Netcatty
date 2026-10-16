@@ -102,8 +102,10 @@ declare global {
 
     // Settings window
     openSettingsWindow?(): Promise<boolean>;
+    setHostBrowserPanelLayout?(options: { browserId: string; visible: boolean; theme?: 'dark' | 'light'; themeTokens?: Record<string, string>; bounds?: { x: number; y: number; width: number; height: number } }): Promise<boolean>;
+    closeHostBrowserPanel?(browserId: string): Promise<boolean>;
     focusHostBrowser?(hostId: string): Promise<boolean>;
-    openHostBrowser?(options: { hostId: string; label: string; theme: 'dark' | 'light'; themeTokens?: Record<string, string>; connectionOptions: PortForwardOptions }): Promise<{ reused: boolean }>;
+    openHostBrowser?(options: { browserId?: string; embedded?: boolean; hostId: string; label: string; theme: 'dark' | 'light'; themeTokens?: Record<string, string>; connectionOptions: PortForwardOptions }): Promise<{ reused: boolean }>;
     getHostBrowserBookmarks?(): Promise<import('../../domain/browserBookmark').BrowserBookmark[]>;
     applyHostBrowserBookmarks?(items: import('../../domain/browserBookmark').BrowserBookmark[]): Promise<boolean>;
     onHostBrowserBookmarksChanged?(callback: () => void): () => void;

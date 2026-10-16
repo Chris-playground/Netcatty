@@ -20,6 +20,8 @@ export const enTerminalMessages: Messages = {
   'terminal.networkDevice.tip.enabled': 'Network Device Mode enabled for {host}',
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Open SFTP',
+  'terminal.browser.title': 'Browser',
+  'terminal.browser.sshOnly': 'Focus an SSH terminal to open its browser.',
   'terminal.browser.open': 'Open Browser',
   'terminal.toolbar.availableAfterConnect': 'Available after connect',
   'terminal.toolbar.sendYmodem': 'Send with YMODEM',

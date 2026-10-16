@@ -468,6 +468,8 @@ export const zhCNVaultMessages: Messages = {
 
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': '打开 SFTP',
+  'terminal.browser.title': '浏览器',
+  'terminal.browser.sshOnly': '请聚焦 SSH 终端以打开浏览器。',
   'terminal.browser.open': '打开浏览器',
   'terminal.toolbar.availableAfterConnect': '连接后可用',
   'terminal.toolbar.sendYmodem': 'YMODEM 发送',

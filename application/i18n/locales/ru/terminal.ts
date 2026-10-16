@@ -41,6 +41,8 @@ export const ruTerminalMessages: Messages = {
 
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Открыть SFTP',
+  'terminal.browser.title': 'Браузер',
+  'terminal.browser.sshOnly': 'Выберите SSH-терминал, чтобы открыть его браузер.',
   'terminal.browser.open': 'Открыть браузер',
   'terminal.toolbar.availableAfterConnect': 'Доступно после подключения',
   'terminal.toolbar.sendYmodem': 'Отправить через YMODEM',

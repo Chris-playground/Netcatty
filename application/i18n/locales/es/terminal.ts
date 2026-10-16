@@ -20,6 +20,8 @@ export const esTerminalMessages: Messages = {
   'terminal.networkDevice.tip.enabled': 'Modo de Dispositivo de Red activado para {host}',
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Abrir SFTP',
+  'terminal.browser.title': 'Navegador',
+  'terminal.browser.sshOnly': 'Selecciona una terminal SSH para abrir su navegador.',
   'terminal.browser.open': 'Abrir navegador',
   'terminal.toolbar.availableAfterConnect': 'Disponible después de conectar',
   'terminal.toolbar.sendYmodem': 'Enviar con YMODEM',

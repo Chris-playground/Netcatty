@@ -1,15 +1,16 @@
 # Host-routed browser for issue #2972
 
-Status: implementation in `codex/issue-2972-host-browser`, 2026-09-30.
-The standalone browser has been exercised on macOS with a local SSH server,
-including host-routed page loading, disconnected/retry states, tabs, bookmarks,
-website icons, and window controls. Windows/Linux and an external SSH host are
-not yet runtime-verified.
+Status: terminal sidebar integration in `codex/issue-2972-host-browser`, 2026-10-16.
+The macOS sidebar and workspace focus switching have been exercised in the real
+app. Electron fixtures verify two independent SSH routes, retained pages,
+panel resizing, bookmarks, downloads, and closing without closing the terminal.
+Windows/Linux and the remaining network acceptance cases below are not yet
+runtime-verified.
 
 ## Goal and completion criteria
 
-From a connected SSH terminal, the user opens a browser window pinned to that
-host. All supported page traffic, including access to that host's
+From a connected SSH terminal, the user opens the Browser tool in the terminal sidebar, alongside SFTP
+and Notes. Its context follows the focused terminal in a workspace. All supported page traffic, including access to that host's
 `127.0.0.1`, must use the selected host's network path. Loss of that path
 stops browsing without switching to a local direct connection. Bookmarks sync
 through the existing encrypted cloud-sync payload.
@@ -33,26 +34,26 @@ The feature is complete only after a packaged desktop build demonstrates:
 
 ## Product behavior
 
-### Entry and window identity
+### Entry and terminal ownership
 
-- Add a Browser action to the customizable top terminal toolbar. Offer it only
-  when a selected, usable SSH host is available. The toolbar's compact and
-  overflow modes must keep the action reachable.
-- The window is pinned to the host identity at creation. Reopening from another
-  terminal for the same host focuses that window; opening from a different host
-  creates an independent window. A tab cannot silently change its route.
-- Title and permanent route badge: `Browser - via <host label>`. The badge has
-  connecting, connected, disconnected, and reconnecting states. Its details
-  show the host name and SSH chain, without exposing credentials or local ports.
-- Keep the browser window independent of the terminal pane. Closing a terminal
-  does not retarget the window. The browser owns its SSH access lifetime and
-  can reconnect to the same saved host; closing the browser releases it.
+- Browser is a normal terminal side-panel tool, alongside SFTP and Notes. It
+  participates in the existing nested split layout, position chooser, and
+  saved layout presets. Terminal toolbar and host-menu actions open this tool.
+- Each terminal keeps its own browser tabs and route. Within a workspace,
+  focusing another terminal reveals that terminal's browser context. Returning
+  restores its earlier tabs and pages without retargeting their network route.
+- Do not show a permanent `Via <host>` badge in the address toolbar. A workspace
+  uses the same focused-host heading pattern as other side-panel tools.
+- Switching tools or terminal tabs hides the native views and retains pages.
+  Closing the whole side panel or its terminal releases its browser views and
+  dedicated SSH connections. Renderer menus, dialogs, and magnified panes must
+  never be covered by a hidden browser view.
 
 ### Browsing surface
 
-- A separate window gives sites usable width. The trusted top chrome has a tab
+- The sidebar can be resized or magnified. The trusted top chrome has a tab
   strip, new/close/reorder tab controls, back, forward, reload/stop, one address
-  bar, a route label, and a bookmarks menu. Page title and favicon appear on
+  bar and a bookmarks menu. Page title and favicon appear on
   tabs. The start tab is a plain app-icon grid with no duplicate address field.
   It follows the main window's flat tab styling and normal desktop shortcuts.
 - Website favicons are fetched through the host route and stored locally by
@@ -61,11 +62,11 @@ The feature is complete only after a packaged desktop build demonstrates:
   icons can also use a custom image, which is included in bookmark sync.
 - `127.0.0.1:80` or `localhost:80` defaults to HTTP and refers to the SSH host.
   External names default to HTTPS. The address field displays the real page URL
-  while the route badge independently identifies the selected host.
+  and the focused terminal determines its host route.
 - All page-created tabs and permitted window-open requests stay in this host's
-  browser window/profile. External protocols and "open in system browser" need
+  browser context/profile. External protocols and "open in system browser" need
   an explicit warning that the destination will use the local computer's route.
-- While disconnected, show a full-window error state and a Retry action. Do not
+- While disconnected, show a full-panel error state and a Retry action. Do not
   load cached pages as though the route were connected; stale content, if ever
   shown, needs a separate offline label.
 
@@ -76,7 +77,7 @@ The feature is complete only after a packaged desktop build demonstrates:
   especially for `localhost` and private addresses. Users can explicitly make
   a public bookmark available from every host.
 - The menu has `This host` and `All hosts`, add/edit/delete, and a quick search.
-  Bookmark opening always uses the current window's host route. A missing host
+  Bookmark opening always uses the current terminal's host route. A missing host
   reference is shown as unavailable; never silently attach it to another host.
 - Sync bookmark metadata as its own id-based payload entity with the same
   merge, deletion, backup/restore, shrink guard, and encrypted provider handling
@@ -95,12 +96,12 @@ The feature is complete only after a packaged desktop build demonstrates:
 - The main process owns a `HostBrowserManager` with a small interface:
   openForHost(hostId), create/close/navigate tab, bookmark operations, and
   close host browser. The UI sends intent and receives state. The manager owns
-  browser windows, tabs, session partitions, route state, and cleanup.
+  panel views, tabs, session partitions, route state, and cleanup.
 - Use a dedicated, temporary SSH connection for the browser, honoring
   Netcatty's existing host authentication, known-host policy, jump hosts, and
   connection settings. A dynamic SOCKS5 listener binds only to `127.0.0.1` on
   an OS-assigned port. It is not a saved port-forward rule. Expose the actual
-  assigned port only inside the main process; close it with the last host window.
+  assigned port only inside the main process; close it with the owning browser panel.
 - A loopback SOCKS listener is not exclusive to this browser: another local
   process could use it while open, and Chromium does not support SOCKS5 proxy
   authentication. Keep its lifetime short, never bind a public interface,
