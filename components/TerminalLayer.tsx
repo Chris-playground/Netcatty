@@ -663,6 +663,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     } else if (targetPanel === 'notes') {
       setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+    } else if (targetPanel === 'browser') {
+      setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     }
 
     setSidePanelOpenTabs(prev => {

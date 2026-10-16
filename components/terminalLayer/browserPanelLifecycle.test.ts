@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { collectSidePanelPanes, closeSidePanelPane, type SidePanelLayout } from '../../domain/sidePanelLayout';
+import { resolveSessionSidePanelAutoOpen } from '../../domain/terminalSidePanelAutoOpen';
 
 const source = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
 const start = source.indexOf('const handleCloseSidePanelPane = useCallback(');
@@ -54,3 +55,37 @@ test('closing a sibling pane keeps the browser mounted', () => {
   assert.deepEqual(result.mounted, ['terminal', 'other-terminal']);
   assert.deepEqual(result.tools, ['browser']);
 });
+
+for (const protocol of ['local', 'ssh']) {
+  test(`browser auto-open mounts content for a ${protocol} terminal`, () => {
+    const statusStart = source.indexOf('const handleStatusChange = useCallback(');
+    const statusEnd = source.indexOf('const handleSessionExit =', statusStart);
+    const addHelper = ast.statements.find((node) => ts.isVariableStatement(node)
+      && node.declarationList.declarations.some((declaration) => declaration.name.getText(ast) === 'addMountedSidePanelTabId'));
+    assert.ok(addHelper && statusStart > 0 && statusEnd > statusStart);
+    let mounted: string[] = [];
+    let opened = new Map<string, string>();
+    const statusCode = ts.transpile(`${addHelper.getText(ast)};${source.slice(statusStart, statusEnd)};handleStatusChange;`, { target: ts.ScriptTarget.ES2022 });
+    const statusChange = vm.runInNewContext(statusCode, {
+      useCallback: (callback: unknown) => callback,
+      onUpdateSessionStatus: () => {},
+      setSftpAuthHostBySessionId: () => {},
+      sessionsRef: { current: [{ id: 'terminal', protocol }] },
+      sidePanelOpenTabsRef: { current: opened },
+      sftpHostSourceSessionForTabRef: { current: new Map() },
+      lastSidePanelTabRef: { current: new Map() },
+      terminalSidePanelAutoOpenRef: { current: true },
+      terminalSidePanelAutoOpenTabRef: { current: 'browser' },
+      localShellSidePanelAutoOpenRef: { current: true },
+      localShellSidePanelAutoOpenTabRef: { current: 'browser' },
+      sftpAutoOpenSidebarRef: { current: false },
+      resolveSessionSidePanelAutoOpen,
+      applyWorkspaceLayoutPresetForSession: () => false,
+      setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
+      setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
+    }) as (sessionId: string, status: string) => void;
+    statusChange('terminal', 'connected');
+    assert.equal(opened.get('terminal'), 'browser');
+    assert.deepEqual(Array.from(mounted), ['terminal']);
+  });
+}
