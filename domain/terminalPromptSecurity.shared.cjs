@@ -8,6 +8,7 @@ const OSC_CONTROL_PATTERN = new RegExp(
   "gu",
 );
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
+const ALTERNATE_ROW_START_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[[0-9]+;1H`, "gu");
 
 const SENSITIVE_ENGLISH_LABEL = [
   String.raw`pass(?:word|phrase|code)`,
@@ -109,7 +110,13 @@ function hasTypedInputAfterConfirmedPrompt(line, options = {}) {
 }
 
 function isUntrustedTerminalInputPrompt(value, options = {}) {
-  const prompt = lastLogicalLine(value).trim();
+  // Vim redraws its Ex prompt at column one without emitting a newline.
+  // Keep that row boundary only on the alternate screen; primary-screen
+  // custom authentication prompts must remain fail-closed.
+  const promptInput = options.alternateScreen
+    ? value.replace(ALTERNATE_ROW_START_PATTERN, "\n")
+    : value;
+  const prompt = lastLogicalLine(promptInput).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
   // Vim command-mode entry on the alternate screen. A bare `:` on the

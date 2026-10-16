@@ -154,3 +154,21 @@ test('renderer and main-process prompt classifiers stay aligned', () => {
     assert.equal(sharedPromptSecurity.isUntrustedTerminalInputPrompt(prompt, options), expected, prompt);
   }
 });
+
+test('Vim row-start cursor positioning separates the alternate-screen colon prompt', () => {
+  // Captured from two real vim.tiny sessions in the native app: Vim moves to
+  // column one of its command row instead of printing a newline before ':'.
+  const renderedBody = '\u001b[?1049h-- INSERT --\u001b[1;1HCLEAN_VIM_MARKER';
+  let tail = appendTerminalPromptSecurityTail('', renderedBody);
+  tail = appendTerminalPromptSecurityTail(tail, '\u001b[51;');
+  tail = appendTerminalPromptSecurityTail(tail, '1H:\u001b[?25h');
+  for (const classify of [isUntrustedTerminalInputPrompt, sharedPromptSecurity.isUntrustedTerminalInputPrompt]) {
+    assert.equal(classify(tail, { alternateScreen: true }), false);
+    assert.equal(classify(tail, { alternateScreen: false }), true);
+    for (const prompt of ['Password:', 'Token: ', 'Custom authentication> ']) {
+      assert.equal(classify(`${renderedBody}\u001b[51;1H${prompt}`, { alternateScreen: true }), true, prompt);
+    }
+    // Moving within a label must not turn a real challenge into a bare colon.
+    assert.equal(classify('Password\u001b[51;9H:', { alternateScreen: true }), true);
+  }
+});
