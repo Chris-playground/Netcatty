@@ -6,6 +6,7 @@ import React, { useCallback, useRef, useSyncExternalStore } from 'react';
 import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
+import { collectSessionIds } from '../../domain/workspace';
 import { getSidePanelLiveSnapshot, subscribeSidePanelLiveSnapshot, sidePanelLiveStore, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, type SidePanelLiveSnapshot } from './sidePanelLiveStore';
 
 // Exercise the production hook without importing the unrelated panel UI modules.
@@ -28,7 +29,7 @@ test('workspace browser follows focus without replacing the earlier terminal con
   assert.ok(browserSlot);
   const slotCode = ts.transpile(browserSlot.getText(ast), { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React });
   const Slot = vm.runInNewContext(`${slotCode}; SidePanelBrowserSlot`, {
-    React, useRef, useSidePanelLiveSnapshotForTab: useSnapshot, resolveSystemSidebarSession,
+    React, useRef, useSidePanelLiveSnapshotForTab: useSnapshot, resolveSystemSidebarSession, collectSessionIds,
     sidePanelHiddenPanelClassName: (hidden: boolean) => hidden ? 'hidden' : 'visible',
     HostBrowserSidePanel: (props: object) => React.createElement('div', { ...props, 'data-browser-context': true }),
   }) as React.ComponentType<{ tabId: string; ctx: object; isVisible: boolean }>;
@@ -63,6 +64,11 @@ test('workspace browser follows focus without replacing the earlier terminal con
     assert.equal(contexts()[1].props.isVisible, false);
     await act(async () => renderer!.update(React.createElement(Slot, { tabId: 'workspace', ctx, isVisible: false })));
     assert.ok(contexts().every((context) => !context.props.isVisible), 'hidden tabs hide every native browser context');
+    ctx.workspaceById.set('workspace', { ...workspace, focusedSessionId: sessionB.id,
+      root: { id: 'b', type: 'pane', sessionId: sessionB.id } });
+    await act(async () => renderer!.update(React.createElement(Slot, { tabId: 'workspace', ctx, isVisible: false })));
+    assert.equal(contexts().length, 1, 'a detached session must leave the old workspace even while it still exists globally');
+    assert.equal(contexts()[0].props.host.id, 'host-b', 'the remaining workspace browser stays mounted');
   } finally {
     await act(async () => renderer?.unmount());
     sidePanelLiveStore.update(SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT);

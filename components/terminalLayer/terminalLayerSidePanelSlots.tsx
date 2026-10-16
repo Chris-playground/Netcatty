@@ -23,6 +23,7 @@ import {
 import { useScriptExecution } from '../../application/state/useScriptExecution';
 import { useRemoteHistoryState } from '../../application/state/useRemoteHistoryState';
 import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
+import { collectSessionIds } from '../../domain/workspace';
 import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHibernate';
 import { resolveTerminalFontFamilyId } from '../../infrastructure/config/fonts';
 import type { Host, TerminalSession, Workspace } from '../../types';
@@ -257,8 +258,10 @@ function SidePanelBrowserSlot({ tabId, ctx, isVisible }: {
       sessions.find((session) => session.id === tabId));
   const retainedSessionIds = useRef(new Set<string>());
   if (isVisible && current) retainedSessionIds.current.add(current.id);
+  const workspaceSessionIds = workspace ? new Set(collectSessionIds(workspace.root)) : null;
   for (const id of retainedSessionIds.current) {
-    if (!sessions.some((session) => session.id === id)) retainedSessionIds.current.delete(id);
+    if (!sessions.some((session) => session.id === id && (workspaceSessionIds
+      ? workspaceSessionIds.has(id) : session.id === tabId && !session.workspaceId))) retainedSessionIds.current.delete(id);
   }
   const sessionHosts = ctx.sessionHostsMap as Map<string, Host>;
   const authHosts = ctx.sftpAuthHostBySessionId as Map<string, Host>;
