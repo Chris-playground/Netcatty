@@ -10,6 +10,8 @@ const { windowsFramelessContentChromeOptions } = require("../bridges/windowManag
 
 const DEAD_PROXY = "socks5://127.0.0.1:9";
 const CHROME_HEIGHT = 80;
+const EMBEDDED_CHROME_HEIGHT = 64;
+const chromeHeight = (record) => Math.round((record.embedded ? EMBEDDED_CHROME_HEIGHT : CHROME_HEIGHT) * (record.zoom || 1));
 const MAX_TABS = 32;
 const DOWNLOAD_PANEL_WIDTH = 372;
 const ALLOWED_PAGE_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "blob:", "data:"]);
@@ -151,8 +153,8 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     const zoom = record.zoom || 1;
     record.downloadsView.webContents.setZoomFactor(zoom);
     record.downloadsView.setBounds({
-      x: Math.max(0, width - Math.round((DOWNLOAD_PANEL_WIDTH + 8) * zoom)), y: Math.round(CHROME_HEIGHT * (record.zoom || 1)),
-      width: Math.min(Math.round(DOWNLOAD_PANEL_WIDTH * zoom), width), height: Math.min(Math.round(panelHeight * zoom), Math.max(1, height - Math.round(CHROME_HEIGHT * (record.zoom || 1)))),
+      x: Math.max(0, width - Math.round((DOWNLOAD_PANEL_WIDTH + 8) * zoom)), y: chromeHeight(record),
+      width: Math.min(Math.round(DOWNLOAD_PANEL_WIDTH * zoom), width), height: Math.min(Math.round(panelHeight * zoom), Math.max(1, height - chromeHeight(record))),
     });
   };
   const closeDownloadsPanel = (record) => {
@@ -189,9 +191,9 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     for (const tab of record.tabs.values()) {
       tab.view.setBounds({
         x: 0,
-        y: Math.round(CHROME_HEIGHT * (record.zoom || 1)),
+        y: chromeHeight(record),
         width: Math.max(1, width - (record.panelOpen ? Math.min(width, Math.round(360 * (record.zoom || 1))) : 0)),
-        height: Math.max(1, height - Math.round(CHROME_HEIGHT * (record.zoom || 1))),
+        height: Math.max(1, height - chromeHeight(record)),
       });
     }
     positionDownloadsView(record);

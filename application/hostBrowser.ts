@@ -17,8 +17,8 @@ interface OpenHostBrowserOptions {
 const pendingOpens = new Map<string, Promise<void>>();
 const browserThemeTokens = ['background', 'foreground', 'secondary', 'muted', 'muted-foreground', 'border', 'primary', 'primary-foreground'] as const;
 
-export function currentBrowserThemeTokens(): Record<string, string> {
-  const style = getComputedStyle(document.documentElement);
+export function currentBrowserThemeTokens(element: Element = document.documentElement): Record<string, string> {
+  const style = getComputedStyle(element);
   return Object.fromEntries(browserThemeTokens.flatMap((token) => {
     const value = style.getPropertyValue(`--${token}`).trim();
     return isValidHslToken(value) ? [[token, value]] : [];

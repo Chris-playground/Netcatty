@@ -36,11 +36,12 @@ export function useHostBrowserPanel(options: BrowserPanelOptions) {
       const visible = isVisible && !!element?.isConnected && !!rect
         && rect.width > 0 && rect.height > 0 && !element?.closest('[inert]') && !covered;
       const bounds = rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined;
-      const theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-      const next = JSON.stringify({ browserId, visible, bounds, theme, tokens: document.documentElement.style.cssText });
+      const theme = element && getComputedStyle(element).colorScheme === 'light' ? 'light' : 'dark';
+      const themeTokens = currentBrowserThemeTokens(element ?? undefined);
+      const next = JSON.stringify({ browserId, visible, bounds, theme, themeTokens });
       if (next !== previous) {
         previous = next;
-        void bridge?.setHostBrowserPanelLayout?.({ browserId, visible, bounds, theme, themeTokens: currentBrowserThemeTokens() }).catch(() => {});
+        void bridge?.setHostBrowserPanelLayout?.({ browserId, visible, bounds, theme, themeTokens }).catch(() => {});
       }
       if (isVisible) frame = requestAnimationFrame(update);
     };

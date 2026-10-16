@@ -88,6 +88,9 @@ async function main() {
   assert.equal(await chromeA.executeJavaScript("document.documentElement.scrollWidth <= innerWidth"), true);
   await chromeA.executeJavaScript(`window.hostBrowser.command({type:'navigate',url:${JSON.stringify(a.url)}})`);
   await waitFor(async () => (await snapshotA()).tabs[0].title, "Host A");
+  const chromeBottom = await chromeA.executeJavaScript("document.querySelector('.chrome').getBoundingClientRect().bottom");
+  const pageA = rootA.children.find((child) => child instanceof WebContentsView && child.webContents.getURL() === a.url);
+  assert.equal(pageA.getBounds().y, chromeBottom, "page must meet the compact toolbar without a gap or overlap");
   layout("workspace:session-a", false);
   assert.equal(owner.contentView.children.includes(rootA), false);
   await waitFor(() => owner.webContents.isFocused(), true);
@@ -101,6 +104,13 @@ async function main() {
   assert.deepEqual(rootA.getBounds(), { x: 20, y: 80, width: 350, height: 500 });
   assert.equal((await snapshotA()).tabs[0].title, "Host A", "focus switch preserves the earlier page");
   assert.equal(owner.contentView.children.includes(rootB), false, "old context must leave the screen");
+  for (let index = 0; index < 6; index += 1) {
+    await chromeA.executeJavaScript("window.hostBrowser.command({type:'new-tab'})");
+  }
+  assert.equal(await chromeA.executeJavaScript(`(() => {
+    const button = document.querySelector('#new-tab').getBoundingClientRect();
+    return document.documentElement.scrollWidth <= innerWidth && button.left >= 0 && button.right <= innerWidth;
+  })()`), true, "tabs must scroll within a narrow pane and leave the add button reachable");
   await chromeA.executeJavaScript("document.querySelector('#add-app').click()");
   assert.equal(await chromeA.executeJavaScript("document.querySelector('#bookmark-panel').getBoundingClientRect().width <= innerWidth"), true);
   await chromeA.executeJavaScript("document.querySelector('#bookmark-close').click()");
@@ -108,6 +118,7 @@ async function main() {
   const downloads = rootA.children.find((child) => child instanceof WebContentsView && child.webContents.getURL().endsWith("downloads.html"));
   assert.ok(downloads);
   assert.ok(downloads.getBounds().width <= rootA.getBounds().width);
+  assert.equal(downloads.getBounds().y, chromeBottom, "downloads must start below the compact toolbar");
   const otherOwner = new BrowserWindow({ show: false });
   assert.throws(() => manager.updatePanelLayout({ sender: otherOwner.webContents }, { browserId: "workspace:session-a", visible: false }), /another terminal window/);
   otherOwner.destroy();
