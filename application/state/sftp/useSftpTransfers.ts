@@ -187,6 +187,7 @@ export const useSftpTransfers = ({
   listRemoteFiles,
   handleSessionError,
   acquireTransferSession,
+  resolveConnectedHost,
 }: UseSftpTransfersParams): UseSftpTransfersResult => {
   const { t } = useI18n();
   const tRef = useRef(t);
@@ -597,13 +598,21 @@ export const useSftpTransfers = ({
       && sourceCacheKey === targetCacheKey
     );
 
+    // Keep the pane's connect-time endpoint even when its saved host is edited.
+    const sourceHost = resolveConnectedHost?.(sourcePane.id);
+    const targetHost = resolveConnectedHost?.(targetPane.id);
+    const connectHosts = {
+      source: sourceHost && sourceHost !== "local" ? sourceHost : undefined,
+      target: targetHost && targetHost !== "local" ? targetHost : undefined,
+    };
+
     try {
     // Prefer dedicated work leases for remote ends so folder walks/listings
     // survive browse park and tab hide (pool holders, not panel map ids).
     if (!sourcePane.connection?.isLocal) {
       const sourceHostId = task.sourceHostId || sourcePane.connection?.hostId;
       if (acquireTransferSession && sourceHostId) {
-        sourceWorkLease = await acquireTransferSession(sourceHostId, `${task.id}:work-source`);
+        sourceWorkLease = await acquireTransferSession(sourceHostId, `${task.id}:work-source`, connectHosts.source);
         sourceSftpId = sourceWorkLease.sftpId;
       }
       if (!sourceSftpId) {
@@ -616,7 +625,7 @@ export const useSftpTransfers = ({
     if (!targetPane.connection?.isLocal) {
       const targetHostId = task.targetHostId || targetPane.connection?.hostId;
       if (acquireTransferSession && targetHostId) {
-        targetWorkLease = await acquireTransferSession(targetHostId, `${task.id}:work-target`);
+        targetWorkLease = await acquireTransferSession(targetHostId, `${task.id}:work-target`, connectHosts.target);
         targetSftpId = targetWorkLease.sftpId;
       }
       if (!targetSftpId) {
@@ -978,6 +987,7 @@ export const useSftpTransfers = ({
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
           sameHost,
+          0, false, undefined, undefined, connectHosts,
         );
 
         if (dirErrors > 0) {
@@ -1025,6 +1035,7 @@ export const useSftpTransfers = ({
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
           sameHost,
+          connectHosts,
         );
       }
 
@@ -1407,7 +1418,7 @@ export const useSftpTransfers = ({
     // Saved host edits replace acquisition; new transfers must not retain the old endpoint.
     // Already-running attempts keep the leases they acquired.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab, acquireTransferSession],
+    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab, acquireTransferSession, resolveConnectedHost],
   );
 
   const cancelTransfer = useCallback(
