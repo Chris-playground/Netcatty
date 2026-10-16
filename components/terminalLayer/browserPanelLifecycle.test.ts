@@ -1,0 +1,56 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import vm from 'node:vm';
+import ts from 'typescript';
+import { collectSidePanelPanes, closeSidePanelPane, type SidePanelLayout } from '../../domain/sidePanelLayout';
+
+const source = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
+const start = source.indexOf('const handleCloseSidePanelPane = useCallback(');
+const end = source.indexOf('const handleResizeSidePanelSplit =', start);
+assert.ok(start > 0 && end > start);
+const ast = ts.createSourceFile('TerminalLayer.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const helper = ast.statements.find((node) => ts.isVariableStatement(node)
+  && node.declarationList.declarations.some((declaration) => declaration.name.getText(ast) === 'removeMountedSidePanelTabId'));
+assert.ok(helper);
+const code = ts.transpile(`${helper.getText(ast)};${source.slice(start, end)};handleCloseSidePanelPane;`, { target: ts.ScriptTarget.ES2022 });
+
+function closePane(tool: 'browser' | 'notes') {
+  const layout: SidePanelLayout = { focusedPaneId: 'browser-pane', root: {
+    type: 'split', id: 'split', direction: 'horizontal', sizes: [0.5, 0.5], children: [
+      { type: 'pane', id: 'browser-pane', tool: 'browser' },
+      { type: 'pane', id: 'notes-pane', tool: 'notes' },
+    ],
+  } };
+  const layouts = new Map([['terminal', layout]]);
+  let mounted = ['terminal', 'other-terminal'];
+  const close = vm.runInNewContext(code, {
+    useCallback: (callback: unknown) => callback,
+    activeTabIdRef: { current: 'terminal' }, sidePanelLayoutsRef: { current: layouts },
+    collectSidePanelPanes,
+    setMagnifiedPane: () => {},
+    closeSidePanelPaneForTab: (tabId: string, paneId: string) => {
+      const next = closeSidePanelPane(layouts.get(tabId)!, paneId);
+      assert.ok(next);
+      layouts.set(tabId, next);
+      return false;
+    },
+    handleCloseSidePanel: () => { throw new Error('the sibling pane must remain open'); },
+    setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
+    shouldMarkSftpPaneClosed: () => false,
+  }) as (paneId: string) => void;
+  close(`${tool}-pane`);
+  return { mounted, tools: collectSidePanelPanes(layouts.get('terminal')!.root).map((pane) => pane.tool) };
+}
+
+test('closing a browser split pane releases only that terminal browser', () => {
+  const result = closePane('browser');
+  assert.deepEqual(result.mounted, ['other-terminal']);
+  assert.deepEqual(result.tools, ['notes']);
+});
+
+test('closing a sibling pane keeps the browser mounted', () => {
+  const result = closePane('notes');
+  assert.deepEqual(result.mounted, ['terminal', 'other-terminal']);
+  assert.deepEqual(result.tools, ['browser']);
+});

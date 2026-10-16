@@ -1898,6 +1898,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       handleCloseSidePanel();
       return;
     }
+    if (closingPane?.tool === 'browser') {
+      setBrowserMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
+    }
     if (shouldMarkSftpPaneClosed({
       closingPaneTool: closingPane?.tool,
       closesWholePanel: closesWholePanel,
