@@ -663,3 +663,56 @@ test("owned cancelled directory settles recoverable children without dropping co
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const liveSize of [37, 3, 0]) {
+  test(`same-pane local copy discovers ${liveSize} bytes after the listed file changes`, async () => {
+    const pane = makePane("right");
+    pane.files = [{ ...makePane("left").files[0], name: "edited.txt", size: 15 }];
+    const started: StartOptions[] = [];
+    const restore = installGlobals({
+      statLocal: async (path: string) => path.endsWith("edited.txt")
+        ? { type: "file", size: liveSize, lastModified: 1758000002000 }
+        : null,
+      startStreamTransfer: async (options: StartOptions) => { started.push(options); return {}; },
+      pauseTransfer: async () => ({ success: false }),
+      resumeTransfer: async () => ({ success: false }),
+    });
+    let ops: ReturnType<typeof useSftpTransfers> | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    function Probe() {
+      ops = useSftpTransfers({
+        ownerId: `local-edited-${liveSize}`,
+        getActivePane: () => pane,
+        getPaneByConnectionId: () => pane,
+        getTabByConnectionId: () => null,
+        updateTab: () => undefined,
+        refresh: async () => undefined,
+        clearCacheForConnection: () => undefined,
+        handleSessionError: () => undefined,
+        sftpSessionsRef: { current: new Map() },
+        connectionCacheKeyMapRef: { current: new Map() },
+        listLocalFiles: async () => [],
+        listRemoteFiles: async () => [],
+      });
+      return null;
+    }
+    try {
+      await act(async () => { renderer = create(React.createElement(Probe)); });
+      await act(async () => {
+        await ops!.startTransfer([{ name: "edited.txt", isDirectory: false }], "right", "right");
+      });
+      assert.equal(ops!.conflicts.length, 1);
+      assert.equal(ops!.conflicts[0].newSize, liveSize, "conflict must show the saved file's current size");
+      assert.equal(ops!.conflicts[0].newModified, 1758000002000);
+      await act(async () => {
+        await ops!.resolveConflict(ops!.conflicts[0].transferId, "duplicate", false);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+      assert.equal(started.length, 1);
+      assert.equal(started[0].totalBytes, liveSize || undefined, "copy must not retain the cached 15-byte size");
+    } finally {
+      await act(async () => { renderer?.unmount(); });
+      restore();
+    }
+  });
+}

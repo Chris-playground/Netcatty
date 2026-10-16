@@ -1269,25 +1269,24 @@ export const useSftpTransfers = ({
         // Prefer the fresh re-stat for remote files: a cached listing size can
         // be stale and undersized, which would silently truncate downloads
         // (#3559). Remote files without a live stat use plan 0 so the bridge
-        // measures the live size; local sources keep the pane metadata.
+        // measures the live size. Local files also start unknown so deferred
+        // discovery reads their current size after edits, not the cached listing.
         const fileEntry = fileEntryMap?.get(file.name);
         const freshMetadata = freshRemoteMetadata.get(file.name);
         const fileSize = file.isDirectory
           ? 0
           : freshMetadata
             ? freshMetadata.size
-            : sourcePane.connection!.isLocal
-              ? (fileEntry?.size ?? 0)
-              : 0;
-        // Only keep an mtime that is paired with trusted metadata (live re-stat,
-        // local source size, or directory totals). A remote file whose re-stat
-        // failed must stay fully unknown (size 0 AND mtime 0 in the plan):
+            : 0;
+        // Only keep an mtime paired with a live re-stat or directory totals.
+        // A file without a live stat must stay fully unknown
+        // (size 0 AND mtime 0 in the plan):
         // discoverTransferSize and the conflict check both treat a nonzero
         // sourceLastModified as proof the size is already known, so a stale
         // mtime would suppress the deferred source re-stat. The overwrite
         // dialog still gets the pane listing's cached entry via
         // discoverTransferSize's cachedListingStatForDialog fallback.
-        const sourceLastModified = !file.isDirectory && !sourcePane.connection!.isLocal && !freshMetadata
+        const sourceLastModified = !file.isDirectory && !freshMetadata
           ? 0
           : (freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0);
 
