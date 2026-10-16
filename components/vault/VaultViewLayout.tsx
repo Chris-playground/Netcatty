@@ -1217,7 +1217,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 handleEditHost,
                 handleHostConnect,
                 handleOpenHostBrowser: (host: any) => {
-                  if (host.protocol && host.protocol !== 'ssh') return;
+                  if (host.protocol && !['ssh', 'mosh', 'local'].includes(host.protocol)) return;
                   void openHostBrowser({ host, hosts, keys, identities, knownHosts, terminalSettings })
                     .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not open the host browser'));
                 },

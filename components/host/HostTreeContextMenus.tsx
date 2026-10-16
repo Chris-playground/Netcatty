@@ -36,7 +36,7 @@ export const OpenDualPaneSftpMenuItem: React.FC<{ host: Host }> = ({ host }) => 
 
 export const OpenHostBrowserMenuItem: React.FC<{ host: Host; onOpenBrowser?: (host: Host) => void }> = ({ host, onOpenBrowser }) => {
   const { t } = useI18n();
-  if (!onOpenBrowser || (host.protocol && host.protocol !== 'ssh')) return null;
+  if (!onOpenBrowser || (host.protocol && !['ssh', 'mosh', 'local'].includes(host.protocol))) return null;
   return <ContextMenuItem onClick={() => onOpenBrowser(host)}><Globe2 className="mr-2 h-4 w-4" /> {t('terminal.browser.open')}</ContextMenuItem>;
 };
 
