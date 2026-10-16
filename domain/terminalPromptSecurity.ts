@@ -64,6 +64,20 @@ function lastLogicalLine(value: string): string {
 }
 
 /**
+ * Full-screen TUIs redraw rows with column-one cursor positioning instead of
+ * printing newlines, so the final logical line no longer carries every label
+ * the screen just rendered. Scan every redrawn row so an authentication
+ * challenge stays fail-closed even after later rows draw over it.
+ */
+function hasSensitiveRedrawnRow(promptInput: string): boolean {
+  const plain = stripTerminalControlSequences(promptInput);
+  return plain.split(/[\n\r]+/).some((row) => {
+    const candidate = row.trim();
+    return candidate.length > 0 && isSensitiveTerminalChallenge(candidate);
+  });
+}
+
+/**
  * Keep enough raw output to recognize authentication prompts split across
  * transport chunks without retaining terminal history or unbounded data.
  */
@@ -202,8 +216,13 @@ export function isUntrustedTerminalInputPrompt(
     ? value.replace(ALTERNATE_ROW_START_PATTERN, "\n")
     : value;
   const prompt = lastLogicalLine(promptInput).trim();
+  // A sensitive challenge on any earlier redrawn alternate-screen row keeps
+  // the input boundary fail-closed even when the final row hides it.
+  if (isSensitiveTerminalChallenge(prompt)
+    || (options.alternateScreen === true && hasSensitiveRedrawnRow(promptInput))) {
+    return true;
+  }
   if (!prompt) return false;
-  if (isSensitiveTerminalChallenge(prompt)) return true;
   // Vim command-mode entry on the alternate screen. A bare `:` on the
   // primary screen stays fail-closed (`sudo -p ':'`).
   if (options.alternateScreen && /^:\s*$/.test(prompt)) return false;

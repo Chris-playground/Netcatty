@@ -172,3 +172,22 @@ test('Vim row-start cursor positioning separates the alternate-screen colon prom
     assert.equal(classify('Password\u001b[51;9H:', { alternateScreen: true }), true);
   }
 });
+
+test('alternate-screen row redraws keep earlier sensitive challenges fail-closed', () => {
+  // A full-screen TUI repositions to column one per redrawn row without
+  // printing newlines, so the challenge row is not the final logical line.
+  const redraw = '\u001b[5;1HPassword:\u001b[24;1HReady';
+  const cleared = '\u001b[5;1HPassword:\u001b[24;1H';
+  for (const classify of [isUntrustedTerminalInputPrompt, sharedPromptSecurity.isUntrustedTerminalInputPrompt]) {
+    assert.equal(classify(redraw, { alternateScreen: true }), true);
+    assert.equal(classify(cleared, { alternateScreen: true }), true);
+    // Primary-screen behavior is unchanged: the row-start sequences are not
+    // row boundaries there, so the stripped single line stays fail-closed.
+    assert.equal(classify(redraw, { alternateScreen: false }), true);
+    // A redraw over a challenge row is not a confirmed shell prompt either.
+    assert.equal(
+      isConfirmedTerminalShellPrompt(redraw, { alternateScreen: true }),
+      false,
+    );
+  }
+});
