@@ -25,15 +25,18 @@ test("late download notifications ignore closed browser chrome in a live termina
   const start = source.indexOf("const notifyDownloads =");
   const end = source.indexOf("const snapshot =", start);
   assert.ok(start > 0 && end > start);
-  const notify = vm.runInNewContext(`${source.slice(start, end)};notifyDownloads;`, {
-    downloadStore: { list: () => [] },
-  });
-  assert.doesNotThrow(() => notify({
+  const record = {
+    hostId: "host",
     win: { isDestroyed: () => false },
     chromeContents: {
       isDestroyed: () => true,
       send: () => { throw new Error("Object has been destroyed"); },
     },
     downloadsPanelOpen: false,
-  }));
+  };
+  const notify = vm.runInNewContext(`${source.slice(start, end)};notifyDownloads;`, {
+    downloadStore: { list: () => [] },
+    windows: new Map([["closed", record]]),
+  });
+  assert.doesNotThrow(() => notify(record));
 });

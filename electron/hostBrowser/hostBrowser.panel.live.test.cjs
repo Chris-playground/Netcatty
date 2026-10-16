@@ -100,7 +100,8 @@ async function main() {
   await waitFor(() => rootA.children.includes(pageA), true);
   layout("workspace:session-a", false);
   assert.equal(owner.contentView.children.includes(rootA), false);
-  await waitFor(() => owner.webContents.isFocused(), true);
+  // A locked desktop cannot grant focus; keep the focus check enabled by default.
+  if (!process.env.NETCATTY_BROWSER_SMOKE_SKIP_FOCUS) await waitFor(() => owner.webContents.isFocused(), true);
   const rootB = await open("workspace:session-b", b);
   const chromeB = rootB.children[0].webContents;
   await chromeB.executeJavaScript(`window.hostBrowser.command({type:'navigate',url:${JSON.stringify(b.url)}})`);
@@ -154,14 +155,34 @@ async function main() {
   await waitFor(async () => (await localChrome.executeJavaScript("window.hostBrowser.snapshot()")).tabs[0].title, "Local browser");
   assert.equal((await localChrome.executeJavaScript("window.hostBrowser.snapshot()")).tabs.length, 1, "first terminal link reuses the blank tab");
   const localPage = localRoot.children.find((child) => child instanceof WebContentsView && child !== localRoot.children[0]);
+  layout('local:session', false);
+  layout('local:peer', true);
+  await manager.open(event, { browserId: 'local:peer', embedded: true, local: true,
+    hostId: 'local', label: 'Same host peer', theme: 'light' });
+  const peerRoot = owner.contentView.children.find((view) => view.children.some((child) => child instanceof WebContentsView
+    && child.webContents.getURL().endsWith('browser.html')));
+  await peerRoot.children[0].webContents.executeJavaScript("window.hostBrowser.command({type:'set-download-panel',open:true})");
+  const peerDownloads = peerRoot.children.find((child) => child instanceof WebContentsView && child.webContents.getURL().endsWith('downloads.html')).webContents;
   let activeDownload;
-  localPage.webContents.session.once('will-download', (_downloadEvent, item) => {
-    activeDownload = item;
-    item.setSavePath(path.join(app.getPath('userData'), 'closing-download.bin'));
-  });
-  localPage.webContents.downloadURL(`http://127.0.0.1:${localSite.address().port}/slow.bin`);
-  await waitFor(() => Boolean(activeDownload), true);
+  const startDownload = async () => {
+    activeDownload = undefined;
+    localPage.webContents.session.once('will-download', (_downloadEvent, item) => {
+      activeDownload = item;
+      item.setSavePath(path.join(app.getPath('userData'), 'closing-download.bin'));
+    });
+    localPage.webContents.downloadURL(`http://127.0.0.1:${localSite.address().port}/slow.bin`);
+    await waitFor(() => Boolean(activeDownload), true);
+  };
+  await startDownload();
   let cancelled = false;
+  activeDownload.once('done', (_downloadEvent, status) => { cancelled = status === 'cancelled'; });
+  await waitFor(() => peerDownloads.executeJavaScript("Boolean(document.querySelector('button[title=\"Cancel download\"]'))"), true);
+  await peerDownloads.executeJavaScript("window.hostBrowserDownloads.list().then(items => window.hostBrowserDownloads.command('cancel', items[0].id))");
+  await waitFor(() => cancelled, true);
+  await waitFor(() => peerDownloads.executeJavaScript("Boolean(document.querySelector('button[title=\"Cancel download\"]'))"), false);
+  manager.closePanel(event, 'local:peer');
+  await startDownload();
+  cancelled = false;
   activeDownload.once('done', (_downloadEvent, status) => { cancelled = status === 'cancelled'; });
   manager.closePanel(event, 'local:session');
   await waitFor(() => cancelled, true);

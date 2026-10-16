@@ -96,12 +96,14 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     record.chromeContents.send("netcatty:host-browser:state", snapshot(record));
   };
   const notifyDownloads = (record) => {
-    if (record.win.isDestroyed() || record.chromeContents.isDestroyed()) return;
     const downloads = downloadStore.list(record.hostId);
-    if (record.downloadsPanelOpen) positionDownloadsView(record);
-    record.chromeContents.send("netcatty:host-browser:downloads-changed", downloads);
-    if (record.downloadsView && !record.downloadsView.webContents.isDestroyed()) {
-      record.downloadsView.webContents.send("netcatty:host-browser:downloads-changed", downloads);
+    for (const target of windows.values()) {
+      if (target.hostId !== record.hostId || target.win.isDestroyed() || target.chromeContents.isDestroyed()) continue;
+      if (target.downloadsPanelOpen) positionDownloadsView(target);
+      target.chromeContents.send("netcatty:host-browser:downloads-changed", downloads);
+      if (target.downloadsView && !target.downloadsView.webContents.isDestroyed()) {
+        target.downloadsView.webContents.send("netcatty:host-browser:downloads-changed", downloads);
+      }
     }
   };
   const snapshot = (record) => ({
@@ -675,10 +677,12 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
         return true;
       }
       case "clear": downloadStore.clearFinished(record.hostId); notifyDownloads(record); return true;
-      case "cancel":
-        if (!item || !record.downloads.has(item.id)) throw new Error("Download is no longer active");
-        record.downloads.get(item.id).cancel();
+      case "cancel": {
+        const owner = item && [...windows.values()].find((candidate) => candidate.hostId === record.hostId && candidate.downloads.has(item.id));
+        if (!owner) throw new Error("Download is no longer active");
+        owner.downloads.get(item.id).cancel();
         return true;
+      }
       case "remove":
         if (!item || !downloadStore.remove(record.hostId, item.id)) return false;
         notifyDownloads(record);
