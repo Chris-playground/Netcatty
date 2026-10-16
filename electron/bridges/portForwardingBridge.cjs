@@ -801,8 +801,8 @@ function bindPortForwardChannels({
         let greetingSent = false;
         const parser = createSocks5RequestParser({
           onFailure: (code) => {
-            if (!greetingSent) socket.write(Buffer.from([0x05, 0xff]));
-            else socket.write(Buffer.from([0x05, code, 0, 1, 0, 0, 0, 0, 0, 0]));
+            if (!greetingSent && code === 0xff) socket.write(Buffer.from([0x05, 0xff]));
+            else if (greetingSent) socket.write(Buffer.from([0x05, code, 0, 1, 0, 0, 0, 0, 0, 0]));
             socket.end();
             destroyTunnelPipeEntry(tunnelState, pipeEntry, { abortOpen: false });
           },
