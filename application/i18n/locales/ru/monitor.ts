@@ -1,4 +1,5 @@
 export const ruMonitorMessages = {
+  "monitor.actions": "Действия панели",
   "monitor.unavailable": "Мониторинг недоступен. Запустите его снова после восстановления связи.",
   "monitor.username": "Пользователь",
   "monitor.password": "Пароль (только для этого запуска)",

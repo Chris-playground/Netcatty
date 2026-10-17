@@ -1,4 +1,5 @@
 export const zhCNMonitorMessages = {
+  "monitor.actions": "面板操作",
   "monitor.unavailable": "监控暂不可用，连接恢复后请重新开始。",
   "monitor.username": "用户名",
   "monitor.password": "密码（仅本次使用）",

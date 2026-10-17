@@ -1,4 +1,5 @@
 export const enMonitorMessages = {
+  "monitor.actions": "Panel actions",
   "monitor.unavailable": "Monitoring is unavailable. Try starting again when the connection is restored.",
   "monitor.username": "Username",
   "monitor.password": "Password (this run only)",

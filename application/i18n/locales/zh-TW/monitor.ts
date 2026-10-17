@@ -1,4 +1,5 @@
 export const zhTWMonitorMessages = {
+  "monitor.actions": "面板操作",
   "monitor.unavailable": "監控暫時無法使用，連線恢復後請重新開始。",
   "monitor.username": "使用者名稱",
   "monitor.password": "密碼（僅本次使用）",

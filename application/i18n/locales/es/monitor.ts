@@ -1,4 +1,5 @@
 export const esMonitorMessages = {
+  "monitor.actions": "Acciones del panel",
   "monitor.unavailable": "La monitorización no está disponible. Iníciala de nuevo cuando se restablezca la conexión.",
   "monitor.username": "Usuario",
   "monitor.password": "Contraseña (solo esta ejecución)",
