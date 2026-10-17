@@ -682,7 +682,8 @@ for (const scenario of [
   { name: "missing timeout tool", script: "exec sleep 20", gpu: null, noTimeout: true },
   { name: "blocked GPU query", script: "trap '' TERM; exec sleep 20", gpu: null },
 ]) {
-  test(`real stats shell preserves other metrics with ${scenario.name}`, async (t) => {
+  for (const monitorOnly of [false, true]) {
+  test(`real stats shell preserves other metrics with ${scenario.name} (${monitorOnly ? "monitor-only" : "terminal"})`, async (t) => {
     if (spawnSync("timeout", ["-s", "KILL", "2", "true"]).status !== 0) {
       t.skip("GNU/BusyBox-compatible timeout is unavailable on this test host");
       return;
@@ -692,6 +693,7 @@ for (const scenario of [
     writeFileSync(join(dir, "nvidia-smi"), `#!/bin/sh\n${scenario.script}\n`, { mode: 0o755 });
     const sessions = new Map([["sid", {
       type: "ssh",
+      _monitorStats: monitorOnly,
       conn: {
         exec(command, cb) {
           const execution = spawnSync("sh", ["-c", [
@@ -719,6 +721,7 @@ for (const scenario of [
     assert.equal(result.stats.gpuMemUsed, scenario.used ?? null);
     assert.equal(result.stats.gpuMemTotal, scenario.total ?? null);
   });
+  }
 }
 
 test("getServerStats measures latency by pinging the stats connection", async () => {
@@ -1406,6 +1409,7 @@ for (const keepaliveInterval of [0, 10000]) {
     assert.equal(result.success, true);
     assert.equal(pingCalls, keepaliveInterval === 0 ? 0 : 1);
     assert.equal(result.stats.latencyMs, keepaliveInterval === 0 ? null : 2);
+    assert.equal(Number.isFinite(result.stats.responseLatencyMs), true);
   });
 }
 

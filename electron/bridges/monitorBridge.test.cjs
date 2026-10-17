@@ -280,7 +280,7 @@ test("full terminal readers upgrade a lightweight cached sample and keep subsequ
         memTotal: 100,
         memUsed: null,
         topProcesses: ctx._monitorStats ? [] : [{ name: "full-process" }],
-        gpu: ctx._monitorStats ? null : 75,
+        gpu: 75,
       },
     };
   };

@@ -100,7 +100,7 @@ async function sampleSharedStats(session, collect, now = Date.now()) {
         appendPoint(state, result, state.at, session._monitorFreshAfter);
       return result;
     }
-    // A terminal needs process/GPU fields omitted from a monitor-only query.
+    // A terminal needs process fields omitted from a monitor-only query.
     // Finish the shared lightweight query, then upgrade once for all full readers.
     await state.pending;
     return sampleSharedStats(session, collect);

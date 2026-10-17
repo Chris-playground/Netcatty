@@ -1199,7 +1199,7 @@ function createSessionOpsApi(ctx) {
         `uptime=$(awk -v n="$nowsec" -v b="$bootsec" 'BEGIN{if(n>0&&b>0)printf "%.0f",n-b}')`,
         `loadavg=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1" "$2" "$3"}')`,
         `echo "CPU:$cpupct|CORES:$cores|MEMINFO:$memtotal $memfree 0 $memcached $swaptotal $swapfree|PROCS:$procs|DISKS:$disks|NET:$net|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`,
-      ].filter(command => !session._monitorStats || (!command.startsWith('procs=') && !command.startsWith('gpustat='))).join('; ');
+      ].filter(command => !session._monitorStats || !command.startsWith('procs=')).join('; ');
 
       // Prefer df's filesystem type column so FUSE mounts can be identified
       // even when their source name looks like an ordinary remote path.
@@ -1305,7 +1305,7 @@ function createSessionOpsApi(ctx) {
         `gpustat=$(gpucsv=$(timeout -s KILL 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null) && printf '%s\\n' "$gpucsv" | awk -F', *' 'NF >= 4 {g++; if($1 ~ /^[0-9]+$/) {n++; u+=$1} if($2 ~ /^[0-9]+$/) {mu+=$2; uc++} if($3 ~ /^[0-9]+$/) {mt+=$3; tc++} if(name=="") name=$4} END{if(n>0) printf "%.0f %s %s %s", u/n, (uc==g ? sprintf("%.0f",mu) : "N/A"), (tc==g ? sprintf("%.0f",mt) : "N/A"), name}' 2>/dev/null || echo "")`,
         // Output all stats (using CPURAW and PERCORERAW instead of CPU and PERCORE)
         `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|NET:$net|GPU:$gpustat|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
-      ].filter(command => !session._monitorStats || (!command.startsWith('procs=') && !command.startsWith('gpustat='))).join('; ');
+      ].filter(command => !session._monitorStats || !command.startsWith('procs=')).join('; ');
 
       // Client-side run bound shared by the stats and disk probes; the remote
       // watchdog uses the same value so an abandoned probe self-kills instead
@@ -1364,6 +1364,12 @@ function createSessionOpsApi(ctx) {
       const pingLatencyPromise = sshStatsConn && !pingDisabled && typeof measureSshPingLatency === 'function'
         ? Promise.resolve(measureSshPingLatency(sshStatsConn)).catch(() => null)
         : Promise.resolve(null);
+      // Observe the exec acknowledgement already needed for this sample. This
+      // remains available when global-request keepalives are disabled, without
+      // sending another ping or opening an additional channel/connection.
+      // Keep it separate from the transport RTT: channel setup also includes
+      // remote processing, and shared terminal readers must retain that distinction.
+      let responseLatencyMs = null;
       const formatStatsError = (error) => (
         error?.code === "SSH_EXEC_OPEN_TIMEOUT" || error?.code === "SSH_EXEC_RUN_TIMEOUT"
           ? "Timeout getting server stats"
@@ -1379,7 +1385,13 @@ function createSessionOpsApi(ctx) {
         };
         void (async () => {
           try {
-            const { stdout } = await executeStatsCommand(statsCommand);
+            const responseStartedAt = performance.now();
+            const { stdout } = await executeStatsCommand(statsCommand, {
+              ...statsExecOptions,
+              onStream: () => {
+                if (sshStatsConn) responseLatencyMs = Math.max(0, Math.round(performance.now() - responseStartedAt));
+              },
+            });
             if (settled) return;
             let combinedStdout = String(stdout || '').trim();
             const primaryOutput = combinedStdout.replace(new RegExp(`^${latencyMarker}\\|?`), '');
@@ -1744,6 +1756,7 @@ function createSessionOpsApi(ctx) {
                 netRxSpeed,    // Total network receive speed (bytes/sec)
                 netTxSpeed,    // Total network transmit speed (bytes/sec)
                 latencyMs,      // SSH transport ping on the existing session (ms); never a second TCP dial (#3630)
+                responseLatencyMs, // Existing stats exec acknowledgement (ms), including remote channel setup
                 netInterfaces, // Per-interface network stats
                 hostname,
                 osName,
