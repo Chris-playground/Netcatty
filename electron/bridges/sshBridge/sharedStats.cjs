@@ -24,6 +24,9 @@ function stateFor(conn, endpoint) {
       at: 0,
       points: [],
       controller: null,
+      latestFull: false,
+      pendingFull: false,
+      fullUntil: 0,
     };
   }
   states.set(conn, state);
@@ -53,7 +56,10 @@ function appendPoint(state, result, now) {
   state.points.push({
     at: now,
     cpu: s.cpu,
-    memory: s.memTotal > 0 ? (s.memUsed / s.memTotal) * 100 : null,
+    memory:
+      s.memTotal > 0 && Number.isFinite(s.memUsed)
+        ? (s.memUsed / s.memTotal) * 100
+        : null,
     disk: s.diskPercent,
     rx: s.networkReady ? s.netRxSpeed : null,
     tx: s.networkReady ? s.netTxSpeed : null,
@@ -73,15 +79,28 @@ async function sampleSharedStats(session, collect, now = Date.now()) {
       state.context.prevCpuStats = session.prevCpuStats;
       state.latest = result;
       state.at = Date.now();
+      state.latestFull = true;
     }
     return result;
   }
   const state = stateFor(conn, session._reuseEndpoint);
+  const full = !session._monitorStats;
+  if (full) state.fullUntil = now + 15000;
   if (state.pending) {
-    if (!session._monitorStats) state.terminalJoined = true;
-    return state.pending;
+    if (full) state.terminalJoined = true;
+    if (!full || state.pendingFull) return state.pending;
+    // A terminal needs process/GPU fields omitted from a monitor-only query.
+    // Finish the shared lightweight query, then upgrade once for all full readers.
+    await state.pending;
+    return sampleSharedStats(session, collect);
   }
-  if (state.latest?.success && now - state.at < 4000) return state.latest;
+  if (
+    state.latest?.success &&
+    now - state.at < 4000 &&
+    (!full || state.latestFull)
+  )
+    return state.latest;
+  const collectFull = full || now < state.fullUntil;
   // Keep transport capabilities on the collection context; baseline is independent of a terminal.
   const companion = !session.conn;
   Object.assign(state.context, {
@@ -91,15 +110,17 @@ async function sampleSharedStats(session, collect, now = Date.now()) {
     type: session.type,
     singleChannelSsh: session.singleChannelSsh,
     hostname: session.hostname,
-    _monitorStats: session._monitorStats,
+    _monitorStats: !collectFull,
   });
   state.controller = new AbortController();
-  state.terminalJoined = !session._monitorStats;
+  state.terminalJoined = full;
+  state.pendingFull = collectFull;
   state.context.statsSignal = state.controller.signal;
   state.pending = Promise.resolve(collect(state.context))
     .then((result) => {
-      if (!state.controller.signal.aborted) {
+      if (!state.controller.signal.aborted && result.success) {
         state.latest = result;
+        state.latestFull = collectFull;
         state.at = Date.now();
         appendPoint(state, result, state.at);
       }

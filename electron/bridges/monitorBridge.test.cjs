@@ -174,6 +174,11 @@ test("terminal and monitor join in-flight collection; stop never aborts a termin
   const collect = (ctx) => {
     calls++;
     ctx.statsSignal.addEventListener("abort", () => (aborted = true));
+    if (!ctx._monitorStats)
+      return Promise.resolve({
+        success: true,
+        stats: { cpu: 1, memTotal: 1, memUsed: 1 },
+      });
     return new Promise((resolve) => (finish = resolve));
   };
   const a = sampleSharedStats({ conn: c, _monitorStats: true }, collect);
@@ -182,7 +187,7 @@ test("terminal and monitor join in-flight collection; stop never aborts a termin
   assert.equal(aborted, false);
   finish({ success: true, stats: { cpu: null, memTotal: 1, memUsed: 1 } });
   await Promise.all([a, b]);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   assert.equal(readSharedStats(c).points.length, 1);
 });
 test("sparse trends keep a finite time and point budget under sustained samples", async () => {
@@ -227,6 +232,182 @@ test("fresh terminal logins with the exact same pool identity share the monitor'
     collect,
   );
   await sampleSharedStats({ conn: b, _reuseEndpoint: endpoint }, collect);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   assert.equal(readSharedStats(a).points, readSharedStats(b).points);
+});
+
+test("full terminal readers upgrade a lightweight cached sample and keep subsequent queries shared", async () => {
+  const c = conn();
+  let calls = 0;
+  const collect = async (ctx) => {
+    calls++;
+    return {
+      success: true,
+      stats: {
+        cpu: 42,
+        memTotal: 100,
+        memUsed: null,
+        topProcesses: ctx._monitorStats ? [] : [{ name: "full-process" }],
+        gpu: ctx._monitorStats ? null : 75,
+      },
+    };
+  };
+  await sampleSharedStats({ conn: c, _monitorStats: true }, collect);
+  const terminal = await sampleSharedStats({ conn: c }, collect);
+  assert.equal(terminal.stats.topProcesses[0].name, "full-process");
+  assert.equal(terminal.stats.gpu, 75);
+  assert.equal(calls, 2);
+  assert.equal(readSharedStats(c).points[0].memory, null);
+  await sampleSharedStats(
+    { conn: c, _monitorStats: true },
+    collect,
+    Date.now() + 5000,
+  );
+  await sampleSharedStats({ conn: c }, collect);
+  assert.equal(calls, 3);
+});
+
+test("a failed sample preserves last good measurements, time and sparse history", async () => {
+  const c = conn();
+  const session = { conn: c, _monitorStats: true };
+  await sampleSharedStats(session, async () => ({
+    success: true,
+    stats: { cpu: 42 },
+  }));
+  const before = readSharedStats(c);
+  const failed = await sampleSharedStats(
+    session,
+    async () => ({ success: false, error: "timeout" }),
+    Date.now() + 5000,
+  );
+  assert.equal(failed.success, false);
+  const after = readSharedStats(c);
+  assert.equal(after.at, before.at);
+  assert.equal(after.result.stats.cpu, 42);
+  assert.deepEqual(after.points, before.points);
+});
+
+test("stopping at the post-authentication await cannot orphan a transport lease", async () => {
+  let transport;
+  const f = fixture({
+    startConnection: async (_event, opts) => {
+      transport = pool.createTransport({
+        conn: conn(),
+        endpoint: pool.buildConnectionReuseEndpoint(opts),
+      });
+      return { transport };
+    },
+  });
+  f.service.reconcile(event(1), [demand()]);
+  while (!transport) await Promise.resolve();
+  await Promise.resolve();
+  f.service.reconcile(event(1), []);
+  await tick();
+  await tick();
+  assert.equal(transport.count, 0);
+  assert.equal(f.service.snapshot(event(1)).hostCount, 0);
+  f.service.dispose();
+});
+
+test("credential-changing retry leaves the other window's original identity actionable", async () => {
+  const f = fixture({
+    startConnection: async (_event, opts) => {
+      if (opts.password !== "corrected") throw new Error("login failed");
+      return {
+        transport: pool.createTransport({
+          conn: conn(),
+          endpoint: pool.buildConnectionReuseEndpoint(opts),
+        }),
+      };
+    },
+  });
+  f.service.reconcile(event(1), [demand()]);
+  f.service.reconcile(event(2), [demand()]);
+  await tick();
+  assert.equal(f.service.snapshot(event(2)).hosts.h.status, "login");
+  f.service.retry(event(1), "h");
+  f.service.reconcile(event(1), [
+    demand("p", { ...options, password: "corrected" }),
+  ]);
+  await tick();
+  await tick();
+  assert.equal(f.service.snapshot(event(1)).hosts.h.status, "live");
+  assert.equal(f.service.snapshot(event(2)).hosts.h.status, "login");
+  assert.equal(f.service.snapshot(event(2)).activeSessions.length, 1);
+  f.service.retry(event(2), "h");
+  f.service.reconcile(event(2), [
+    demand("p", { ...options, password: "corrected" }),
+  ]);
+  await tick();
+  assert.equal(f.service.snapshot(event(2)).hosts.h.status, "live");
+  f.service.dispose();
+});
+
+test("same-identity retry restarts shared failed demand for both windows", async () => {
+  let attempts = 0;
+  const f = fixture({
+    startConnection: async (_event, opts) => {
+      if (++attempts === 1) throw new Error("login failed");
+      return {
+        transport: pool.createTransport({
+          conn: conn(),
+          endpoint: pool.buildConnectionReuseEndpoint(opts),
+        }),
+      };
+    },
+  });
+  f.service.reconcile(event(1), [demand()]);
+  f.service.reconcile(event(2), [demand()]);
+  await tick();
+  f.service.retry(event(1), "h");
+  f.service.reconcile(event(1), [demand()]);
+  await tick();
+  await tick();
+  assert.equal(f.service.snapshot(event(1)).hosts.h.status, "live");
+  assert.equal(f.service.snapshot(event(2)).hosts.h.status, "live");
+  assert.equal(attempts, 2);
+  f.service.dispose();
+});
+
+test("closing the owner during authentication reconnects demand for the surviving window", async () => {
+  let rejectFirst,
+    attempts = 0;
+  const f = fixture({
+    startConnection: (_event, opts) => {
+      if (++attempts === 1)
+        return new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        });
+      return Promise.resolve({
+        transport: pool.createTransport({
+          conn: conn(),
+          endpoint: pool.buildConnectionReuseEndpoint(opts),
+        }),
+      });
+    },
+    cancelConnection: () => rejectFirst(new Error("cancelled")),
+  });
+  f.service.reconcile(event(1), [demand()]);
+  f.service.reconcile(event(2), [demand()]);
+  await tick();
+  f.service.removeOwner(1);
+  await tick();
+  await tick();
+  assert.equal(attempts, 2);
+  assert.equal(f.service.snapshot(event(2)).hosts.h.status, "live");
+  f.service.dispose();
+});
+
+test("replacing a host at the capacity limit admits its replacement immediately", async () => {
+  const f = fixture();
+  const hosts = Array.from({ length: 257 }, (_, i) => ({
+    id: `h${i}`,
+    options: { ...options, hostname: `test-${i}` },
+  }));
+  f.service.reconcile(event(1), [{ id: "p", hosts: hosts.slice(0, 256) }]);
+  f.service.reconcile(event(1), [{ id: "p", hosts: hosts.slice(1) }]);
+  const result = f.service.snapshot(event(1));
+  assert.equal(result.hostCount, 256);
+  assert.equal(result.hosts.h256.status, "queued");
+  f.service.dispose();
 });

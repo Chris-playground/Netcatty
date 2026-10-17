@@ -1191,6 +1191,7 @@ export const useVaultState = () => {
   }, []);
 
   const clearVaultData = useCallback(() => {
+    void withVaultImportLock('vault', async () => writeMonitorPanels([]));
     updateHosts([]);
     updateKeys([]);
     updateIdentities([]);

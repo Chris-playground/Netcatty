@@ -18,6 +18,7 @@ function createMonitorService({
   const panels = new Map();
   const entries = new Map();
   const revisions = new Map();
+  const retries = new Map();
   let dialTail = Promise.resolve();
   let disposed = false;
   let epoch = 0;
@@ -140,8 +141,10 @@ function createMonitorService({
               );
             pool.completeTransportDial(coordination, transport);
           }
-          if (entry.cancelled) {
-            // Return a temporary lease to apply the pool's ordinary idle policy.
+          const { detectVendorFromSshVersion } =
+            await import("../../domain/sshServerVendor.mjs");
+          if (entry.cancelled || disposed) {
+            // Cancellation can arrive during authentication or module loading.
             const holder = {};
             pool.borrowTransport(transport, {
               kind: pool.LEASE_KINDS.monitor,
@@ -150,9 +153,6 @@ function createMonitorService({
             pool.returnTransport(holder);
             return;
           }
-          const { detectVendorFromSshVersion } = await import(
-            "../../domain/sshServerVendor.mjs"
-          );
           if (
             detectVendorFromSshVersion(transport.conn?._remoteVer) ||
             require("../../domain/singleChannelSshBanner.shared.cjs").remoteSoftwareRequiresSingleChannel(
@@ -236,31 +236,10 @@ function createMonitorService({
         }
         keys.push(key);
         hosts.push({ id: host.id, key });
-        let entry = entries.get(key);
-        if (!entry && entries.size >= 256) {
-          hosts[hosts.length - 1] = { id: host.id, status: "limit" };
-          keys.pop();
-          continue;
-        }
-        if (!entry) {
-          entry = {
-            key,
-            hostname: options.hostname,
-            sessionId: `monitor-${randomUUID()}`,
-            holder: {},
-            owner: event.sender.id,
-            status: "queued",
-            failures: 0,
-            transport: null,
-            timer: null,
-            cancelled: false,
-            controller: new AbortController(),
-          };
-          entries.set(key, entry);
-          connect(entry, event, options);
-        }
+        hosts[hosts.length - 1].options = options;
       }
       panels.set(id, {
+        event,
         owner,
         id: panel.id,
         keys,
@@ -271,8 +250,22 @@ function createMonitorService({
     for (const [id, panel] of panels)
       if (panel.owner === owner && !wanted.has(id)) panels.delete(id);
     const needed = new Set([...panels.values()].flatMap((p) => p.keys));
+    const ownKeys = new Set(
+      [...panels.values()]
+        .filter((p) => p.owner === owner)
+        .flatMap((p) => p.keys),
+    );
+    const retryKeys = retries.get(owner) ?? new Set();
+    retries.delete(owner);
+    // Release obsolete demand before applying the limit. A credential-changing
+    // retry keeps other windows' old identity available in its existing state.
     for (const entry of entries.values())
-      if (!needed.has(entry.key)) release(entry);
+      if (
+        !needed.has(entry.key) ||
+        (ownKeys.has(entry.key) && retryKeys.has(entry.key))
+      )
+        release(entry);
+    admitEntries(owner);
     for (const entry of entries.values()) {
       if (entry.timer && entry.due - now() > intervalFor(entry) * 1000) {
         timers.clearTimeout(entry.timer);
@@ -289,6 +282,31 @@ function createMonitorService({
     }
     return snapshot(event);
   }
+  function admitEntries(preferredOwner) {
+    const candidates = [...panels.values()].sort(
+      (a, b) =>
+        Number(b.owner === preferredOwner) - Number(a.owner === preferredOwner),
+    );
+    for (const panel of candidates)
+      for (const host of panel.hosts) {
+        if (!host.key || entries.has(host.key) || entries.size >= 256) continue;
+        const entry = {
+          key: host.key,
+          hostname: host.options.hostname,
+          sessionId: `monitor-${randomUUID()}`,
+          holder: {},
+          owner: panel.owner,
+          status: "queued",
+          failures: 0,
+          transport: null,
+          timer: null,
+          cancelled: false,
+          controller: new AbortController(),
+        };
+        entries.set(host.key, entry);
+        connect(entry, panel.event, host.options);
+      }
+  }
   function snapshot(event) {
     const own = [...panels.values()].filter((p) => p.owner === event.sender.id);
     const hosts = {};
@@ -299,7 +317,7 @@ function createMonitorService({
           ? readSharedStats(entry.transport.conn)
           : null;
         hosts[host.id] = {
-          status: entry?.status ?? host.status ?? "queued",
+          status: entry?.status ?? host.status ?? "limit",
           at: shared?.at ?? 0,
           stats: shared?.result?.success ? shared.result.stats : null,
           points: shared?.points ?? [],
@@ -325,44 +343,43 @@ function createMonitorService({
     };
   }
   function removeOwner(owner) {
+    retries.delete(owner);
     revisions.set(owner, (revisions.get(owner) ?? 0) + 1);
     for (const [id, p] of panels) if (p.owner === owner) panels.delete(id);
     const needed = new Set([...panels.values()].flatMap((p) => p.keys));
     for (const entry of entries.values()) {
       if (!needed.has(entry.key)) release(entry);
-      else if (entry.connecting && entry.owner === owner) {
-        entry.cancelled = true;
-        entry.controller.abort();
-        cancelConnection(entry.sessionId);
-        entry.connecting = false;
-        entry.status = "login";
-      }
+      else if (entry.connecting && entry.owner === owner) release(entry);
     }
+    admitEntries();
   }
+
   function stopAll() {
     epoch++;
     for (const [owner, revision] of revisions)
       revisions.set(owner, revision + 1);
     panels.clear();
+    retries.clear();
     for (const entry of entries.values()) release(entry);
   }
   function retry(event, hostId) {
-    // Login retry reuses fresh renderer-resolved credentials by removing that owner's demand first.
+    const keys = retries.get(event.sender.id) ?? new Set();
     for (const p of panels.values())
       if (p.owner === event.sender.id)
         for (const host of p.hosts) {
-          if (host.id === hostId) {
-            const e = entries.get(host.key);
-            if (
-              e &&
-              ["login", "error", "unsupported", "disconnected"].includes(
-                e.status,
-              )
+          const entry = entries.get(host.key);
+          if (
+            host.id === hostId &&
+            entry &&
+            ["login", "error", "unsupported", "disconnected"].includes(
+              entry.status,
             )
-              release(e);
-          }
+          )
+            keys.add(host.key);
         }
+    retries.set(event.sender.id, keys);
   }
+
   return {
     reconcile,
     snapshot,
