@@ -42,6 +42,8 @@ export const zhTWMonitorMessages = {
   "monitor.diskCapacityUnknown": "暫無容量讀數",
   "monitor.rootDisk": "根分割區",
   "monitor.network": "網路",
+  "monitor.download": "下載",
+  "monitor.upload": "上傳",
   "monitor.updated": "更新時間",
   "monitor.updatedAt": "更新於 {time}",
   "monitor.noSamples": "等待第一次讀數",

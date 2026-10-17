@@ -43,6 +43,8 @@ export const ruMonitorMessages = {
   "monitor.diskCapacityUnknown": "Данные об объёме недоступны",
   "monitor.rootDisk": "Корневой раздел",
   "monitor.network": "Сеть",
+  "monitor.download": "Загрузка",
+  "monitor.upload": "Отправка",
   "monitor.updated": "Обновлено",
   "monitor.updatedAt": "Обновлено: {time}",
   "monitor.noSamples": "Ожидание первого измерения",

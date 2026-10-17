@@ -810,10 +810,12 @@ export function MonitorPanels({
                                 <td className="px-3 tabular-nums whitespace-nowrap">
                                   <div className="flex items-center gap-1.5">
                                     <ArrowDown size={13} className="shrink-0 text-sky-600 dark:text-sky-400" />
+                                    <span className="sr-only">{t("monitor.download")}: </span>
                                     {rate(s?.networkReady ? s.netRxSpeed : null)}
                                   </div>
                                   <div className="flex items-center gap-1.5">
                                     <ArrowUp size={13} className="shrink-0 text-violet-600 dark:text-violet-400" />
+                                    <span className="sr-only">{t("monitor.upload")}: </span>
                                     {rate(s?.networkReady ? s.netTxSpeed : null)}
                                   </div>
                                 </td>

@@ -42,6 +42,8 @@ export const zhCNMonitorMessages = {
   "monitor.diskCapacityUnknown": "暂无容量读数",
   "monitor.rootDisk": "根分区",
   "monitor.network": "网络",
+  "monitor.download": "下载",
+  "monitor.upload": "上传",
   "monitor.updated": "更新时间",
   "monitor.updatedAt": "更新于 {time}",
   "monitor.noSamples": "等待第一次读数",

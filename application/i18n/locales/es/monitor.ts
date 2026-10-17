@@ -44,6 +44,8 @@ export const esMonitorMessages = {
   "monitor.diskCapacityUnknown": "Capacidad no disponible",
   "monitor.rootDisk": "Partición raíz",
   "monitor.network": "Red",
+  "monitor.download": "Descarga",
+  "monitor.upload": "Subida",
   "monitor.updated": "Actualizado",
   "monitor.updatedAt": "Actualizado: {time}",
   "monitor.noSamples": "Esperando la primera lectura",
