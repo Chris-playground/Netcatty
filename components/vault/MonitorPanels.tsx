@@ -660,8 +660,8 @@ export function MonitorPanels({
                           key={id}
                           {...dragProps(id)}
                           className={cn(
-                            "flex h-full min-w-0 cursor-grab flex-col overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card active:cursor-grabbing focus-visible:outline focus-visible:outline-primary",
-                            dragging?.panelId === panel.id && dragging.hostId === id && "opacity-40",
+                            "flex h-full min-w-0 cursor-default flex-col overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card focus-visible:outline focus-visible:outline-primary",
+                            dragging?.panelId === panel.id && dragging.hostId === id && "cursor-grabbing opacity-40",
                             dropTarget === id && "bg-accent",
                             status(host, state) !== "live" &&
                               "text-muted-foreground",
@@ -757,8 +757,8 @@ export function MonitorPanels({
                                 key={id}
                                 {...dragProps(id)}
                                 className={cn(
-                                  "cursor-grab [&>td]:bg-card/70 [&>td]:transition-colors hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl",
-                                  dragging?.panelId === panel.id && dragging.hostId === id && "opacity-40",
+                                  "cursor-default [&>td]:bg-card/70 [&>td]:transition-colors hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl",
+                                  dragging?.panelId === panel.id && dragging.hostId === id && "cursor-grabbing opacity-40",
                                   dropTarget === id && "[&>td]:bg-accent",
                                   status(host, state) !== "live" &&
                                     "text-muted-foreground",
@@ -767,7 +767,7 @@ export function MonitorPanels({
                                 <td className="px-3 py-3">
                                   <button
                                     draggable
-                                    className="flex items-center gap-2.5 text-left hover:underline"
+                                    className="flex cursor-inherit items-center gap-2.5 text-left hover:underline"
                                     onClick={() => {
                                       setEditor(null);
                                       setDetail(id);
