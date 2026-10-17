@@ -44,18 +44,3 @@ export type MonitorPanelDemand = {
     status?: "login" | "error";
   }[];
 };
-export function monitorNeedsAttention(
-  state: MonitorHostState | undefined,
-  interval: number,
-  now = Date.now(),
-): boolean {
-  if (!state || state.status !== "live" || now - state.at > interval * 2500)
-    return true;
-  const s = state.stats;
-  return (
-    !!s &&
-    ((s.cpu ?? 0) >= 85 ||
-      (s.memTotal && s.memUsed ? s.memUsed / s.memTotal >= 0.9 : false) ||
-      s.disks.some((d) => d.percent >= 90))
-  );
-}

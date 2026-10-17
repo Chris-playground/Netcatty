@@ -1,9 +1,7 @@
 import React, { useEffect, useId, useMemo, useState } from "react";
 import {
-  AlertCircle,
   ArrowDown,
   ArrowUp,
-  CircleCheck,
   Clock3,
   Copy,
   Cpu,
@@ -32,7 +30,6 @@ import {
 } from "../../application/state/monitorRuntimeStore";
 import type { MonitorPanel } from "../../domain/monitorPanels";
 import {
-  monitorNeedsAttention,
   type MonitorHostState,
   type MonitorPoint,
 } from "../../domain/monitorRuntime";
@@ -42,7 +39,6 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Badge } from "../ui/badge";
 import { Combobox } from "../ui/combobox";
 import { ScrollArea } from "../ui/scroll-area";
 import {
@@ -70,6 +66,7 @@ import {
 import SelectHostPanel from "../SelectHostPanel";
 import { DistroAvatar } from "../DistroAvatar";
 import { ResourceBar } from "../systemManager/ResourceBar";
+import { MonitorDiskUsage } from "./MonitorDiskUsage";
 import { VaultHeaderSearch, VaultPageHeader } from "./VaultPageHeader";
 import { toast } from "../ui/toast";
 
@@ -181,25 +178,6 @@ export function MonitorTrend({
   );
 }
 
-export function MonitorRunningIndicator() {
-  const { t } = useI18n();
-  const { count } = useMonitorSnapshot();
-  if (!count) return null;
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 gap-1.5 app-no-drag text-xs"
-      onClick={monitorActions.stopAll}
-      title={t("monitor.stopAll")}
-    >
-      <Gauge size={14} className="text-primary" />
-      <span>{t("monitor.runningCount", { count })}</span>
-      <Square size={11} />
-    </Button>
-  );
-}
-
 export function MonitorPanels({
   hosts,
   customGroups,
@@ -251,7 +229,6 @@ export function MonitorPanels({
             interval: 10,
             range: 15,
             sort: "manual",
-            attentionOnly: false,
           },
     });
   };
@@ -321,14 +298,10 @@ export function MonitorPanels({
       state: runtime.hosts[id],
     }));
     const filtered = rows.filter(
-      ({ host, state }) =>
-        (!q ||
-          `${host?.label ?? ""} ${host?.hostname ?? ""} ${host?.group ?? ""}`
-            .toLocaleLowerCase()
-            .includes(q)) &&
-        (!panel.attentionOnly ||
-          !host ||
-          monitorNeedsAttention(state, panel.interval)),
+      ({ host }) => !q ||
+        `${host?.label ?? ""} ${host?.hostname ?? ""} ${host?.group ?? ""}`
+          .toLocaleLowerCase()
+          .includes(q),
     );
     return panel.sort === "manual"
       ? filtered
@@ -356,16 +329,15 @@ export function MonitorPanels({
           ? "stale"
           : (state?.status ?? "queued");
   const stateBadge = (host: Host | undefined, state?: MonitorHostState) => (
-    <Badge
-      variant="outline"
+    <span
       className={cn(
-        "gap-1.5 whitespace-nowrap text-[10px] shrink-0 font-medium",
+        "inline-flex items-center gap-1.5 whitespace-nowrap text-[10px] shrink-0 font-medium",
         status(host, state) === "live"
-          ? "text-emerald-700 dark:text-emerald-400 border-emerald-500/25 bg-emerald-500/10"
+          ? "text-emerald-700 dark:text-emerald-400"
           : ["error", "disconnected", "missing"].includes(status(host, state))
-            ? "text-destructive border-destructive/25 bg-destructive/5"
+            ? "text-destructive"
             : ["login", "stale", "unsupported", "limit"].includes(status(host, state))
-              ? "text-amber-700 dark:text-amber-400 border-amber-500/25 bg-amber-500/10"
+              ? "text-amber-700 dark:text-amber-400"
               : "text-muted-foreground",
       )}
     >
@@ -374,7 +346,7 @@ export function MonitorPanels({
         className="h-1.5 w-1.5 rounded-full bg-current"
       />
       {t(`monitor.status.${status(host, state)}`)}
-    </Badge>
+    </span>
   );
   const renderMetrics = (
     state: MonitorHostState | undefined,
@@ -385,7 +357,7 @@ export function MonitorPanels({
       s?.memTotal && s.memUsed != null ? (s.memUsed / s.memTotal) * 100 : null;
     return (
       <div className={cn("grid grid-cols-2 gap-2", large && "gap-3")}>
-        <div className="min-w-0 rounded-lg border border-border/40 bg-muted/20 p-2.5">
+        <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <Cpu size={13} className="text-sky-600 dark:text-sky-400" />
             {t("monitor.cpu")}
@@ -407,7 +379,7 @@ export function MonitorPanels({
             />
           )}
         </div>
-        <div className="min-w-0 rounded-lg border border-border/40 bg-muted/20 p-2.5">
+        <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <MemoryStick size={13} className="text-emerald-600 dark:text-emerald-400" />
             {t("monitor.memory")}
@@ -434,61 +406,40 @@ export function MonitorPanels({
   };
   const hostDetail = hosts.find((h) => h.id === detail);
   const detailState = detail ? runtime.hosts[detail] : undefined;
-  const panelHosts =
-    panel?.hostIds.map((id) => ({
-      host: hosts.find((h) => h.id === id),
-      state: runtime.hosts[id],
-    })) ?? [];
-  const liveCount = panelHosts.filter(
-    ({ host, state }) => status(host, state) === "live",
-  ).length;
-  const attentionCount = panelHosts.filter(
-    ({ host, state }) =>
-      !host || monitorNeedsAttention(state, panel?.interval ?? 10),
-  ).length;
   const hasAside = !!editor || !!detail;
   return (
     <section
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
       data-section="vault-monitor"
     >
-      <VaultPageHeader>
-        <Gauge size={18} />
-        <h1 className="font-semibold text-sm">{t("monitor.title")}</h1>
-        <div className="flex-1" />
-        {!!runtime.count && (
-          <>
-            <span className="hidden lg:block text-xs text-muted-foreground">
-              {t("monitor.runningSummary", {
-                count: runtime.count,
-                hosts: runtime.hostCount,
-              })}
-            </span>
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-200",
+          hasAside && "max-[1000px]:hidden",
+        )}
+      >
+        <VaultPageHeader>
+          <Gauge size={18} />
+          <h1 className="font-semibold text-sm">{t("monitor.title")}</h1>
+          <div className="flex-1" />
+          {!!runtime.count && (
             <Button variant="ghost" size="sm" onClick={monitorActions.stopAll}>
               {t("monitor.stopAll")}
             </Button>
-          </>
-        )}
-        <Button size="sm" className="gap-1.5" onClick={() => startEdit(null)}>
-          <Plus size={14} />
-          {t("monitor.create")}
-        </Button>
-      </VaultPageHeader>
-      {runtime.unavailable && (
-        <p
-          role="alert"
-          className="border-b border-border/40 px-4 py-3 text-xs text-destructive"
-        >
-          {t("monitor.unavailable")}
-        </p>
-      )}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div
-          className={cn(
-            "flex min-w-0 flex-1 flex-col",
-            hasAside && "max-[1000px]:hidden",
           )}
-        >
+          <Button size="sm" className="gap-1.5" onClick={() => startEdit(null)}>
+            <Plus size={14} />
+            {t("monitor.create")}
+          </Button>
+        </VaultPageHeader>
+        {runtime.unavailable && (
+          <p
+            role="alert"
+            className="border-b border-border/40 px-4 py-3 text-xs text-destructive"
+          >
+            {t("monitor.unavailable")}
+          </p>
+        )}
           {!panel ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
               <Gauge size={36} className="text-muted-foreground" />
@@ -565,7 +516,7 @@ export function MonitorPanels({
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-2 px-4 py-2">
-                <div className="flex rounded-md border border-border/60 p-0.5">
+                <div className="flex h-8 rounded-md bg-muted/50 p-0.5">
                   {(["list", "charts"] as const).map((view) => (
                     <Button
                       key={view}
@@ -590,6 +541,7 @@ export function MonitorPanels({
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("monitor.search")}
                   className="min-w-36 flex-1"
+                  inputClassName="h-8 text-xs"
                 />
                 <Select
                   value={String(panel.interval)}
@@ -656,52 +608,6 @@ export function MonitorPanels({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-3 gap-2 px-4 py-3">
-                {[
-                  {
-                    icon: Server,
-                    label: t("monitor.hosts"),
-                    count: panel.hostIds.length,
-                    tone: "text-primary bg-primary/10",
-                  },
-                  {
-                    icon: CircleCheck,
-                    label: t("monitor.status.live"),
-                    count: running ? liveCount : "--",
-                    tone: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10",
-                  },
-                  {
-                    icon: AlertCircle,
-                    label: t("monitor.needsAttention"),
-                    count: running ? attentionCount : "--",
-                    tone: "text-amber-700 dark:text-amber-400 bg-amber-500/10",
-                  },
-                ].map(({ icon: Icon, label, count, tone }) => (
-                  <div key={label} className="flex min-w-0 items-center gap-2.5 rounded-lg border border-border/50 bg-card px-3 py-2.5">
-                    <span className={cn("hidden min-[900px]:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tone)}>
-                      <Icon size={16} />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold leading-tight tabular-nums">{count}</div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">{label}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-center justify-end px-4 pb-2 border-b border-border/40">
-                <Button
-                  variant={panel.attentionOnly ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  aria-pressed={panel.attentionOnly}
-                  onClick={() => {
-                    void patchPanel({ attentionOnly: !panel.attentionOnly });
-                  }}
-                >
-                  <AlertCircle size={13} />
-                  {t("monitor.attention")}
-                </Button>
-              </div>
               <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
                 <div className="p-4">
                   {!rows.length ? (
@@ -709,12 +615,12 @@ export function MonitorPanels({
                       {t("monitor.noMatches")}
                     </p>
                   ) : panel.view === "charts" ? (
-                    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-3">
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-4">
                       {rows.map(({ id, host, state }) => (
                         <button
                           key={id}
                           className={cn(
-                            "min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card text-left transition-colors hover:border-primary/40 focus-visible:outline focus-visible:outline-primary",
+                            "min-w-0 overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card focus-visible:outline focus-visible:outline-primary",
                             status(host, state) !== "live" &&
                               "text-muted-foreground",
                           )}
@@ -723,7 +629,7 @@ export function MonitorPanels({
                             setDetail(id);
                           }}
                         >
-                          <div className="flex items-center gap-3 border-b border-border/40 bg-muted/15 px-4 py-3">
+                          <div className="mb-5 flex items-center gap-3">
                             {host ? (
                               <DistroAvatar host={host} fallback={host.label} size="log" />
                             ) : (
@@ -739,29 +645,17 @@ export function MonitorPanels({
                             </div>
                             {stateBadge(host, state)}
                           </div>
-                          <div className={cn("p-3", status(host, state) !== "live" && "opacity-60")}>
+                          <div className={cn(status(host, state) !== "live" && "opacity-60")}>
                             {renderMetrics(state)}
-                            <div className="mt-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+                            <div className="mt-4">
                               <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                                 <HardDrive size={13} className="text-amber-600 dark:text-amber-400" />
-                                <span>{t("monitor.rootDisk")}</span>
+                                <span>{t("monitor.disks")}</span>
                               </div>
-                              <ResourceBar label="" value={state?.stats?.diskPercent} size="md" />
-                              {state?.stats?.disks
-                                .filter(
-                                  (d) => d.mountPoint !== "/" && d.percent >= 90,
-                                )
-                                .map((d) => (
-                                  <p
-                                    key={d.mountPoint}
-                                    className="mt-1 text-xs text-destructive"
-                                  >
-                                    {d.mountPoint} {percent(d.percent)}
-                                  </p>
-                                ))}
+                              <MonitorDiskUsage stats={state?.stats} />
                             </div>
                             <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] tabular-nums">
-                              <span className="flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-2">
+                              <span className="flex items-center gap-1.5 py-1">
                                 <ArrowDown size={13} className="shrink-0 text-sky-600 dark:text-sky-400" />
                                 {rate(
                                   state?.stats?.networkReady
@@ -769,7 +663,7 @@ export function MonitorPanels({
                                     : null,
                                 )}
                               </span>
-                              <span className="flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-2">
+                              <span className="flex items-center gap-1.5 py-1">
                                 <ArrowUp size={13} className="shrink-0 text-violet-600 dark:text-violet-400" />
                                 {rate(
                                   state?.stats?.networkReady
@@ -779,7 +673,7 @@ export function MonitorPanels({
                               </span>
                             </div>
                           </div>
-                          <p className="flex items-center gap-1.5 border-t border-border/40 bg-muted/15 px-4 py-2 text-[10px] text-muted-foreground">
+                          <p className="mt-4 flex items-center gap-1.5 text-[10px] text-muted-foreground">
                             <Clock3 size={11} />
                             {state?.at
                               ? t("monitor.updatedAt", {
@@ -800,7 +694,7 @@ export function MonitorPanels({
                               "status",
                               "cpu",
                               "memory",
-                              "rootDisk",
+                              "disks",
                               "network",
                               "updated",
                             ].map((k) => (
@@ -864,13 +758,8 @@ export function MonitorPanels({
                                     }
                                   />
                                 </td>
-                                <td className="px-3 tabular-nums">
-                                  <ResourceBar label="" value={s?.diskPercent} />
-                                  {s?.disks.some((d) => d.percent >= 90) && (
-                                    <span className="ml-1 text-destructive">
-                                      !
-                                    </span>
-                                  )}
+                                <td className="min-w-[220px] px-3 py-3">
+                                  <MonitorDiskUsage stats={s} />
                                 </td>
                                 <td className="px-3 tabular-nums whitespace-nowrap">
                                   ↓{" "}
@@ -934,6 +823,7 @@ export function MonitorPanels({
                 <Button
                   variant="outline"
                   className="w-full justify-between"
+                  aria-label={t("monitor.chooseHosts")}
                   onClick={() => setSelecting(true)}
                 >
                   {t("monitor.selectedCount", {
@@ -1065,7 +955,7 @@ export function MonitorPanels({
             className="max-[1000px]:!w-full max-[1000px]:border-l-0"
           >
             <AsidePanelContent>
-              <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <div className="flex items-center gap-3">
                 {hostDetail && <DistroAvatar host={hostDetail} fallback={hostDetail.label} size="lg" />}
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 truncate text-xs text-muted-foreground">{hostDetail?.hostname ?? detail}</div>
@@ -1262,7 +1152,6 @@ export function MonitorPanels({
             </AsidePanelFooter>
           </AsidePanel>
         )}
-      </div>
       <Dialog
         open={!!deleting}
         onOpenChange={(open) => !open && setDeleting(null)}

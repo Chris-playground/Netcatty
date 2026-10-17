@@ -22,7 +22,6 @@ const panel: MonitorPanel = {
   interval: 10,
   range: 15,
   sort: "manual",
-  attentionOnly: false,
 };
 const payload = (panels?: MonitorPanel[]): SyncPayload => ({
   hosts: [],
@@ -40,6 +39,7 @@ test("portable panel sanitizer strips all runtime data and preserves ordered ref
       stats: { cpu: 42 },
       points: [1],
       running: true,
+      attentionOnly: true,
       error: "secret",
     },
   ]);

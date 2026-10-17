@@ -8,7 +8,6 @@ export interface MonitorPanel {
   interval: 10 | 30 | 60;
   range: 5 | 15 | 30;
   sort: "manual" | "name" | "cpu" | "memory" | "disk";
-  attentionOnly: boolean;
 }
 
 export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
@@ -51,7 +50,6 @@ export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
           p.sort === "disk"
             ? p.sort
             : "manual",
-        attentionOnly: p.attentionOnly === true,
       },
     ];
   });

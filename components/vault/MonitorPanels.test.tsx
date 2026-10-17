@@ -8,6 +8,7 @@ import { writeMonitorPanels } from "../../application/state/monitorPanelsStorage
 import type { Host } from "../../domain/models";
 import type { MonitorPoint } from "../../domain/monitorRuntime";
 import { MonitorPanels, MonitorTrend } from "./MonitorPanels";
+import { MonitorDiskUsage } from "./MonitorDiskUsage";
 
 const now = 1_800_000_000_000;
 const point = (ago: number, cpu: number | null): MonitorPoint => ({
@@ -72,6 +73,28 @@ const hosts: Host[] = [
   { id: "brand", label: "Ubuntu host", hostname: "ubuntu.example.com", username: "test", port: 22, os: "linux", tags: [], createdAt: 1, distro: "ubuntu" },
 ];
 
+test("disk usage shows every reported partition, including healthy and empty disks", () => {
+  const disks = [
+    { mountPoint: "/", used: 25, total: 100, percent: 25 },
+    { mountPoint: "/data", used: 95, total: 100, percent: 95 },
+    { mountPoint: "/backup", used: 0, total: 100, percent: 0 },
+  ];
+  const document = new JSDOM(renderToStaticMarkup(
+    <MonitorDiskUsage stats={{ disks, diskPercent: 25 }} />,
+  )).window.document;
+  assert.deepEqual([...document.querySelectorAll("span[title]")].map((e) => e.textContent), ["/", "/data", "/backup"]);
+  for (const value of ["25.0%", "95.0%", "0.0%"])
+    assert.ok(document.body.textContent!.includes(value));
+});
+
+test("disk usage retains a root-only reading and leaves missing data unknown", () => {
+  const known = renderToStaticMarkup(<MonitorDiskUsage stats={{ disks: [], diskPercent: 42 }} />);
+  const unknown = renderToStaticMarkup(<MonitorDiskUsage />);
+  assert.ok(known.includes("42.0%"));
+  assert.ok(unknown.includes("--"));
+  assert.ok(!unknown.includes("0.0%"));
+});
+
 for (const view of ["list", "charts"] as const) {
   test(`${view} keeps saved custom icons, colors and OS logos`, (t) => {
     const storage = new Map<string, string>();
@@ -84,7 +107,7 @@ for (const view of ["list", "charts"] as const) {
       if (original) Object.defineProperty(globalThis, "localStorage", original);
       else Reflect.deleteProperty(globalThis, "localStorage");
     });
-    writeMonitorPanels([{ id: "panel", name: "Panel", description: "", hostIds: hosts.map((h) => h.id), view, interval: 10, range: 15, sort: "manual", attentionOnly: false }]);
+    writeMonitorPanels([{ id: "panel", name: "Panel", description: "", hostIds: hosts.map((h) => h.id), view, interval: 10, range: 15, sort: "manual" }]);
     const document = new JSDOM(renderToStaticMarkup(
       <I18nProvider locale="en"><MonitorPanels hosts={hosts} customGroups={[]} onConnect={() => {}} /></I18nProvider>,
     )).window.document;
