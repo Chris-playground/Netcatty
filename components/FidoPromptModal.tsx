@@ -59,7 +59,7 @@ export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({ request, onSub
           hideCloseButton
           aria-describedby={descriptionId}
           overlayClassName="fido-prompt-overlay bg-black/20"
-          className="fido-prompt-dialog w-[calc(100%_-_2rem)] max-w-[400px] gap-0 overflow-hidden rounded-xl border-border/70 p-6 sm:rounded-xl"
+          className="fido-prompt-dialog z-[51] w-[calc(100%_-_2rem)] max-w-[400px] gap-0 overflow-hidden rounded-xl border-border/70 p-6 sm:rounded-xl"
           style={{ boxShadow: '0 20px 60px -20px rgb(0 0 0 / 0.28)' }}
         >
           <div key={visibleRequest.requestId} className="fido-prompt-stage">
