@@ -1,14 +1,21 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import {
-  Activity,
+  AlertCircle,
   ArrowDown,
   ArrowUp,
+  CircleCheck,
+  Clock3,
   Copy,
+  Cpu,
+  Gauge,
+  HardDrive,
   LayoutGrid,
   List,
+  MemoryStick,
   Pencil,
   Play,
   Plus,
+  Server,
   Square,
   Terminal,
   Trash2,
@@ -61,6 +68,8 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import SelectHostPanel from "../SelectHostPanel";
+import { DistroAvatar } from "../DistroAvatar";
+import { ResourceBar } from "../systemManager/ResourceBar";
 import { VaultHeaderSearch, VaultPageHeader } from "./VaultPageHeader";
 import { toast } from "../ui/toast";
 
@@ -95,6 +104,7 @@ export function MonitorTrend({
   label: string;
   className?: string;
 }) {
+  const gradientId = useId();
   const end = Date.now(),
     start = end - range * 60000;
   const visible = points.filter((p) => p.at >= start);
@@ -102,27 +112,30 @@ export function MonitorTrend({
     field === "cpu" || field === "memory"
       ? 100
       : Math.max(1, ...visible.map((p) => p[field] ?? 0));
-  const segments: string[] = [];
-  let current = "";
+  const segments: { path: string; firstX: number; x: number; y: number }[] = [];
+  let current: (typeof segments)[number] | null = null;
   let previous: MonitorPoint | null = null;
   for (const p of visible) {
     const value = p[field];
     if (value == null) {
       if (current) segments.push(current);
-      current = "";
+      current = null;
       previous = null;
       continue;
     }
     if (previous && p.at - previous.at > interval * 2500) {
       if (current) segments.push(current);
-      current = "";
+      current = null;
     }
     const x = Math.max(
       0,
       Math.min(300, ((p.at - start) / (end - start)) * 300),
     );
     const y = 58 - (Math.min(max, Math.max(0, value)) / max) * 54;
-    current += `${current ? " L" : "M"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    const coordinate = `${x.toFixed(2)} ${y.toFixed(2)}`;
+    current = current
+      ? { ...current, path: `${current.path} L ${coordinate}`, x, y }
+      : { path: `M ${coordinate}`, firstX: x, x, y };
     previous = p;
   }
   if (current) segments.push(current);
@@ -134,16 +147,35 @@ export function MonitorTrend({
       preserveAspectRatio="none"
       className={cn("h-16 w-full text-primary", className)}
     >
-      <path d="M0 58 H300" className="stroke-border" strokeWidth=".5" />
-      {segments.map((d, i) => (
-        <path
-          key={i}
-          d={d}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          vectorEffect="non-scaling-stroke"
-        />
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="currentColor" stopOpacity=".20" />
+          <stop offset="100%" stopColor="currentColor" stopOpacity=".02" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M0 4 H300 M0 31 H300 M0 58 H300"
+        className="stroke-border/60"
+        strokeWidth=".5"
+        strokeDasharray="3 4"
+      />
+      {segments.map(({ path, firstX, x, y }, i) => (
+        <g key={i}>
+          <path
+            d={`${path} L ${x.toFixed(2)} 58 L ${firstX.toFixed(2)} 58 Z`}
+            fill={`url(#${gradientId})`}
+          />
+          <path
+            d={path}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <circle cx={x} cy={y} r="2" fill="currentColor" />
+        </g>
       ))}
     </svg>
   );
@@ -161,7 +193,7 @@ export function MonitorRunningIndicator() {
       onClick={monitorActions.stopAll}
       title={t("monitor.stopAll")}
     >
-      <Activity size={14} className="text-primary" />
+      <Gauge size={14} className="text-primary" />
       <span>{t("monitor.runningCount", { count })}</span>
       <Square size={11} />
     </Button>
@@ -327,12 +359,20 @@ export function MonitorPanels({
     <Badge
       variant="outline"
       className={cn(
-        "text-[10px] shrink-0",
-        ["live"].includes(status(host, state))
-          ? "text-primary border-primary/30"
-          : "text-muted-foreground",
+        "gap-1.5 whitespace-nowrap text-[10px] shrink-0 font-medium",
+        status(host, state) === "live"
+          ? "text-emerald-700 dark:text-emerald-400 border-emerald-500/25 bg-emerald-500/10"
+          : ["error", "disconnected", "missing"].includes(status(host, state))
+            ? "text-destructive border-destructive/25 bg-destructive/5"
+            : ["login", "stale", "unsupported", "limit"].includes(status(host, state))
+              ? "text-amber-700 dark:text-amber-400 border-amber-500/25 bg-amber-500/10"
+              : "text-muted-foreground",
       )}
     >
+      <span
+        aria-hidden="true"
+        className="h-1.5 w-1.5 rounded-full bg-current"
+      />
       {t(`monitor.status.${status(host, state)}`)}
     </Badge>
   );
@@ -344,16 +384,17 @@ export function MonitorPanels({
     const memory =
       s?.memTotal && s.memUsed != null ? (s.memUsed / s.memTotal) * 100 : null;
     return (
-      <div className={cn("grid grid-cols-2 gap-3", large && "gap-5")}>
-        <div>
-          <div className="text-xs text-muted-foreground">
+      <div className={cn("grid grid-cols-2 gap-2", large && "gap-3")}>
+        <div className="min-w-0 rounded-lg border border-border/40 bg-muted/20 p-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Cpu size={13} className="text-sky-600 dark:text-sky-400" />
             {t("monitor.cpu")}
           </div>
-          <div className="text-lg tabular-nums">
-            {percent(s?.cpu)}{" "}
-            <span className="text-xs text-muted-foreground">
-              {s?.cpuCores ? t("monitor.cores", { count: s.cpuCores }) : ""}
-            </span>
+          <div className="mt-2 text-xl font-semibold leading-tight tabular-nums text-foreground">
+            {percent(s?.cpu)}
+          </div>
+          <div className="mt-1 min-h-4 text-[10px] text-muted-foreground">
+            {s?.cpuCores ? t("monitor.cores", { count: s.cpuCores }) : "--"}
           </div>
           {panel && (
             <MonitorTrend
@@ -362,15 +403,19 @@ export function MonitorPanels({
               range={panel.range}
               interval={panel.interval}
               label={t("monitor.cpuTrend")}
+              className="mt-2 h-14 text-sky-600 dark:text-sky-400"
             />
           )}
         </div>
-        <div>
-          <div className="text-xs text-muted-foreground">
+        <div className="min-w-0 rounded-lg border border-border/40 bg-muted/20 p-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <MemoryStick size={13} className="text-emerald-600 dark:text-emerald-400" />
             {t("monitor.memory")}
           </div>
-          <div className="text-lg tabular-nums">{percent(memory)}</div>
-          <div className="text-[10px] text-muted-foreground">
+          <div className="mt-2 text-xl font-semibold leading-tight tabular-nums text-foreground">
+            {percent(memory)}
+          </div>
+          <div className="mt-1 min-h-4 text-[10px] text-muted-foreground">
             {capacity(s?.memUsed)} / {capacity(s?.memTotal)}
           </div>
           {panel && (
@@ -380,6 +425,7 @@ export function MonitorPanels({
               range={panel.range}
               interval={panel.interval}
               label={t("monitor.memoryTrend")}
+              className="mt-2 h-14 text-emerald-600 dark:text-emerald-400"
             />
           )}
         </div>
@@ -388,6 +434,18 @@ export function MonitorPanels({
   };
   const hostDetail = hosts.find((h) => h.id === detail);
   const detailState = detail ? runtime.hosts[detail] : undefined;
+  const panelHosts =
+    panel?.hostIds.map((id) => ({
+      host: hosts.find((h) => h.id === id),
+      state: runtime.hosts[id],
+    })) ?? [];
+  const liveCount = panelHosts.filter(
+    ({ host, state }) => status(host, state) === "live",
+  ).length;
+  const attentionCount = panelHosts.filter(
+    ({ host, state }) =>
+      !host || monitorNeedsAttention(state, panel?.interval ?? 10),
+  ).length;
   const hasAside = !!editor || !!detail;
   return (
     <section
@@ -395,7 +453,7 @@ export function MonitorPanels({
       data-section="vault-monitor"
     >
       <VaultPageHeader>
-        <Activity size={18} />
+        <Gauge size={18} />
         <h1 className="font-semibold text-sm">{t("monitor.title")}</h1>
         <div className="flex-1" />
         {!!runtime.count && (
@@ -433,7 +491,7 @@ export function MonitorPanels({
         >
           {!panel ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-              <Activity size={36} className="text-muted-foreground" />
+              <Gauge size={36} className="text-muted-foreground" />
               <h2 className="font-semibold">{t("monitor.empty")}</h2>
               <p className="max-w-sm text-sm text-muted-foreground">
                 {t("monitor.emptyHint")}
@@ -598,29 +656,53 @@ export function MonitorPanels({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-xs text-muted-foreground border-b border-border/40">
-                <span>
-                  {t("monitor.selectedCount", { count: panel.hostIds.length })}
-                </span>
-                <span>
-                  {t("monitor.liveCount", {
-                    count: panel.hostIds.filter(
-                      (id) => runtime.hosts[id]?.status === "live",
-                    ).length,
-                  })}
-                </span>
+              <div className="grid grid-cols-3 gap-2 px-4 py-3">
+                {[
+                  {
+                    icon: Server,
+                    label: t("monitor.hosts"),
+                    count: panel.hostIds.length,
+                    tone: "text-primary bg-primary/10",
+                  },
+                  {
+                    icon: CircleCheck,
+                    label: t("monitor.status.live"),
+                    count: running ? liveCount : "--",
+                    tone: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10",
+                  },
+                  {
+                    icon: AlertCircle,
+                    label: t("monitor.needsAttention"),
+                    count: running ? attentionCount : "--",
+                    tone: "text-amber-700 dark:text-amber-400 bg-amber-500/10",
+                  },
+                ].map(({ icon: Icon, label, count, tone }) => (
+                  <div key={label} className="flex min-w-0 items-center gap-2.5 rounded-lg border border-border/50 bg-card px-3 py-2.5">
+                    <span className={cn("hidden min-[900px]:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tone)}>
+                      <Icon size={16} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-lg font-semibold leading-tight tabular-nums">{count}</div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">{label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-end px-4 pb-2 border-b border-border/40">
                 <Button
                   variant={panel.attentionOnly ? "secondary" : "ghost"}
                   size="sm"
-                  className="ml-auto h-7 text-xs"
+                  className="h-7 gap-1.5 text-xs"
+                  aria-pressed={panel.attentionOnly}
                   onClick={() => {
                     void patchPanel({ attentionOnly: !panel.attentionOnly });
                   }}
                 >
+                  <AlertCircle size={13} />
                   {t("monitor.attention")}
                 </Button>
               </div>
-              <ScrollArea className="min-h-0 flex-1">
+              <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
                 <div className="p-4">
                   {!rows.length ? (
                     <p className="p-8 text-center text-sm text-muted-foreground">
@@ -632,7 +714,7 @@ export function MonitorPanels({
                         <button
                           key={id}
                           className={cn(
-                            "min-w-0 rounded-xl border border-border/60 bg-card p-4 text-left transition-colors hover:bg-muted/30 focus-visible:outline focus-visible:outline-primary",
+                            "min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card text-left transition-colors hover:border-primary/40 focus-visible:outline focus-visible:outline-primary",
                             status(host, state) !== "live" &&
                               "text-muted-foreground",
                           )}
@@ -641,9 +723,14 @@ export function MonitorPanels({
                             setDetail(id);
                           }}
                         >
-                          <div className="flex items-start gap-2 mb-4">
+                          <div className="flex items-center gap-3 border-b border-border/40 bg-muted/15 px-4 py-3">
+                            {host ? (
+                              <DistroAvatar host={host} fallback={host.label} size="log" />
+                            ) : (
+                              <Server size={24} className="shrink-0 text-muted-foreground" />
+                            )}
                             <div className="min-w-0 flex-1">
-                              <h3 className="truncate text-sm font-semibold">
+                              <h3 className="truncate text-sm font-semibold text-foreground">
                                 {host?.label ?? t("monitor.missingHost")}
                               </h3>
                               <p className="truncate text-xs text-muted-foreground">
@@ -652,54 +739,48 @@ export function MonitorPanels({
                             </div>
                             {stateBadge(host, state)}
                           </div>
-                          {renderMetrics(state)}
-                          <div className="mt-3 border-t border-border/40 pt-3">
-                            <div className="flex items-center justify-between text-xs">
-                              <span>{t("monitor.rootDisk")}</span>
-                              <span className="tabular-nums">
-                                {percent(state?.stats?.diskPercent)}
+                          <div className={cn("p-3", status(host, state) !== "live" && "opacity-60")}>
+                            {renderMetrics(state)}
+                            <div className="mt-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+                              <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <HardDrive size={13} className="text-amber-600 dark:text-amber-400" />
+                                <span>{t("monitor.rootDisk")}</span>
+                              </div>
+                              <ResourceBar label="" value={state?.stats?.diskPercent} size="md" />
+                              {state?.stats?.disks
+                                .filter(
+                                  (d) => d.mountPoint !== "/" && d.percent >= 90,
+                                )
+                                .map((d) => (
+                                  <p
+                                    key={d.mountPoint}
+                                    className="mt-1 text-xs text-destructive"
+                                  >
+                                    {d.mountPoint} {percent(d.percent)}
+                                  </p>
+                                ))}
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] tabular-nums">
+                              <span className="flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-2">
+                                <ArrowDown size={13} className="shrink-0 text-sky-600 dark:text-sky-400" />
+                                {rate(
+                                  state?.stats?.networkReady
+                                    ? state.stats.netRxSpeed
+                                    : null,
+                                )}
+                              </span>
+                              <span className="flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-2">
+                                <ArrowUp size={13} className="shrink-0 text-violet-600 dark:text-violet-400" />
+                                {rate(
+                                  state?.stats?.networkReady
+                                    ? state.stats.netTxSpeed
+                                    : null,
+                                )}
                               </span>
                             </div>
-                            <div className="mt-1.5 h-1 rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-primary"
-                                style={{
-                                  width: `${Math.min(100, state?.stats?.diskPercent ?? 0)}%`,
-                                }}
-                              />
-                            </div>
-                            {state?.stats?.disks
-                              .filter(
-                                (d) => d.mountPoint !== "/" && d.percent >= 90,
-                              )
-                              .map((d) => (
-                                <p
-                                  key={d.mountPoint}
-                                  className="mt-1 text-xs text-destructive"
-                                >
-                                  {d.mountPoint} {percent(d.percent)}
-                                </p>
-                              ))}
                           </div>
-                          <div className="mt-3 flex justify-between text-xs tabular-nums">
-                            <span className="flex items-center gap-1">
-                              <ArrowDown size={12} />
-                              {rate(
-                                state?.stats?.networkReady
-                                  ? state.stats.netRxSpeed
-                                  : null,
-                              )}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <ArrowUp size={12} />
-                              {rate(
-                                state?.stats?.networkReady
-                                  ? state.stats.netTxSpeed
-                                  : null,
-                              )}
-                            </span>
-                          </div>
-                          <p className="mt-3 text-[10px] text-muted-foreground">
+                          <p className="flex items-center gap-1.5 border-t border-border/40 bg-muted/15 px-4 py-2 text-[10px] text-muted-foreground">
+                            <Clock3 size={11} />
                             {state?.at
                               ? t("monitor.updatedAt", {
                                   time: new Date(state.at).toLocaleTimeString(),
@@ -711,7 +792,7 @@ export function MonitorPanels({
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-border/60">
-                      <table className="w-full min-w-[680px] text-xs">
+                      <table className="w-full min-w-[840px] text-xs">
                         <thead className="bg-muted/30 text-muted-foreground">
                           <tr>
                             {[
@@ -746,17 +827,24 @@ export function MonitorPanels({
                               >
                                 <td className="px-3 py-3">
                                   <button
-                                    className="text-left hover:underline"
+                                    className="flex items-center gap-2.5 text-left hover:underline"
                                     onClick={() => {
                                       setEditor(null);
                                       setDetail(id);
                                     }}
                                   >
-                                    <div className="font-medium">
-                                      {host?.label ?? t("monitor.missingHost")}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground">
-                                      {host?.hostname ?? id}
+                                    {host ? (
+                                      <DistroAvatar host={host} fallback={host.label} size="md" />
+                                    ) : (
+                                      <Server size={24} className="shrink-0 text-muted-foreground" />
+                                    )}
+                                    <div className="min-w-0 max-w-52">
+                                      <div className="truncate font-medium">
+                                        {host?.label ?? t("monitor.missingHost")}
+                                      </div>
+                                      <div className="truncate text-[10px] text-muted-foreground">
+                                        {host?.hostname ?? id}
+                                      </div>
                                     </div>
                                   </button>
                                 </td>
@@ -764,17 +852,20 @@ export function MonitorPanels({
                                   {stateBadge(host, state)}
                                 </td>
                                 <td className="px-3 tabular-nums">
-                                  {percent(s?.cpu)}
+                                  <ResourceBar label="" value={s?.cpu} />
                                 </td>
                                 <td className="px-3 tabular-nums">
-                                  {percent(
-                                    s?.memTotal && s.memUsed != null
-                                      ? (s.memUsed / s.memTotal) * 100
-                                      : null,
-                                  )}
+                                  <ResourceBar
+                                    label=""
+                                    value={
+                                      s?.memTotal && s.memUsed != null
+                                        ? (s.memUsed / s.memTotal) * 100
+                                        : null
+                                    }
+                                  />
                                 </td>
                                 <td className="px-3 tabular-nums">
-                                  {percent(s?.diskPercent)}
+                                  <ResourceBar label="" value={s?.diskPercent} />
                                   {s?.disks.some((d) => d.percent >= 90) && (
                                     <span className="ml-1 text-destructive">
                                       !
@@ -974,7 +1065,13 @@ export function MonitorPanels({
             className="max-[1000px]:!w-full max-[1000px]:border-l-0"
           >
             <AsidePanelContent>
-              {stateBadge(hostDetail, detailState)}
+              <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/20 p-3">
+                {hostDetail && <DistroAvatar host={hostDetail} fallback={hostDetail.label} size="lg" />}
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 truncate text-xs text-muted-foreground">{hostDetail?.hostname ?? detail}</div>
+                  {stateBadge(hostDetail, detailState)}
+                </div>
+              </div>
               {["login", "error", "disconnected"].includes(
                 detailState?.status ?? "",
               ) && (

@@ -37,6 +37,7 @@ export const ruMonitorMessages = {
   "monitor.sort.disk": "По корневому диску",
   "monitor.selectedCount": "Выбрано серверов: {count}",
   "monitor.liveCount": "Обновлено: {count}",
+  "monitor.needsAttention": "Требуют внимания",
   "monitor.attention": "Требуют внимания",
   "monitor.noMatches": "Нет подходящих серверов",
   "monitor.host": "Сервер",

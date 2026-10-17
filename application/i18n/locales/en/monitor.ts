@@ -38,6 +38,7 @@ export const enMonitorMessages = {
   "monitor.sort.disk": "Highest root disk",
   "monitor.selectedCount": "Selected hosts: {count}",
   "monitor.liveCount": "Reporting: {count}",
+  "monitor.needsAttention": "Needs attention",
   "monitor.attention": "Needs attention only",
   "monitor.noMatches": "No matching hosts",
   "monitor.host": "Host",

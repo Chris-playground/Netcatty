@@ -36,6 +36,7 @@ export const zhTWMonitorMessages = {
   "monitor.sort.disk": "根分割區從高到低",
   "monitor.selectedCount": "已選 {count} 台主機",
   "monitor.liveCount": "{count} 台已更新",
+  "monitor.needsAttention": "需關注",
   "monitor.attention": "只看需關注",
   "monitor.noMatches": "沒有符合條件的主機",
   "monitor.host": "主機",

@@ -38,6 +38,7 @@ export const esMonitorMessages = {
   "monitor.sort.disk": "Mayor uso del disco raíz",
   "monitor.selectedCount": "Equipos seleccionados: {count}",
   "monitor.liveCount": "Actualizados: {count}",
+  "monitor.needsAttention": "Requieren atención",
   "monitor.attention": "Solo requieren atención",
   "monitor.noMatches": "No hay equipos coincidentes",
   "monitor.host": "Equipo",

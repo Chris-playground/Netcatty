@@ -36,6 +36,7 @@ export const zhCNMonitorMessages = {
   "monitor.sort.disk": "根分区从高到低",
   "monitor.selectedCount": "已选 {count} 台主机",
   "monitor.liveCount": "{count} 台已更新",
+  "monitor.needsAttention": "需关注",
   "monitor.attention": "只看需关注",
   "monitor.noMatches": "没有符合条件的主机",
   "monitor.host": "主机",
