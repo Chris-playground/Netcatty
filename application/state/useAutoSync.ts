@@ -1,3 +1,4 @@
+import { STORAGE_KEY_MONITOR_PANELS } from '../../infrastructure/config/storageKeys';
 /**
  * useAutoSync - Auto-sync Hook for Cloud Sync
  * 
@@ -261,7 +262,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       const chatChanged = key === STORAGE_KEY_AI_SESSIONS
         && localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled === true;
       if (!SYNCABLE_SETTING_STORAGE_KEY_SET.has(key)
-        && key !== STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS && !chatChanged) return;
+        && key !== STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS && key !== STORAGE_KEY_MONITOR_PANELS && !chatChanged) return;
       setSyncableSettingsStorageVersion((v) => v + 1);
     };
 

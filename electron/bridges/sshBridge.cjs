@@ -863,6 +863,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           password: jump.password,
           logPrefix: `[Chain] Hop ${i + 1}/${totalHops}`,
           scope: keyboardInteractiveScope,
+          allowSavePassword: options._monitorMode !== true,
           bootEpoch: options.bootEpoch,
           getAuthBanner: () => authBanner,
           shouldSkipAutoFill: () => shouldSkipKiPasswordAutoFill(hopAuthPhase),
@@ -1439,6 +1440,7 @@ const sessionOpsApi = createSessionOpsApi({
   getServerStats: undefined,
 });
 const {
+  getStatsForContext,
   getSessionRemoteInfo,
   getSessionDistroInfo,
   readRemoteHistory,
@@ -1450,6 +1452,18 @@ const {
   getServerStats,
   setSessionEncoding,
 } = sessionOpsApi;
+
+const { createMonitorService } = require("./monitorBridge.cjs");
+const monitorService = createMonitorService({ startConnection: startSSHSession, cancelConnection: cancelTestConnection, getStats: getStatsForContext,
+  prepareOptions: (options) => require("./sshBridge/startSession.cjs").prepareAgentForwardingOptions(options, getAvailableForwardingAgentSocket),
+});
+const monitorHandlers = {
+  "netcatty:monitor:update": (event, payload) => monitorService.reconcile(event, payload),
+  "netcatty:monitor:snapshot": (event) => monitorService.snapshot(event),
+  "netcatty:monitor:stop-all": () => monitorService.stopAll(),
+  "netcatty:monitor:owner-close": (_event, owner) => monitorService.removeOwner(owner),
+  "netcatty:monitor:retry": (event, hostId) => monitorService.retry(event, hostId),
+};
 
 /**
  * Register IPC handlers for SSH operations
@@ -1491,6 +1505,19 @@ function registerOwnedAuthResponseHandler(ipcMain, terminalWorkerManager, channe
 
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
+  for (const [channel, handler] of Object.entries(monitorHandlers)) {
+    if (terminalWorkerManager) {
+      const tracked = new WeakSet();
+      ipcMain.handle(channel, (event, payload) => {
+        if (!tracked.has(event.sender)) {
+          tracked.add(event.sender);
+          event.sender.once("destroyed", () => terminalWorkerManager.request("netcatty:monitor:owner-close", event.sender.id, { webContentsId: event.sender.id }).catch(() => {}));
+        }
+        return terminalWorkerManager.request(channel, payload, { webContentsId: event.sender.id });
+      });
+    } else ipcMain.handle(channel, handler);
+  }
+
   if (terminalWorkerManager) {
     [
       "netcatty:start",
@@ -1587,6 +1614,7 @@ function registerHandlers(ipcMain, options = {}) {
 
 module.exports = {
   init,
+  stopAllMonitoring: () => monitorService.stopAll(),
   registerHandlers,
   connectThroughChain,
   buildAlgorithms,
