@@ -291,6 +291,19 @@ async function main() {
     "list view opens",
   );
   assert.ok((await count()) < 50, "list renders only visible rows");
+  for (const position of [0, 450, 100000]) {
+    await run(
+      `document.querySelector('[data-section=vault-monitor-list]').scrollLeft=${position}`,
+    );
+    await run("new Promise(r=>requestAnimationFrame(r))");
+    assert.ok(
+      await run(
+        `(()=>{const viewport=document.querySelector('[data-section=vault-monitor-list]');const action=document.querySelector('tbody tr td:last-child');return window.innerWidth-viewport.getBoundingClientRect().right>=15 && window.innerWidth-action.getBoundingClientRect().right>=15})()`,
+      ),
+      "sticky actions retain the right page gutter at every horizontal scroll position",
+    );
+  }
+
   await scroll("0");
   await checkActionContrast("list");
   const columnOrder = await run(

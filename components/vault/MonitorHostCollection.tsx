@@ -62,7 +62,7 @@ export function MonitorHostCollection<T extends { id: string }>({
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    const measure = () => setWidth(Math.max(0, element.clientWidth - 32));
+    const measure = () => setWidth(Math.max(0, element.clientWidth));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
@@ -83,128 +83,132 @@ export function MonitorHostCollection<T extends { id: string }>({
     0,
   );
   return (
-    <div
-      ref={scrollRef}
-      className="min-h-0 min-w-0 flex-1 overflow-auto"
-      data-section="vault-monitor-list"
-      data-monitor-virtual={view}
-    >
-      <div className="p-4">
-        {view === "charts" ? (
-          <div
-            className="relative"
-            style={{ height: virtualizer.getTotalSize() }}
-          >
-            {virtualizer.getVirtualItems().map((row) => (
-              <div
-                key={row.key}
-                data-monitor-virtual-row={row.index}
-                className="absolute left-0 top-0 grid w-full gap-4"
-                style={{
-                  height: MONITOR_CARD_HEIGHT,
-                  gridTemplateColumns: `repeat(${columns},minmax(0,1fr))`,
-                  transform: `translateY(${row.start - scrollMargin}px)`,
-                }}
-              >
-                {items
-                  .slice(row.index * columns, (row.index + 1) * columns)
-                  .map((item) => (
-                    <React.Fragment key={item.id}>
-                      {renderCard(item)}
-                    </React.Fragment>
-                  ))}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <table
-            className="block text-xs"
-            style={{ width: tableWidth }}
-            aria-rowcount={items.length + 1}
-          >
-            <thead className="sticky top-0 z-20 block bg-background text-muted-foreground">
-              <tr
-                className="grid h-10"
-                style={{ gridTemplateColumns: template }}
-              >
-                {MONITOR_COLUMNS.map((column) => (
-                  <th
-                    key={column.key}
-                    data-monitor-column={column.key}
-                    className={`relative flex min-w-0 items-center px-3 text-left text-[11px] font-medium${column.key === "terminal" ? " sticky right-0 z-10 bg-background" : ""}`}
-                  >
-                    <span
-                      className="truncate"
-                      title={t(`monitor.${column.key}`)}
-                    >
-                      {column.key === "terminal" ? (
-                        <span className="sr-only">
-                          {t("monitor.openTerminal")}
-                        </span>
-                      ) : (
-                        t(`monitor.${column.key}`)
-                      )}
-                    </span>
-                    <div
-                      role="separator"
-                      aria-orientation="vertical"
-                      aria-label={t("monitor.resizeColumn", {
-                        column: t(`monitor.${column.key}`),
-                      })}
-                      aria-valuenow={widths[column.key]}
-                      aria-valuemin={column.min}
-                      aria-valuemax={column.key === "terminal" ? 200 : 640}
-                      tabIndex={0}
-                      className="absolute inset-y-1 right-0 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-1 after:right-0.5 after:w-px hover:after:bg-primary focus-visible:after:bg-primary"
-                      onPointerDown={(event) => startResize(column.key, event)}
-                      onDoubleClick={() => resize(column.key, column.width)}
-                      onKeyDown={(event) => {
-                        if (
-                          event.key === "ArrowLeft" ||
-                          event.key === "ArrowRight"
-                        ) {
-                          event.preventDefault();
-                          resize(
-                            column.key,
-                            widths[column.key] +
-                              (event.key === "ArrowRight" ? 1 : -1) *
-                                (event.shiftKey ? 32 : 8),
-                          );
-                        }
-                      }}
-                    />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody
-              className="relative block"
+    <div className="min-h-0 min-w-0 flex-1 px-4">
+      <div
+        ref={scrollRef}
+        className="h-full min-w-0 overflow-auto"
+        data-section="vault-monitor-list"
+        data-monitor-virtual={view}
+      >
+        <div className="py-4">
+          {view === "charts" ? (
+            <div
+              className="relative"
               style={{ height: virtualizer.getTotalSize() }}
             >
               {virtualizer.getVirtualItems().map((row) => (
-                <tr
+                <div
                   key={row.key}
-                  {...rowProps(items[row.index])}
-                  ref={virtualizer.measureElement}
-                  data-index={row.index}
-                  aria-rowindex={row.index + 2}
+                  data-monitor-virtual-row={row.index}
+                  className="absolute left-0 top-0 grid w-full gap-4"
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: template,
-                    minHeight: 72,
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: tableWidth,
+                    height: MONITOR_CARD_HEIGHT,
+                    gridTemplateColumns: `repeat(${columns},minmax(0,1fr))`,
                     transform: `translateY(${row.start - scrollMargin}px)`,
                   }}
                 >
-                  {renderCells(items[row.index])}
-                </tr>
+                  {items
+                    .slice(row.index * columns, (row.index + 1) * columns)
+                    .map((item) => (
+                      <React.Fragment key={item.id}>
+                        {renderCard(item)}
+                      </React.Fragment>
+                    ))}
+                </div>
               ))}
-            </tbody>
-          </table>
-        )}
+            </div>
+          ) : (
+            <table
+              className="block text-xs"
+              style={{ width: tableWidth }}
+              aria-rowcount={items.length + 1}
+            >
+              <thead className="sticky top-0 z-20 block bg-background text-muted-foreground">
+                <tr
+                  className="grid h-10"
+                  style={{ gridTemplateColumns: template }}
+                >
+                  {MONITOR_COLUMNS.map((column) => (
+                    <th
+                      key={column.key}
+                      data-monitor-column={column.key}
+                      className={`relative flex min-w-0 items-center px-3 text-left text-[11px] font-medium${column.key === "terminal" ? " sticky right-0 z-10 bg-background" : ""}`}
+                    >
+                      <span
+                        className="truncate"
+                        title={t(`monitor.${column.key}`)}
+                      >
+                        {column.key === "terminal" ? (
+                          <span className="sr-only">
+                            {t("monitor.openTerminal")}
+                          </span>
+                        ) : (
+                          t(`monitor.${column.key}`)
+                        )}
+                      </span>
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={t("monitor.resizeColumn", {
+                          column: t(`monitor.${column.key}`),
+                        })}
+                        aria-valuenow={widths[column.key]}
+                        aria-valuemin={column.min}
+                        aria-valuemax={column.key === "terminal" ? 200 : 640}
+                        tabIndex={0}
+                        className="absolute inset-y-1 right-0 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-1 after:right-0.5 after:w-px hover:after:bg-primary focus-visible:after:bg-primary"
+                        onPointerDown={(event) =>
+                          startResize(column.key, event)
+                        }
+                        onDoubleClick={() => resize(column.key, column.width)}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "ArrowLeft" ||
+                            event.key === "ArrowRight"
+                          ) {
+                            event.preventDefault();
+                            resize(
+                              column.key,
+                              widths[column.key] +
+                                (event.key === "ArrowRight" ? 1 : -1) *
+                                  (event.shiftKey ? 32 : 8),
+                            );
+                          }
+                        }}
+                      />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody
+                className="relative block"
+                style={{ height: virtualizer.getTotalSize() }}
+              >
+                {virtualizer.getVirtualItems().map((row) => (
+                  <tr
+                    key={row.key}
+                    {...rowProps(items[row.index])}
+                    ref={virtualizer.measureElement}
+                    data-index={row.index}
+                    aria-rowindex={row.index + 2}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: template,
+                      minHeight: 72,
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: tableWidth,
+                      transform: `translateY(${row.start - scrollMargin}px)`,
+                    }}
+                  >
+                    {renderCells(items[row.index])}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
