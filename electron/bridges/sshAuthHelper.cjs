@@ -1264,9 +1264,13 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
   const releaseAcquiredFidoResources = () => {
     if (fidoResourcesReleased) return;
     fidoResourcesReleased = true;
-    // Shared Windows system agent: drop our hold and only ssh-add -d when this
-    // was the last session still using that public identity.
-    if (!ownedFidoAgent && sharedAgentIdentities.length > 0 && socketPath) {
+    // Netcatty-owned agents outlive a single session (releaseFidoAgent keeps
+    // the process alive while other sessions hold refs), just like the shared
+    // Windows system agent. In both cases: drop our hold and only ssh-add -d
+    // when this was the last session still using that public identity —
+    // otherwise one session's SK identity stays advertised to the survivors
+    // (and to any agent-forwarding delegate) after it closed.
+    if (sharedAgentIdentities.length > 0 && socketPath) {
       const {
         resolveSshAddBinary,
         releaseSharedAgentIdentity,
@@ -1366,7 +1370,10 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
           key: identityPath,
           identityPath,
         }));
-      if (!ownedFidoAgent && sharedAgentIdentities.length > 0) {
+      if (sharedAgentIdentities.length > 0) {
+        // Reference-count identities for owned agents too: the owned agent is
+        // a long-lived singleton, so closing one session must drop only that
+        // session's hold, not leave its SK identity advertised to survivors.
         const { retainSharedAgentIdentity } = require("./systemSshAgent.cjs");
         let transferredSkTempCleanup = false;
         for (const entry of sharedAgentIdentities) {
@@ -1431,8 +1438,10 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
     throw error;
   } finally {
     if (skTempCleanup) {
-      // Owned agents die with their identities. Shared agents transfer temp
-      // cleanup into the identity refcount above; anything left here is unused.
+      // Any session that adopted the staging dir into the identity refcount
+      // above transfers cleanup (owned and shared agents alike); the last
+      // release removes the dir after ssh-add -d finishes. Anything left here
+      // is an unused/redundant temp dir.
       fs.promises.rm(skTempCleanup, { recursive: true, force: true }).catch(() => {});
     }
   }

@@ -233,6 +233,93 @@ test("prepareSystemSshAgentForAuth releases FIDO resources when preparation thro
   }
 });
 
+test("owned FIDO agent reference-counts identities: ssh-add -d only on the last session release", async () => {
+  const fidoAgentManager = require("./fidoAgentManager.cjs");
+  const fidoAskpass = require("./fidoAskpass.cjs");
+  const systemSshAgent = require("./systemSshAgent.cjs");
+  const childProcess = require("node:child_process");
+  const originalAcquire = fidoAgentManager.acquireFidoAgent;
+  const originalRelease = fidoAgentManager.releaseFidoAgent;
+  const originalReleaseLease = fidoAskpass.releaseFidoAskpassLease;
+  const originalPrepare = systemSshAgent.prepareSystemSshAgent;
+  const originalExecFile = childProcess.execFile;
+  const skPub =
+    "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAABHNzaDo= test";
+  const blob = systemSshAgent.publicKeyBlob(skPub);
+  const pathA = "/tmp/netcatty-owned-sk-a";
+  const pathB = "/tmp/netcatty-owned-sk-b";
+  const deleted = [];
+  let generation = 0;
+
+  // The owned agent is a Netcatty-managed singleton shared across concurrent
+  // sessions; releaseFidoAgent only drops one refcount and keeps it alive.
+  fidoAgentManager.acquireFidoAgent = async () => {
+    generation += 1;
+    return {
+      socketPath: "/tmp/netcatty-owned-agent.sock",
+      askpassEnv: {
+        SSH_ASKPASS: "/bin/true",
+        NETCATTY_FIDO_ASKPASS_LEASE: `lease-${generation}`,
+      },
+      owned: true,
+      generation,
+    };
+  };
+  fidoAgentManager.releaseFidoAgent = () => {};
+  fidoAskpass.releaseFidoAskpassLease = () => {};
+  let prepCount = 0;
+  systemSshAgent.prepareSystemSshAgent = async () => {
+    prepCount += 1;
+    const identityPath = prepCount === 1 ? pathA : pathB;
+    return {
+      getIdentities: (cb) => cb(null, []),
+      sign: (_k, _d, _o, cb) => cb(new Error("unused")),
+      _netcattyNewlyLoadedIdentityPaths: [identityPath],
+      _netcattySharedAgentIdentities: [{ key: blob, identityPath }],
+    };
+  };
+  childProcess.execFile = (file, args, opts, cb) => {
+    if (Array.isArray(args) && args[0] === "-d") {
+      deleted.push(args[1]);
+      if (typeof cb === "function") cb(null, "", "");
+      return { kill() {} };
+    }
+    return originalExecFile(file, args, opts, cb);
+  };
+
+  try {
+    systemSshAgent.resetSharedAgentIdentityRefsForTests();
+    const { prepareSystemSshAgentForAuth } = require("./sshAuthHelper.cjs");
+    const agentA = await prepareSystemSshAgentForAuth({
+      useSshAgent: true,
+      useFidoAgent: true,
+      agentPublicKeys: [skPub],
+      loadIdentityFilesIntoAgent: true,
+      identityFilePaths: [pathA],
+    }, "[test-owned-a]");
+    const agentB = await prepareSystemSshAgentForAuth({
+      useSshAgent: true,
+      useFidoAgent: true,
+      agentPublicKeys: [skPub],
+      loadIdentityFilesIntoAgent: true,
+      identityFilePaths: [pathB],
+    }, "[test-owned-b]");
+
+    // Closing session A must not leave A's identity advertised to session B.
+    agentA._releaseNetcattyFidoAgent();
+    assert.deepEqual(deleted, [], "first release must keep the identity for the surviving session");
+    agentB._releaseNetcattyFidoAgent();
+    assert.deepEqual(deleted, [pathA], "last release removes the identity from the owned agent");
+  } finally {
+    fidoAgentManager.acquireFidoAgent = originalAcquire;
+    fidoAgentManager.releaseFidoAgent = originalRelease;
+    fidoAskpass.releaseFidoAskpassLease = originalReleaseLease;
+    systemSshAgent.prepareSystemSshAgent = originalPrepare;
+    childProcess.execFile = originalExecFile;
+    systemSshAgent.resetSharedAgentIdentityRefsForTests();
+  }
+});
+
 test("prepareSystemSshAgentForAuth removes newly loaded identities from a shared Windows agent on release", async () => {
   const fidoAgentManager = require("./fidoAgentManager.cjs");
   const fidoAskpass = require("./fidoAskpass.cjs");

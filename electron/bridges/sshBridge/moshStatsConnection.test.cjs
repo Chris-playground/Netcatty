@@ -320,6 +320,71 @@ test("automatic stats auth keeps local-key fallback with an explicit agent", asy
   ]);
 });
 
+test("sk-* key handle + certificate routes to the prepared hardware-backed agent, not a software cert agent", async () => {
+  let agentConstructions = 0;
+  const { api, sessions } = makeApi({
+    NetcattyAgent: class {
+      constructor() {
+        agentConstructions += 1;
+      }
+    },
+    prepareSystemSshAgentForAuth: async () => "/tmp/prepared-fido-agent.sock",
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      authMethod: "auto",
+      useSshAgent: true,
+      // SK private material parses non-interactively but can never sign
+      // locally — building a software certificate agent around it fails auth
+      // and blocks prepareSystemSshAgentForAuth below.
+      privateKey: "sk-ssh-ed25519@openssh.com AAAA handle test",
+      certificate: "sk-ssh-ed25519-cert-v01@openssh.com AAAA cert test",
+      identityFilePaths: [],
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick();
+
+  assert.equal(agentConstructions, 0, "software certificate agent must not be built from an SK handle");
+  assert.equal(FakeSSHClient.instances[0].connectOpts.agent, "/tmp/prepared-fido-agent.sock");
+});
+
+test("path-backed sk-* key handles are filtered out of the companion's identity files too", async () => {
+  let agentConstructions = 0;
+  const { api, sessions } = makeApi({
+    NetcattyAgent: class {
+      constructor() {
+        agentConstructions += 1;
+      }
+    },
+    readFileNoFollow: async () => "sk-ecdsa-sha2-nistp256@openssh.com AAAA handle test",
+    prepareSystemSshAgentForAuth: async () => "/tmp/prepared-fido-agent.sock",
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      authMethod: "auto",
+      useSshAgent: true,
+      certificate: "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com AAAA cert test",
+      identityFilePaths: ["~/.ssh/id_sk"],
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick();
+
+  assert.equal(agentConstructions, 0, "software certificate agent must not be built from a path-backed SK handle");
+  assert.equal(FakeSSHClient.instances[0].connectOpts.agent, "/tmp/prepared-fido-agent.sock");
+});
+
 test("falls back to ssh-agent when a socket is available and no inline creds", async () => {
   // The system ssh used by the Mosh handshake authenticates via the local
   // agent by default, so the companion should too — regardless of the
