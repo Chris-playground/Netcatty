@@ -191,14 +191,14 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 
 ## 9. Implementation acceptance checklist
 
-- [ ] Named panels: create/edit/copy/delete, ordered cross-group host references, list/cards, search/sort/attention, details and terminal action.
-- [ ] Existing Vault components/themes/forms; every visible addition translated for all five locales.
-- [ ] Config only: local storage, concurrent window field edits, cloud merge/deletions/legacy payloads, JSON import/export and protective backups.
-- [ ] Shared SSH pool, full identity, joined dials, explicit monitor lease, no shell or startup commands; serialized authentication.
-- [ ] One collection/baseline/history per compatible transport across panels/windows/terminal; cancellation releases only owned demand.
-- [ ] Memory-only samples/status/errors; bounded sparse trends, honest first samples, stale readings and unsupported targets.
-- [ ] Lock/sleep/offline/close/quit cleanup; restart restores stopped configuration only.
-- [ ] Controlled SSH integration, cancellation/reuse and representative scale checks; real Electron complete flows, themes, narrow windows, languages.
+- [x] Named panels: create/edit/copy/delete, ordered cross-group host references, list/cards, search/sort/attention, details and terminal action.
+- [x] Existing Vault components/themes/forms; every visible addition translated for all five locales.
+- [x] Config only: local storage, concurrent window field edits, cloud merge/deletions/legacy payloads, JSON import/export and protective backups.
+- [x] Shared SSH pool, full identity, joined dials, explicit monitor lease, no shell or startup commands; serialized authentication.
+- [x] One collection/baseline/history per compatible transport across panels/windows/terminal; cancellation releases only owned demand.
+- [x] Memory-only samples/status/errors; bounded sparse trends, honest first samples, stale readings and unsupported targets.
+- [x] Lock/sleep/offline/close/quit cleanup; restart restores stopped configuration only.
+- [x] Controlled SSH integration, cancellation/reuse and representative scale checks; real Electron complete flows, themes, narrow windows, languages.
 - [ ] Focused and required checks, independent current-head reviews, exact-head remote review, CI and review-thread gates; verify after merge.
 
 ## 10. Implementation notes (2026-10-17)
@@ -207,9 +207,19 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 - Monitoring runs in the terminal worker, using the existing SSH registry's full identity and joined dials, with an explicit `monitor` lease. Authentication reuses the existing SSH preparation, host-key, keyboard-interactive and jump-host paths. No terminal session or shell is created for monitoring.
 - Ordinary terminal opens retain their existing fresh-login policy. If a terminal already exists, monitoring borrows its compatible transport. Distinct transports with the exact same normalized identity share the metrics cache and baseline too, so a required fresh terminal login does not duplicate collection.
 - Shared collection/history is volatile. Each history keeps at most 180 points from the last 30 minutes, sampled no faster than every 10 seconds. At most 256 unique monitoring identities run at once; the metrics identity cache is bounded to 512 entries and periodically prunes expired histories. No readings, errors, running intent or credentials enter the panel storage shape.
-- Known network devices are rejected using the existing renderer banner rules, extracted into one shared module. Recognized single-channel peers are rejected before an extra command runs. Monitor-initiated samples omit process and GPU queries. The same existing Linux/macOS parser, disk handling, CPU deltas and network deltas serve terminal and monitoring readers.
+- Known network devices are rejected using the existing renderer banner rules, extracted into one shared module. Recognized single-channel peers are rejected before an extra command runs. Monitor-only samples omit process and GPU queries. A terminal reader upgrades a lightweight sample to a complete one; subsequent shared queries remain complete while a terminal is actively reading. The same existing Linux/macOS parser, disk handling, CPU deltas and network deltas serve terminal and monitoring readers.
 - A real macOS shell exercise found an existing cooked-template escape in the disk awk expression. It now uses a literal prefix comparison, with a generated-command regression test; the actual monitor reads root/volume capacity correctly.
 
 Verified so far in an isolated Electron profile and controlled SSH fixture (no saved production host logins): creation, validation, cross-group selection, copy starting stopped, two running panels, navigation retention, direct and jump-host real shell sampling, known-host confirmation, unsupported network devices, sequential verification prompts, failed login details, light/dark and Chinese/narrow rendering. Stopping an in-flight slow query produced no additional queries after 12 seconds; another panel and an ordinary terminal remained usable. Starting monitoring against an existing terminal did not add an authenticated connection. Restart restored two saved panels with zero running panels and zero monitor readings.
 
-Focused configuration, sync/backup round-trip, concurrent edit, collection, pool, SSH authentication and capability checks pass. Build and directory packaging have run; the packaged archive includes the shared vendor rules and monitoring runtime. The repository-wide TypeScript check has 755 pre-existing errors on both this work and an untouched main snapshot, with no new diagnostics after path/line normalization. The Node 26 full suite also exposes a pre-existing transfer FileHandle cleanup failure, reproduced against untouched main; missing nested plugin dependencies were environment setup and were corrected. Final full-suite, multi-window, representative-scale and PR review evidence will be added before merge.
+Focused configuration, sync/backup round-trip, concurrent edit, collection, pool, SSH authentication and capability checks pass. Build and directory packaging have run; the packaged archive includes the shared vendor rules and monitoring runtime. The repository-wide TypeScript check has 755 pre-existing errors on both this work and an untouched main snapshot, with no new diagnostics after path/line normalization. The Node 26 full suite also exposes a pre-existing transfer FileHandle cleanup failure, reproduced against untouched main; missing nested plugin dependencies were environment setup and were corrected. The complete suite finished with 13,822 tests: 13,791 passed, 30 skipped and the one reproduced baseline FileHandle failure. Follow-up review fixes have focused regression coverage. Current-head review and merge checks are recorded in the PR.
+
+
+Additional acceptance evidence:
+
+- Actual two-window execution: both owners watched the same two supported identities with two running panels and only two unique monitoring entries. A stale editor in the second window changed description and host order after the first renamed the panel; all three edits survived. Stopping and then closing the second owner left the first live. Independent tests cover owner closure during active and queued authentication, credential-changing and same-identity retry, and stop during post-authentication work.
+- Actual UI actions also exercised saved ordering, name sorting, search, attention filtering, duplicate creation starting stopped, confirmed deletion retaining all saved hosts, and JSON restore. Clear All Local Data removes panels. An offline event stops all monitoring; restore recreates five saved panels with zero running panels.
+- Each of the five locales was rendered in Electron with no untranslated monitoring keys or document overflow. Light/dark and 760px width were checked; the editor's Save button remained inside the viewport.
+- A controlled SSH fixture supplied 100 distinct identities over real connections. All 100 produced their first readings in 876ms; 100 cards rendered (two trend charts each), with a measured renderer heap increase of 6.69MiB. The fixture recorded 100 successful authentications, 100 collection commands plus capability/disk work, and zero shells for this exercise. This tests fixture throughput and rendering, not a production fleet's network latency.
+- Accelerated in-memory history exercise through the production sampler retained exactly 18,000 points for 100 identities, with a measured heap increase of 1.92MiB after collection. This measures the real bounded object representation; it does not claim 30 minutes of production observation.
+- Last successful readings and their timestamp survive sampling failure; missing measurements remain null. A failed host does not block reuse and collection on an already-authenticated host. Capacity is applied after obsolete demand is removed, including replacing a host at the 256-identity bound.
