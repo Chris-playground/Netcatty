@@ -95,3 +95,12 @@ test("cancelFidoPromptRequestsForLease settles owned prompts and notifies render
   handleResponse({ sender: { id: 11 } }, { requestId: otherRequestId, cancelled: true });
   await other;
 });
+
+test("combined OpenSSH PIN and user-presence prompts require secret entry", () => {
+  for (const algorithm of ["ED25519-SK", "ECDSA-SK"]) {
+    assert.equal(
+      classifyAskpassPrompt(`Enter PIN and confirm user presence for ${algorithm} key SHA256:test: `),
+      "pin",
+    );
+  }
+});

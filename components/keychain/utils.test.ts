@@ -52,10 +52,10 @@ test("resolveImportedKeyType keeps soft keys", () => {
 test("KeychainManager handleImport uses material type not seeded draft type", () => {
   const source = readFileSync(join(import.meta.dirname, "../KeychainManager.tsx"), "utf8");
   // Must resolve from material; must not keep draftKey.type first (openImport seeds ED25519).
-  assert.match(source, /resolveImportedKeyType/);
+  assert.match(source, /detectSshKeyType/);
   assert.doesNotMatch(
     source,
     /type:\s*\(draftKey\.type as KeyType\)\s*\|\|\s*detectedType/,
   );
-  assert.match(source, /type:\s*detectedType/);
+  assert.match(source, /type:\s*detected.type/);
 });

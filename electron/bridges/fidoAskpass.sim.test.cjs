@@ -14,7 +14,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const tempDirBridge = require("./tempDirBridge.cjs");
 // Keep the managed temp path short: Unix domain sockets reject long sun_path.
-const managedTemp = fs.mkdtempSync(path.join(path.resolve(__dirname, "../.."), "nc-fido-"));
+const managedTemp = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fp-"));
 const originalGetTempDir = tempDirBridge.getTempDir;
 tempDirBridge.getTempDir = () => managedTemp;
 const {
@@ -257,6 +257,41 @@ test("leaseless agent prompts route to the last leased signing window", async ()
     assert.deepEqual(seen, [501, 501]);
   } finally {
     setResolveWebContentsForTests(null);
+    shutdownFidoAskpass();
+  }
+});
+
+test("OpenSSH notification helper exit dismisses its pending touch prompt", async () => {
+  let delivered;
+  const requested = new Promise((resolve) => { delivered = resolve; });
+  const notifications = [];
+  const sender = {
+    id: 2823, isDestroyed: () => false,
+    send(channel, payload) {
+      notifications.push({ channel, payload });
+      if (channel === "netcatty:fido-prompt-request") delivered(payload);
+    },
+  };
+  let child;
+  const env = buildFidoAskpassEnv({ resolveWebContents: () => sender });
+  try {
+    child = spawn(env.SSH_ASKPASS, ["Confirm user presence for key ED25519-SK"], {
+      env: { ...process.env, ...env }, stdio: "ignore",
+    });
+    const request = await requested;
+    assert.equal(request.kind, "touch");
+    const closed = new Promise((resolve) => child.once("close", resolve));
+    child.kill("SIGTERM");
+    await closed;
+    for (let i = 0; i < 50 && fidoPromptHandler.getRequests().has(request.requestId); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(fidoPromptHandler.getRequests().has(request.requestId), false);
+    assert.ok(notifications.some(({ channel, payload }) =>
+      channel === "netcatty:fido-prompt-cancelled" && payload.requestId === request.requestId));
+  } finally {
+    child?.kill();
+    require("./fidoAskpass.cjs").releaseFidoAskpassLease(env.NETCATTY_FIDO_ASKPASS_LEASE);
     shutdownFidoAskpass();
   }
 });

@@ -143,10 +143,8 @@ function isKeyEncrypted(keyContent) {
   return false;
 }
 
-function expandIdentityFilePath(keyPath) {
-  return keyPath.startsWith("~/")
-    ? path.join(os.homedir(), keyPath.slice(2))
-    : keyPath;
+function expandIdentityFilePath(keyPath, context = {}) {
+  return systemSshAgent.resolveIdentityPath(keyPath, context);
 }
 
 function notifyPassphraseAuthFailed(sender, keyPath, resolvedPath, keyIds) {
@@ -940,7 +938,7 @@ async function identityFilesLookLikeSk(identityFilePaths, injected = {}) {
   const readFile = injected.readFile || fs.promises.readFile;
   const expand = injected.expandIdentityFilePath || expandIdentityFilePath;
   for (const rawPath of identityFilePaths) {
-    const identityPath = expand(rawPath);
+    const identityPath = expand(rawPath, injected);
     if (!identityPath) continue;
     const candidates = identityPath.endsWith(".pub")
       ? [identityPath]
@@ -1012,7 +1010,7 @@ async function enhanceAuthOptionsForFido(options = {}, sender) {
     return base;
   }
   try {
-    if (await identityFilesLookLikeSk(options.identityFilePaths)) {
+    if (await identityFilesLookLikeSk(options.identityFilePaths, options)) {
       return {
         ...base,
         useSshAgent: true,
@@ -1118,7 +1116,7 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
     && Array.isArray(options.identityFilePaths)
     && options.identityFilePaths.length > 0) {
     try {
-      pathBackedSk = await identityFilesLookLikeSk(options.identityFilePaths);
+      pathBackedSk = await identityFilesLookLikeSk(options.identityFilePaths, options);
     } catch {
       pathBackedSk = false;
     }
@@ -1232,7 +1230,7 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
     // mutate the user's IdentityFile tree.
     try {
       for (const rawPath of options.identityFilePaths) {
-        const identityPath = expandIdentityFilePath(rawPath);
+        const identityPath = expandIdentityFilePath(rawPath, options);
         if (!identityPath || identityPath.endsWith(".pub")) continue;
         let privateKeyText = "";
         try {
@@ -1337,7 +1335,9 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
       identitiesOnly: options.identitiesOnly,
       addKeysToAgent: options.addKeysToAgent,
       useKeychain: ownedFidoAgent ? false : options.useKeychain,
-      agentPublicKeys: options.agentPublicKeys,
+      agentPublicKeys: isFidoFlow && options.certificate
+        ? [...(options.agentPublicKeys || []), options.certificate]
+        : options.agentPublicKeys,
       loadIdentityFilesIntoAgent: looksLikeSkOpenSshMaterial(options.privateKey)
         || (Array.isArray(options.agentPublicKeys)
           && options.agentPublicKeys.some((key) => looksLikeSkOpenSshMaterial(key)))
@@ -1388,6 +1388,32 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
         }
       }
       const askpassLeaseId = askpassEnv?.NETCATTY_FIDO_ASKPASS_LEASE;
+      if (askpassLeaseId) {
+        const { runWithFidoSigningLease } = require("./fidoAskpass.cjs");
+        const sign = agent.sign.bind(agent);
+        agent.sign = (key, data, signOptions, callback) => {
+          if (typeof signOptions === "function") {
+            callback = signOptions;
+            signOptions = undefined;
+          }
+          runWithFidoSigningLease(askpassLeaseId, (finish) => {
+            if (fidoResourcesReleased) {
+              finish();
+              callback(new Error("FIDO authentication session has ended"));
+              return;
+            }
+            const settle = (...args) => {
+              finish();
+              callback(...args);
+            };
+            try {
+              sign(key, data, signOptions, settle);
+            } catch (error) {
+              settle(error);
+            }
+          });
+        };
+      }
       if (ownedFidoAgent || askpassLeaseId || sharedAgentIdentities.length > 0 || acquiredFidoAgent) {
         agent._netcattyOwnedFidoAgent = ownedFidoAgent === true;
         // Shared lease; quit/exit hooks hard-kill the owned agent as a backstop.

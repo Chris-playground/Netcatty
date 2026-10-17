@@ -29,6 +29,7 @@ function settleRequest(requestId, result, notification) {
   if (!pending) return false;
 
   if (pending.timeoutId) clearTimeout(pending.timeoutId);
+  pending.abortCleanup?.();
   fidoPromptRequests.delete(requestId);
 
   if (notification) {
@@ -83,6 +84,7 @@ function cancelFidoPromptRequestsForLease(leaseId, reason = "lease-released") {
  *   title?: string,
  *   keyName?: string,
  *   leaseId?: string,
+ *   signal?: AbortSignal,
  * }} options
  * @returns {Promise<{ cancelled?: boolean, response?: string|null } | null>}
  */
@@ -114,6 +116,17 @@ function requestFidoPrompt(sender, options = {}) {
       createdAt: Date.now(),
       timeoutId,
     });
+
+    if (options.signal) {
+      const onAbort = () => cancelFidoPromptRequest(requestId, "helper-exited");
+      const pending = fidoPromptRequests.get(requestId);
+      pending.abortCleanup = () => options.signal.removeEventListener("abort", onAbort);
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      if (options.signal.aborted) {
+        onAbort();
+        return;
+      }
+    }
 
     try {
       sender.send("netcatty:fido-prompt-request", {
@@ -162,6 +175,10 @@ function getRequests() {
  */
 function classifyAskpassPrompt(prompt) {
   const p = String(prompt || "").toLowerCase();
+  // ssh-agent combines both requirements in one prompt for verify-required
+  // keys: "Enter PIN and confirm user presence ...". It still expects a PIN
+  // on stdout; classifying it as touch would silently return an empty string.
+  if (/\bpin\b|密码|密碼|口令/.test(p)) return "pin";
   if (/confirm user presence|touch (your |the )?(security )?key|tap (your |the )?(security )?key|user presence|请触摸|請觸摸|请轻触/.test(p)) {
     return "touch";
   }

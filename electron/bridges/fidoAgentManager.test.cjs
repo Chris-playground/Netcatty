@@ -39,7 +39,7 @@ async function withManagedTemp(run) {
   const fs = require("node:fs");
   const path = require("node:path");
   const tempDirBridge = require("./tempDirBridge.cjs");
-  const managedTemp = fs.mkdtempSync(path.join(__dirname, "netcatty-fido-win-"));
+  const managedTemp = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fa-"));
   const originalGetTempDir = tempDirBridge.getTempDir;
   tempDirBridge.getTempDir = () => managedTemp;
   try {
@@ -117,7 +117,7 @@ test("acquireFidoAgent releases askpass lease when agent start fails", async () 
   const path = require("node:path");
   const tempDirBridge = require("./tempDirBridge.cjs");
   const { getAskpassLeaseCountForTests } = require("./fidoAskpass.cjs");
-  const managedTemp = fs.mkdtempSync(path.join(__dirname, "netcatty-fido-lease-"));
+  const managedTemp = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fa-"));
   const originalGetTempDir = tempDirBridge.getTempDir;
   tempDirBridge.getTempDir = () => managedTemp;
   const before = getAskpassLeaseCountForTests();
@@ -161,7 +161,7 @@ test("ssh-agent spawn env omits caller-bound askpass lease", async () => {
   const path = require("node:path");
   const tempDirBridge = require("./tempDirBridge.cjs");
   const { releaseFidoAskpassLease } = require("./fidoAskpass.cjs");
-  const managedTemp = fs.mkdtempSync(path.join(__dirname, "netcatty-fido-agent-env-"));
+  const managedTemp = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fa-"));
   const originalGetTempDir = tempDirBridge.getTempDir;
   tempDirBridge.getTempDir = () => managedTemp;
   const sockPath = path.join(managedTemp, "agent.sock");
@@ -247,7 +247,7 @@ test("stale releaseFidoAgent ignores a newer agent generation", async () => {
   const path = require("node:path");
   const tempDirBridge = require("./tempDirBridge.cjs");
   const { releaseFidoAskpassLease } = require("./fidoAskpass.cjs");
-  const managedTemp = fs.mkdtempSync(path.join(__dirname, "netcatty-fido-gen-"));
+  const managedTemp = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fa-"));
   const originalGetTempDir = tempDirBridge.getTempDir;
   tempDirBridge.getTempDir = () => managedTemp;
   const firstSock = path.join(managedTemp, "agent1.sock");

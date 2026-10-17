@@ -457,7 +457,7 @@ test("shared Windows agent keeps staging dir until ssh-add -d finishes", async (
     assert.equal(fs.existsSync(identityPath), true);
     pendingDeleteCb(null, "", "");
     for (let i = 0; i < 40 && fs.existsSync(stagingDir); i += 1) {
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(
       fs.existsSync(stagingDir),
@@ -487,4 +487,27 @@ test("materializeSkPrivateKeyFile writes companion .pub from publicKey hint", as
   assert.ok(result?.keyPath);
   assert.equal(fs.readFileSync(`${result.keyPath}.pub`, "utf8").trim(), skPub.trim());
   fs.rmSync(result.cleanupDir, { recursive: true, force: true });
+});
+
+
+test("FIDO IdentityFile probing expands OpenSSH tokens with the connection context", async () => {
+  const tempDirBridge = require("./tempDirBridge.cjs");
+  const dir = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "sk-path-"));
+  const context = { hostname: "server.example", port: 2222, username: "deploy" };
+  const keyPath = path.join(dir, "id_%h_%p_%r_%%");
+  fs.writeFileSync(path.join(dir, "id_server.example_2222_deploy_%.pub"), skPub);
+  try {
+    assert.equal(await identityFilesLookLikeSk([keyPath], context), true);
+    assert.equal(await identityFilesLookLikeSk([keyPath], { ...context, username: "other" }), false);
+    const prep = await enhanceAuthOptionsForFido({
+      ...context, identityFilePaths: [keyPath], useSshAgent: false,
+    });
+    assert.equal(prep.useFidoAgent, true);
+    assert.equal(prep.useSshAgent, true);
+    assert.equal((await enhanceAuthOptionsForFido({
+      ...context, identityFilePaths: [keyPath], authMethod: "password", useSshAgent: false,
+    })).useSshAgent, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

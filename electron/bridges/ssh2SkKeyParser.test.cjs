@@ -117,3 +117,32 @@ test("ssh2 maps SK certificate identities to full wire signature algorithms", ()
     "sk-ssh-ed25519@openssh.com",
   );
 });
+
+test("ssh2 agent protocol preserves SK signature framing, flags and counter", async () => {
+  const { AgentProtocol } = require("ssh2/lib/agent.js");
+  for (const line of [buildSkEd25519PublicLine(), buildSkEcdsaPublicLine(), buildSkEd25519CertPublicLine()]) {
+    const client = new AgentProtocol(true);
+    const server = new AgentProtocol(false);
+    client.pipe(server).pipe(client);
+    const raw = Buffer.alloc(64, 7);
+    const payload = Buffer.alloc(4 + raw.length + 5);
+    payload.writeUInt32BE(raw.length, 0);
+    raw.copy(payload, 4);
+    payload[4 + raw.length] = 5; // presence and verification
+    payload.writeUInt32BE(0x12345678, 5 + raw.length);
+    server.on("sign", (request, key) => {
+      assert.equal(request.getContext(), getOpenSSHCertSignatureAlgorithm(key.type));
+      server.signReply(request, payload);
+    });
+    try {
+      const returned = await new Promise((resolve, reject) => client.sign(
+        parseKey(line), Buffer.from("challenge"), {},
+        (error, signature) => error ? reject(error) : resolve(signature),
+      ));
+      assert.deepEqual(returned, payload);
+    } finally {
+      client.destroy();
+      server.destroy();
+    }
+  }
+});

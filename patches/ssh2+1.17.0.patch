@@ -1,7 +1,31 @@
 diff --git a/node_modules/ssh2/lib/agent.js b/node_modules/ssh2/lib/agent.js
 --- a/node_modules/ssh2/lib/agent.js
 +++ b/node_modules/ssh2/lib/agent.js
-@@ -711,7 +711,10 @@
+@@ -6,7 +6,7 @@
+ const { readFile } = require('fs');
+ const { execFile, spawn } = require('child_process');
+ 
+-const { isParsedKey, parseKey } = require('./protocol/keyParser.js');
++const { isParsedKey, parseKey, getOpenSSHCertSignatureAlgorithm } = require('./protocol/keyParser.js');
+ 
+ const {
+   makeBufferParser,
+@@ -655,8 +655,12 @@
+               // TODO: verify signature type based on key and options used
+               // during initial sign request
+               binaryParser.init(signature, 0);
+-              binaryParser.readString(true);
+-              signature = binaryParser.readString();
++              const signatureType = binaryParser.readString(true);
++              // SK signatures append flags/counter outside the inner string.
++              // Preserve the complete algorithm-specific payload for authPK.
++              signature = signatureType && signatureType.startsWith('sk-')
++                ? signature.subarray(binaryParser.pos())
++                : binaryParser.readString();
+               binaryParser.clear();
+ 
+               if (signature === undefined)
+@@ -711,7 +715,10 @@
                  hash: undefined,
                };
                let ctx;
@@ -13,7 +37,16 @@ diff --git a/node_modules/ssh2/lib/agent.js b/node_modules/ssh2/lib/agent.js
                  if (flagsVal & SSH_AGENT_RSA_SHA2_256) {
                    ctx = 'rsa-sha2-256';
                    flags.hash = 'sha256';
-@@ -781,7 +784,11 @@
+@@ -721,7 +728,7 @@
+                 }
+               }
+               if (ctx === undefined)
+-                ctx = pubKey.type;
++                ctx = getOpenSSHCertSignatureAlgorithm(pubKey.type);
+ 
+               const req = new AgentInboundRequest(msgType, ctx);
+               this[SYM_REQS].push(req);
+@@ -781,7 +788,11 @@
        if (pubKey instanceof Error)
          throw new Error('Invalid public key argument');
  
@@ -26,6 +59,35 @@ diff --git a/node_modules/ssh2/lib/agent.js b/node_modules/ssh2/lib/agent.js
          switch (options.hash) {
            case 'sha256':
              flags = SSH_AGENT_RSA_SHA2_256;
+@@ -992,19 +1003,24 @@
+       let p = 0;
+       const sigFormat = req.getContext();
+       const sigFormatLen = Buffer.byteLength(sigFormat);
++      const sigPrefixLen = sigFormat.startsWith('sk-') ? 0 : 4;
+       const buf = Buffer.allocUnsafe(
+-        4 + 1 + 4 + 4 + sigFormatLen + 4 + signature.length
++        4 + 1 + 4 + 4 + sigFormatLen + sigPrefixLen + signature.length
+       );
+ 
+       writeUInt32BE(buf, buf.length - 4, p);
+ 
+       buf[p += 4] = SSH_AGENT_SIGN_RESPONSE;
+ 
+-      writeUInt32BE(buf, 4 + sigFormatLen + 4 + signature.length, ++p);
++      writeUInt32BE(buf, 4 + sigFormatLen + sigPrefixLen + signature.length, ++p);
+       writeUInt32BE(buf, sigFormatLen, p += 4);
+       buf.utf8Write(sigFormat, p += 4, sigFormatLen);
+-      writeUInt32BE(buf, signature.length, p += sigFormatLen);
+-      signature.copy(buf, p += 4);
++      p += sigFormatLen;
++      if (sigPrefixLen) {
++        writeUInt32BE(buf, signature.length, p);
++        p += 4;
++      }
++      signature.copy(buf, p);
+ 
+       return respond(this, req, buf);
+     }
 diff --git a/node_modules/ssh2/lib/client.js b/node_modules/ssh2/lib/client.js
 --- a/node_modules/ssh2/lib/client.js
 +++ b/node_modules/ssh2/lib/client.js
@@ -70,7 +132,7 @@ diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/
  } = require('./keyParser.js');
  const MESSAGE_HANDLERS = require('./handlers.js');
  const {
-@@ -701,11 +702,18 @@
+@@ -701,11 +702,19 @@
        if (signature === false)
          throw new Error('Error while converting handshake signature');
  
@@ -81,21 +143,22 @@ diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/
 +        sigAlgo = getOpenSSHCertSignatureAlgorithm(keyAlgo);
 +
        const sigLen = signature.length;
++      const sigPrefixLen = sigAlgo.startsWith('sk-') ? 0 : 4;
 +      const sigAlgoLen = Buffer.byteLength(sigAlgo);
        p = this._packetRW.write.allocStart;
        packet = this._packetRW.write.alloc(
          1 + 4 + userLen + 4 + 14 + 4 + 9 + 1 + 4 + algoLen + 4 + pubKeyLen + 4
 -          + 4 + algoLen + 4 + sigLen
-+          + 4 + sigAlgoLen + 4 + sigLen
++          + 4 + sigAlgoLen + sigPrefixLen + sigLen
        );
  
        // TODO: simply copy from original "packet" to new `packet` to avoid
-@@ -729,12 +737,12 @@
+@@ -729,13 +738,17 @@
        writeUInt32BE(packet, pubKeyLen, p += algoLen);
        packet.set(pubKey, p += 4);
  
 -      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, p += pubKeyLen);
-+      writeUInt32BE(packet, 4 + sigAlgoLen + 4 + sigLen, p += pubKeyLen);
++      writeUInt32BE(packet, 4 + sigAlgoLen + sigPrefixLen + sigLen, p += pubKeyLen);
  
 -      writeUInt32BE(packet, algoLen, p += 4);
 -      packet.utf8Write(keyAlgo, p += 4, algoLen);
@@ -103,11 +166,17 @@ diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/
 +      packet.utf8Write(sigAlgo, p += 4, sigAlgoLen);
  
 -      writeUInt32BE(packet, sigLen, p += algoLen);
-+      writeUInt32BE(packet, sigLen, p += sigAlgoLen);
-       packet.set(signature, p += 4);
+-      packet.set(signature, p += 4);
++      p += sigAlgoLen;
++      if (sigPrefixLen) {
++        writeUInt32BE(packet, sigLen, p);
++        p += 4;
++      }
++      packet.set(signature, p);
  
        // Servers shouldn't send packet type 60 in response to signed publickey
-@@ -810,19 +818,26 @@
+       // attempts, but if they do, interpret as type 60.
+@@ -810,20 +823,32 @@
        if (!signature)
          throw new Error('Error while converting handshake signature');
  
@@ -118,12 +187,13 @@ diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/
 +        sigAlgo = getOpenSSHCertSignatureAlgorithm(keyAlgo);
 +
        const sigLen = signature.length;
++      const sigPrefixLen = sigAlgo.startsWith('sk-') ? 0 : 4;
 +      const sigAlgoLen = Buffer.byteLength(sigAlgo);
        const reqDataLen = (data.length - sesLen - 4);
        p = this._packetRW.write.allocStart;
        const packet = this._packetRW.write.alloc(
 -        reqDataLen + 4 + 4 + algoLen + 4 + sigLen
-+        reqDataLen + 4 + 4 + sigAlgoLen + 4 + sigLen
++        reqDataLen + 4 + 4 + sigAlgoLen + sigPrefixLen + sigLen
        );
  
        bufferCopy(data, packet, 4 + sesLen, data.length, p);
@@ -132,14 +202,20 @@ diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/
 -      writeUInt32BE(packet, algoLen, p += 4);
 -      packet.utf8Write(keyAlgo, p += 4, algoLen);
 -      writeUInt32BE(packet, sigLen, p += algoLen);
-+      writeUInt32BE(packet, 4 + sigAlgoLen + 4 + sigLen, p += reqDataLen);
+-      packet.set(signature, p += 4);
++      writeUInt32BE(packet, 4 + sigAlgoLen + sigPrefixLen + sigLen, p += reqDataLen);
 +      writeUInt32BE(packet, sigAlgoLen, p += 4);
 +      packet.utf8Write(sigAlgo, p += 4, sigAlgoLen);
-+      writeUInt32BE(packet, sigLen, p += sigAlgoLen);
-       packet.set(signature, p += 4);
++      p += sigAlgoLen;
++      if (sigPrefixLen) {
++        writeUInt32BE(packet, sigLen, p);
++        p += 4;
++      }
++      packet.set(signature, p);
  
        this._authsQueue.push('hostbased');
-@@ -1916,7 +1931,10 @@
+ 
+@@ -1916,7 +1941,10 @@
  }
  
  // SSH-protoversion-softwareversion (SP comments) CR LF

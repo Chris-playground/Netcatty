@@ -93,6 +93,30 @@ const askpassLeases = new Map();
 let lastLeasedSigningResolver = null;
 /** @type {string|null} Lease id that last marked lastLeasedSigningResolver. */
 let lastLeasedSigningLeaseId = null;
+let activeSigningLeaseId = null;
+const signingQueue = [];
+
+// A shared OpenSSH agent cannot pass a per-request lease to its helper.
+// Serialize hardware signatures and bind each prompt to its calling window
+// until that signature's callback settles.
+function runWithFidoSigningLease(leaseId, operation) {
+  signingQueue.push({ leaseId, operation });
+  if (signingQueue.length > 1) return;
+  const next = () => {
+    const entry = signingQueue[0];
+    if (!entry) return;
+    activeSigningLeaseId = entry.leaseId;
+    let finished = false;
+    entry.operation(() => {
+      if (finished) return;
+      finished = true;
+      activeSigningLeaseId = null;
+      signingQueue.shift();
+      if (signingQueue.length) queueMicrotask(next);
+    });
+  };
+  next();
+}
 
 function getTempBase() {
   const tempDirBridge = require("./tempDirBridge.cjs");
@@ -162,6 +186,9 @@ function liveSenderFromResolver(resolver) {
  * focus / any open window, then the sticky global fallback.
  */
 function resolveSharedAgentPromptSender() {
+  if (activeSigningLeaseId && askpassLeases.has(activeSigningLeaseId)) {
+    return liveSenderFromResolver(askpassLeases.get(activeSigningLeaseId));
+  }
   const fromLastLease = liveSenderFromResolver(lastLeasedSigningResolver);
   if (fromLastLease) return fromLastLease;
 
@@ -176,11 +203,19 @@ function resolveSharedAgentPromptSender() {
 
 function handleAskpassClient(socket) {
   let buf = "";
+  let handled = false;
+  const controller = new AbortController();
+  // OpenSSH kills its notification helper as soon as the token is touched.
+  // Dismiss that prompt even when the renderer has not clicked Continue.
+  socket.once("close", () => controller.abort());
+  socket.on("error", () => controller.abort());
   socket.setEncoding("utf8");
   socket.on("data", async (chunk) => {
+    if (handled) return;
     buf += chunk;
     const nl = buf.indexOf("\n");
     if (nl === -1) return;
+    handled = true;
     let msg;
     try {
       msg = JSON.parse(buf.slice(0, nl));
@@ -208,7 +243,7 @@ function handleAskpassClient(socket) {
       }
     } else {
       sender = resolveSharedAgentPromptSender();
-      ownerLeaseId = lastLeasedSigningLeaseId || "";
+      ownerLeaseId = activeSigningLeaseId || lastLeasedSigningLeaseId || "";
     }
     if (!sender) {
       socket.end(`${JSON.stringify({ ok: false, error: "no_window" })}\n`);
@@ -220,7 +255,9 @@ function handleAskpassClient(socket) {
         message: prompt,
         keyName: "FIDO2",
         leaseId: ownerLeaseId,
+        signal: controller.signal,
       });
+      if (socket.destroyed) return;
       if (!result || result.cancelled) {
         socket.end(`${JSON.stringify({ ok: false, error: "cancelled" })}\n`);
         return;
@@ -373,6 +410,7 @@ function shutdownFidoAskpass() {
 module.exports = {
   ensureFidoAskpass,
   buildFidoAskpassEnv,
+  runWithFidoSigningLease,
   releaseFidoAskpassLease,
   shutdownFidoAskpass,
   classifyAskpassPrompt: fidoPromptHandler.classifyAskpassPrompt,

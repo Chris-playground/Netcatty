@@ -135,7 +135,7 @@ const resolveBridgePrivateKeyMaterial = (
   ) {
     return undefined;
   }
-  return sanitizeCredentialValue(key.privateKey);
+  return sanitizeCredentialValue(key.privateKey) || undefined;
 };
 
 const formatPluginDiagnosticLines = (
