@@ -82,7 +82,7 @@ test("disk usage shows every reported partition, including healthy and empty dis
   const document = new JSDOM(renderToStaticMarkup(
     <MonitorDiskUsage stats={{ disks, diskPercent: 25 }} />,
   )).window.document;
-  assert.deepEqual([...document.querySelectorAll("span[title]")].map((e) => e.textContent), ["/", "/data", "/backup"]);
+  assert.deepEqual([...document.querySelectorAll("[data-monitor-disk] > span")].map((e) => e.textContent), ["/", "/data", "/backup"]);
   for (const value of ["25.0%", "95.0%", "0.0%"])
     assert.ok(document.body.textContent!.includes(value));
 });
@@ -104,7 +104,7 @@ test("cards show the two largest capacities without changing the source disk ord
   const document = new JSDOM(renderToStaticMarkup(
     <MonitorDiskUsage stats={{ disks, diskPercent: 98 }} limit={2} />,
   )).window.document;
-  assert.deepEqual([...document.querySelectorAll("span[title]")].map((e) => e.textContent), ["/data", "/backup"]);
+  assert.deepEqual([...document.querySelectorAll("[data-monitor-disk] > span")].map((e) => e.textContent), ["/data", "/backup"]);
   assert.deepEqual(disks.map((disk) => disk.mountPoint), ["/small", "/data", "/backup"]);
 });
 

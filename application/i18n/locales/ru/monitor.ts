@@ -38,6 +38,8 @@ export const ruMonitorMessages = {
   "monitor.cpu": "ЦП",
   "monitor.cores": "Ядер: {count}",
   "monitor.memory": "Память",
+  "monitor.diskCapacity": "Использовано {used} / всего {total}",
+  "monitor.diskCapacityUnknown": "Данные об объёме недоступны",
   "monitor.rootDisk": "Корневой раздел",
   "monitor.network": "Сеть",
   "monitor.updated": "Обновлено",

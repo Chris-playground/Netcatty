@@ -37,6 +37,8 @@ export const zhCNMonitorMessages = {
   "monitor.cpu": "CPU",
   "monitor.cores": "{count} 核",
   "monitor.memory": "内存",
+  "monitor.diskCapacity": "已用 {used} / 总容量 {total}",
+  "monitor.diskCapacityUnknown": "暂无容量读数",
   "monitor.rootDisk": "根分区",
   "monitor.network": "网络",
   "monitor.updated": "更新时间",

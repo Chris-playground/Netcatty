@@ -37,6 +37,8 @@ export const zhTWMonitorMessages = {
   "monitor.cpu": "CPU",
   "monitor.cores": "{count} 核心",
   "monitor.memory": "記憶體",
+  "monitor.diskCapacity": "已用 {used} / 總容量 {total}",
+  "monitor.diskCapacityUnknown": "暫無容量讀數",
   "monitor.rootDisk": "根分割區",
   "monitor.network": "網路",
   "monitor.updated": "更新時間",

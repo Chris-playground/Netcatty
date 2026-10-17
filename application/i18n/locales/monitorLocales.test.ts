@@ -8,7 +8,7 @@ import { zhCNMonitorMessages } from "./zh-CN/monitor";
 import { zhTWMonitorMessages } from "./zh-TW/monitor";
 
 test("monitoring UI literal message keys exist, including editor-only controls", () => {
-  for (const name of ["MonitorPanels", "MonitorNavButton"]) {
+  for (const name of ["MonitorPanels", "MonitorNavButton", "MonitorDiskUsage"]) {
     const source = readFileSync(new URL(`../../../components/vault/${name}.tsx`, import.meta.url), "utf8");
     const keys = [...source.matchAll(/\bt\("(monitor\.[^"]+)"/g)].map((match) => match[1]);
     for (const key of keys)

@@ -27,7 +27,6 @@ interface SelectHostPanelProps {
   subtitle?: string;
   className?: string;
   headerClassName?: string;
-  modal?: boolean;
   width?: string;
   layout?: AsidePanelLayout;
   resizable?: boolean;
@@ -58,7 +57,6 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   subtitle,
   className,
   headerClassName,
-  modal = false,
   width,
   layout = "overlay",
   resizable = false,
@@ -87,7 +85,6 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
       onClose={onClose ?? onBack}
       title={panelTitle}
       headerClassName={headerClassName}
-      modal={modal}
       subtitle={subtitle}
       showBackButton={true}
       onBack={onBack}

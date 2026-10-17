@@ -39,6 +39,8 @@ export const enMonitorMessages = {
   "monitor.cpu": "CPU",
   "monitor.cores": "Cores: {count}",
   "monitor.memory": "Memory",
+  "monitor.diskCapacity": "{used} used / {total} total",
+  "monitor.diskCapacityUnknown": "Capacity unavailable",
   "monitor.rootDisk": "Root partition",
   "monitor.network": "Network",
   "monitor.updated": "Updated",

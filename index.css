@@ -442,19 +442,6 @@ html.platform-win32 {
   will-change: width, opacity;
 }
 
-@keyframes monitor-drawer-enter {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
-.monitor-drawer-enter {
-  animation: monitor-drawer-enter 220ms cubic-bezier(0.24, 0.84, 0.32, 1) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .monitor-drawer-enter { animation: none; }
-}
-
 :root {
   color-scheme: light;
 }

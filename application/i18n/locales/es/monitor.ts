@@ -39,6 +39,8 @@ export const esMonitorMessages = {
   "monitor.cpu": "CPU",
   "monitor.cores": "Núcleos: {count}",
   "monitor.memory": "Memoria",
+  "monitor.diskCapacity": "{used} usados / {total} en total",
+  "monitor.diskCapacityUnknown": "Capacidad no disponible",
   "monitor.rootDisk": "Partición raíz",
   "monitor.network": "Red",
   "monitor.updated": "Actualizado",

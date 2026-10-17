@@ -609,10 +609,10 @@ export function MonitorPanels({
                     className="h-8 w-auto text-xs"
                     aria-label={t("monitor.interval")}
                   >
-                    <SelectValue />
+                    <SelectValue>{t("monitor.seconds", { count: panel.interval })}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {MONITOR_INTERVALS.map((v) => (
+                    {MONITOR_INTERVALS.filter((v) => v >= 3).map((v) => (
                       <SelectItem key={v} value={String(v)}>
                         {t("monitor.seconds", { count: v })}
                       </SelectItem>
@@ -853,8 +853,7 @@ export function MonitorPanels({
             open
             onClose={() => setEditor(null)}
             title={t(editor.base ? "monitor.edit" : "monitor.create")}
-            layout="overlay"
-            modal
+            layout="inline"
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
             headerClassName={monitorAsideHeaderClass}
@@ -1009,8 +1008,7 @@ export function MonitorPanels({
             onContinue={() => setSelecting(false)}
             title={t("monitor.chooseHosts")}
             subtitle={t("monitor.selectionHint")}
-            layout="overlay"
-            modal
+            layout="inline"
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
             headerClassName={monitorAsideHeaderClass}
@@ -1023,8 +1021,7 @@ export function MonitorPanels({
             onClose={() => setDetail(null)}
             title={hostDetail?.label ?? t("monitor.missingHost")}
             subtitle={hostDetail?.hostname}
-            layout="overlay"
-            modal
+            layout="inline"
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
             headerClassName={monitorAsideHeaderClass}
