@@ -14,6 +14,7 @@ interface SelectHostPanelProps {
   onSelect: (host: Host) => void;
   onSelectionChange?: (selectedHostIds: string[]) => void;
   onBack: () => void;
+  onClose?: () => void;
   onContinue?: () => void;
   onNewHost?: () => void;
   availableKeys?: SSHKey[];
@@ -26,6 +27,7 @@ interface SelectHostPanelProps {
   subtitle?: string;
   className?: string;
   headerClassName?: string;
+  modal?: boolean;
   width?: string;
   layout?: AsidePanelLayout;
   resizable?: boolean;
@@ -43,6 +45,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   onSelect,
   onSelectionChange,
   onBack,
+  onClose,
   onContinue,
   onNewHost,
   availableKeys = [],
@@ -55,6 +58,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   subtitle,
   className,
   headerClassName,
+  modal = false,
   width,
   layout = "overlay",
   resizable = false,
@@ -80,9 +84,10 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   return (
     <AsidePanel
       open={true}
-      onClose={onBack}
+      onClose={onClose ?? onBack}
       title={panelTitle}
       headerClassName={headerClassName}
+      modal={modal}
       subtitle={subtitle}
       showBackButton={true}
       onBack={onBack}

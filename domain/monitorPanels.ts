@@ -1,3 +1,6 @@
+export const MONITOR_INTERVALS = [1, 2, 3, 5, 10, 30, 60] as const;
+export const DEFAULT_MONITOR_INTERVAL = 5;
+
 /** Portable configuration only. Never add samples, connection state or errors here. */
 export interface MonitorPanel {
   id: string;
@@ -5,7 +8,7 @@ export interface MonitorPanel {
   description: string;
   hostIds: string[];
   view: "list" | "charts";
-  interval: 10 | 30 | 60;
+  interval: (typeof MONITOR_INTERVALS)[number];
   range: 5 | 15 | 30;
   sort: "manual" | "name" | "cpu" | "memory" | "disk";
 }
@@ -41,7 +44,9 @@ export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
             ]
           : [],
         view: p.view === "charts" ? "charts" : "list",
-        interval: p.interval === 30 || p.interval === 60 ? p.interval : 10,
+        interval: MONITOR_INTERVALS.includes(p.interval as MonitorPanel["interval"])
+          ? p.interval as MonitorPanel["interval"]
+          : DEFAULT_MONITOR_INTERVAL,
         range: p.range === 5 || p.range === 15 ? p.range : 30,
         sort:
           p.sort === "name" ||

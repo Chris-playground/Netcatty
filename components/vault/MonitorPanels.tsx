@@ -28,12 +28,13 @@ import {
   monitorActions,
   useMonitorSnapshot,
 } from "../../application/state/monitorRuntimeStore";
-import type { MonitorPanel } from "../../domain/monitorPanels";
+import { DEFAULT_MONITOR_INTERVAL, MONITOR_INTERVALS, type MonitorPanel } from "../../domain/monitorPanels";
 import {
   type MonitorHostState,
   type MonitorPoint,
 } from "../../domain/monitorRuntime";
 import type { Host } from "../../domain/models";
+import { findMonitorChartPoint } from "../../domain/monitorChart";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -106,9 +107,11 @@ export function MonitorTrend({
   className?: string;
 }) {
   const gradientId = useId();
+  const { resolvedLocale } = useI18n();
+  const [hoverAt, setHoverAt] = useState<number | null>(null);
   const end = Date.now(),
     start = end - range * 60000;
-  const visible = points.filter((p) => p.at >= start);
+  const visible = points.filter((p) => p.at >= start && p.at <= end);
   const max =
     field === "cpu" || field === "memory"
       ? 100
@@ -140,45 +143,79 @@ export function MonitorTrend({
     previous = p;
   }
   if (current) segments.push(current);
+  const hovered = hoverAt == null ? undefined : visible.find((p) => p.at === hoverAt);
+  const hoveredValue = hovered?.[field];
+  const hoverX = hovered ? ((hovered.at - start) / (end - start)) * 300 : 0;
+  const hoverY = hoveredValue == null ? 0 : 58 - (Math.min(max, Math.max(0, hoveredValue)) / max) * 54;
   return (
-    <svg
-      role="img"
-      aria-label={label}
-      viewBox="0 0 300 64"
-      preserveAspectRatio="none"
-      className={cn("h-16 w-full text-primary", className)}
-    >
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="currentColor" stopOpacity=".20" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity=".02" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M0 4 H300 M0 31 H300 M0 58 H300"
-        className="stroke-border/60"
-        strokeWidth=".5"
-        strokeDasharray="3 4"
-      />
-      {segments.map(({ path, firstX, x, y }, i) => (
-        <g key={i}>
-          <path
-            d={`${path} L ${x.toFixed(2)} 58 L ${firstX.toFixed(2)} 58 Z`}
-            fill={`url(#${gradientId})`}
-          />
-          <path
-            d={path}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-          />
-          <circle cx={x} cy={y} r="2" fill="currentColor" />
-        </g>
-      ))}
-    </svg>
+    <div className="relative min-w-0">
+      <svg
+        role="img"
+        aria-label={label}
+        viewBox="0 0 300 64"
+        preserveAspectRatio="none"
+        className={cn("block h-16 w-full cursor-crosshair text-primary", className)}
+        data-monitor-trend={field}
+        onPointerMove={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          if (!rect.width) return;
+          const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+          const point = findMonitorChartPoint(
+            visible,
+            field,
+            start + fraction * (end - start),
+            Math.max(interval * 1250, ((end - start) / rect.width) * 4),
+          );
+          setHoverAt(point?.at ?? null);
+        }}
+        onPointerLeave={() => setHoverAt(null)}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity=".20" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity=".02" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M0 4 H300 M0 31 H300 M0 58 H300"
+          className="stroke-border/60"
+          strokeWidth=".5"
+          strokeDasharray="3 4"
+        />
+        {segments.map(({ path, firstX, x, y }, i) => (
+          <g key={i}>
+            <path
+              d={`${path} L ${x.toFixed(2)} 58 L ${firstX.toFixed(2)} 58 Z`}
+              fill={`url(#${gradientId})`}
+            />
+            <path
+              d={path}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle cx={x} cy={y} r="2" fill="currentColor" />
+          </g>
+        ))}
+        {hoveredValue != null && (
+          <g aria-hidden="true">
+            <line x1={hoverX} x2={hoverX} y1="4" y2="58" stroke="currentColor" strokeOpacity=".5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+            <circle cx={hoverX} cy={hoverY} r="3" fill="currentColor" className="stroke-background" strokeWidth="1.5" />
+          </g>
+        )}
+      </svg>
+      {hovered && hoveredValue != null && (
+        <div role="tooltip" className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 whitespace-nowrap rounded-md border border-border/40 bg-popover px-2 py-1.5 text-[10px] text-popover-foreground shadow-md">
+          <div className="font-medium">{label} · {field === "cpu" || field === "memory" ? `${hoveredValue.toFixed(2)}%` : rate(hoveredValue)}</div>
+          <time dateTime={new Date(hovered.at).toISOString()} className="text-muted-foreground">
+            {new Date(hovered.at).toLocaleTimeString(resolvedLocale, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </time>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -230,7 +267,7 @@ export function MonitorPanels({
             description: "",
             hostIds: [],
             view: "charts",
-            interval: 10,
+            interval: DEFAULT_MONITOR_INTERVAL,
             range: 15,
             sort: "manual",
           },
@@ -329,7 +366,7 @@ export function MonitorPanels({
       : !running
         ? "stopped"
         : state?.status === "live" &&
-            Date.now() - state.at > (panel?.interval ?? 10) * 2500
+            Date.now() - state.at > Math.max(5000, (panel?.interval ?? DEFAULT_MONITOR_INTERVAL) * 2500)
           ? "stale"
           : (state?.status ?? "queued");
   const stateBadge = (host: Host | undefined, state?: MonitorHostState) => (
@@ -551,7 +588,7 @@ export function MonitorPanels({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[10, 30, 60].map((v) => (
+                    {MONITOR_INTERVALS.map((v) => (
                       <SelectItem key={v} value={String(v)}>
                         {t("monitor.seconds", { count: v })}
                       </SelectItem>
@@ -786,6 +823,7 @@ export function MonitorPanels({
             onClose={() => setEditor(null)}
             title={t(editor.base ? "monitor.edit" : "monitor.create")}
             layout="overlay"
+            modal
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
             headerClassName={monitorAsideHeaderClass}
@@ -933,10 +971,15 @@ export function MonitorPanels({
             onSelect={() => {}}
             onSelectionChange={(hostIds) => updateDraft({ hostIds })}
             onBack={() => setSelecting(false)}
+            onClose={() => {
+              setSelecting(false);
+              setEditor(null);
+            }}
             onContinue={() => setSelecting(false)}
             title={t("monitor.chooseHosts")}
             subtitle={t("monitor.selectionHint")}
             layout="overlay"
+            modal
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
             headerClassName={monitorAsideHeaderClass}
@@ -950,6 +993,7 @@ export function MonitorPanels({
             title={hostDetail?.label ?? t("monitor.missingHost")}
             subtitle={hostDetail?.hostname}
             layout="overlay"
+            modal
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
             headerClassName={monitorAsideHeaderClass}

@@ -183,7 +183,7 @@ export function useMonitorRuntime() {
     void poll();
     const timer = setInterval(() => {
       void poll();
-    }, 2000);
+    }, 1000);
     return () => {
       disposed = true;
       clearInterval(timer);

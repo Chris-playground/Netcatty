@@ -556,3 +556,49 @@ for (const sharedHost of ["first", "second"]) {
     f.service.dispose();
   });
 }
+
+for (const interval of [1, 2, 3, 5, 10, 30, 60]) {
+  test(`monitor schedules ${interval}s collection and passes its cache demand`, async () => {
+    let requested;
+    const f = fixture({ getStats: async (context) => {
+      requested = context._monitorIntervalMs;
+      return { success: true, stats: {} };
+    } });
+    f.service.reconcile(event(1), [{ ...demand(), interval }]);
+    await until(() => f.timers.length > 0);
+    assert.equal(f.timers.at(-1).ms, interval * 1000);
+    assert.equal(requested, interval * 1000);
+    f.service.dispose();
+  });
+}
+
+test("one-second monitoring bypasses the terminal's four-second cache and records bounded history", async () => {
+  const c = conn();
+  const original = Date.now;
+  let now = 100000, calls = 0;
+  Date.now = () => now;
+  const session = { conn: c, _monitorStats: true, _monitorIntervalMs: 1000 };
+  const collect = async () => {
+    calls++;
+    return { success: true, stats: { cpu: calls % 100, memTotal: 100, memUsed: 50 } };
+  };
+  try {
+    await sampleSharedStats(session, collect, now);
+    now += 500;
+    await sampleSharedStats(session, collect, now);
+    assert.equal(calls, 1);
+    now += 500;
+    await sampleSharedStats(session, collect, now);
+    assert.equal(calls, 2);
+    assert.equal(readSharedStats(c).points.length, 2);
+    for (let i = 0; i < 2000; i++) {
+      now += 1000;
+      await sampleSharedStats(session, collect, now);
+    }
+    const history = readSharedStats(c).points;
+    assert.equal(history.length, 1800);
+    assert.ok(history.every((p) => now - p.at <= 1800000));
+  } finally {
+    Date.now = original;
+  }
+});

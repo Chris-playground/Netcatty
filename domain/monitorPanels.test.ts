@@ -4,6 +4,7 @@ import {
   normalizeMonitorPanels,
   rebaseMonitorPanel,
   type MonitorPanel,
+  MONITOR_INTERVALS,
 } from "./monitorPanels";
 import { mergeSyncPayloads } from "./syncMerge";
 import type { SyncPayload } from "./sync";
@@ -30,6 +31,12 @@ const payload = (panels?: MonitorPanel[]): SyncPayload => ({
   customGroups: [],
   syncedAt: 1,
   ...(panels === undefined ? {} : { monitorPanels: panels }),
+});
+test("monitor intervals include each supported cadence and default to five seconds", () => {
+  assert.deepEqual(MONITOR_INTERVALS, [1, 2, 3, 5, 10, 30, 60]);
+  for (const interval of MONITOR_INTERVALS)
+    assert.equal(normalizeMonitorPanels([{ ...panel, interval }])[0].interval, interval);
+  assert.equal(normalizeMonitorPanels([{ ...panel, interval: undefined }])[0].interval, 5);
 });
 test("portable panel sanitizer strips all runtime data and preserves ordered references", () => {
   const clean = normalizeMonitorPanels([

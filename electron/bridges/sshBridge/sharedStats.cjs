@@ -49,7 +49,7 @@ function appendPoint(state, result, now) {
   if (
     !result.success ||
     !result.stats ||
-    now - (state.points.at(-1)?.at ?? 0) < 10000
+    now - (state.points.at(-1)?.at ?? 0) < 1000
   )
     return;
   const s = result.stats;
@@ -66,7 +66,7 @@ function appendPoint(state, result, now) {
   });
   state.points = state.points
     .filter((p) => now - p.at <= 30 * 60000)
-    .slice(-180);
+    .slice(-1800);
 }
 async function sampleSharedStats(session, collect, now = Date.now()) {
   const conn = session.conn || session.moshStatsConn || session.etStatsConn;
@@ -85,6 +85,7 @@ async function sampleSharedStats(session, collect, now = Date.now()) {
   }
   const state = stateFor(conn, session._reuseEndpoint);
   const full = !session._monitorStats;
+  const cacheMs = full ? 4000 : Math.min(4000, session._monitorIntervalMs ?? 5000);
   if (full) state.fullUntil = now + 15000;
   if (state.pending) {
     if (full) state.terminalJoined = true;
@@ -96,7 +97,7 @@ async function sampleSharedStats(session, collect, now = Date.now()) {
   }
   if (
     state.latest?.success &&
-    now - state.at < 4000 &&
+    now - state.at < cacheMs &&
     (!full || state.latestFull)
   )
     return state.latest;

@@ -1,4 +1,5 @@
 import { ArrowLeft, MoreVertical, X } from 'lucide-react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import React, { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter';
@@ -84,6 +85,7 @@ interface AsidePanelProps extends AsidePanelResizeProps {
     children: ReactNode;
     className?: string;
     headerClassName?: string;
+    modal?: boolean;
     width?: string;
     layout?: AsidePanelLayout;
     /**
@@ -338,6 +340,41 @@ export const AsidePanelStack: React.FC<AsidePanelStackProps> = ({
 };
 
 // Simple Panel Component (no stack)
+const modalOpeners = new WeakMap<HTMLElement, HTMLElement>();
+
+function ModalAsidePanel({ children, onClose }: { children: React.ReactElement; onClose: () => void }) {
+    // Capture before children mount and autofocus. A replacement drawer inherits
+    // the original opener when moving between an editor and its host picker.
+    const [opener] = useState(() => {
+        if (typeof document === 'undefined') return null;
+        const active = document.activeElement;
+        if (!(active instanceof HTMLElement)) return null;
+        const previousDialog = active.closest<HTMLElement>('[role="dialog"]');
+        return (previousDialog && modalOpeners.get(previousDialog)) || active;
+    });
+    return (
+        <DialogPrimitive.Root open onOpenChange={(next) => !next && onClose()}>
+            <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/25 app-no-drag monitor-backdrop-enter" data-section="aside-modal-backdrop" />
+            <DialogPrimitive.Content
+                asChild
+                aria-modal="true"
+                aria-describedby={undefined}
+                ref={(element) => {
+                    if (element && opener) modalOpeners.set(element, opener);
+                }}
+                onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    // Do not pull focus out of a replacement drawer.
+                    if (document.activeElement?.closest('[role="dialog"]')) return;
+                    if (opener?.isConnected) opener.focus({ preventScroll: true });
+                }}
+            >
+                {children}
+            </DialogPrimitive.Content>
+        </DialogPrimitive.Root>
+    );
+}
+
 export const AsidePanel: React.FC<AsidePanelProps> = ({
     open,
     onClose,
@@ -349,6 +386,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
     children,
     className,
     headerClassName,
+    modal = false,
     width = 'w-[380px]',
     layout = 'overlay',
     resizable = false,
@@ -376,7 +414,8 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         if (!resizable) return;
 
         event.preventDefault();
-        event.stopPropagation();
+        // Modal outside-click tracking must observe the resize pointerdown.
+        if (!modal) event.stopPropagation();
 
         const startX = event.clientX;
         const startWidth = panelWidthPx;
@@ -407,21 +446,23 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         window.addEventListener('pointermove', handlePointerMove);
         window.addEventListener('pointerup', handlePointerUp);
         window.addEventListener('pointercancel', handlePointerUp);
-    }, [panelWidthPx, persistWidthStorageKey, resizable]);
+    }, [modal, panelWidthPx, persistWidthStorageKey, resizable]);
 
     if (!open) return null;
 
-    return (
+    const panel = (
         <div className={cn(
             layout === 'inline'
                 ? "relative split-panel-enter shrink-0 h-full min-h-0 max-w-full border-l border-border/60 bg-background flex flex-col app-no-drag overflow-hidden shadow-[-16px_0_32px_hsl(var(--foreground)/0.08)]"
                 : "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
             layout === 'overlay' && !usesPixelWidth && width,
             isResizing && 'transition-none',
-            className
+            className,
+            modal && 'z-50 monitor-drawer-enter',
         )}
         style={panelStyle}
         data-section={dataSection}>
+            {modal && <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>}
             {resizable ? (
                 <div
                     role="separator"
@@ -450,6 +491,8 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
             {children}
         </div>
     );
+    if (!modal) return panel;
+    return <ModalAsidePanel onClose={onClose}>{panel}</ModalAsidePanel>;
 };
 
 export default AsidePanel;

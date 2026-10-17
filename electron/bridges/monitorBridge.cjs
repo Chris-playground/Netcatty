@@ -72,6 +72,7 @@ function createMonitorService({
         conn: entry.transport.conn,
         hostname: entry.hostname,
         _monitorStats: true,
+        _monitorIntervalMs: intervalFor(entry) * 1000,
         _reuseEndpoint: entry.transport.endpoint,
       });
       if (entry.cancelled) return;
@@ -252,7 +253,7 @@ function createMonitorService({
         id: panel.id,
         keys,
         hosts,
-        interval: [10, 30, 60].includes(panel.interval) ? panel.interval : 10,
+        interval: [1, 2, 3, 5, 10, 30, 60].includes(panel.interval) ? panel.interval : 5,
       });
     }
     for (const [id, panel] of panels)

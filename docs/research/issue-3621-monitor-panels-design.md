@@ -100,9 +100,9 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 
 ### 图表模式
 
-每台一张自动排列的卡片：主机图标/名称/地址/状态、CPU 当前值及核数、内存当前值及容量、CPU/内存短趋势、总容量最大的两个分区的挂载点和占用条、网络上下行当前速率。卡片高度保持一致，内部以留白和彩色读数分区，不嵌套描边容器或状态标签；列表同样无边框，工具栏控件统一高度。面板说明不在主页面重复展示。
+每台一张自动排列的卡片：主机图标/名称/地址/状态、CPU 当前值及核数、内存当前值及容量、CPU/内存短趋势（悬停显示指示线、真实采样值和时间）、总容量最大的两个分区的挂载点和占用条、网络上下行当前速率。卡片高度保持一致，内部以留白和彩色读数分区，不嵌套描边容器或状态标签；列表同样无边框，工具栏控件统一高度。面板说明不在主页面重复展示。
 
-点击主机打开右侧详情，显示放大的 CPU/内存趋势、网络上传/下载趋势、系统信息和各盘/各网卡读数。详情、编辑与选主机互斥打开，均使用可拖拽调宽的覆盖式侧栏；侧栏标题栏与主内容标题栏同高，保留返回/关闭和固定底部操作。
+点击主机打开右侧详情，显示放大的 CPU/内存趋势、网络上传/下载趋势、系统信息和各盘/各网卡读数。详情、编辑与选主机互斥打开，均使用可拖拽调宽的模态覆盖式侧栏，滑入时淡入遮罩，点击遮罩或按 Escape 关闭；侧栏标题栏与主内容标题栏同高，保留返回/关闭和固定底部操作。
 
 两种展示共用主机集合、读数和短趋势。换视图不重新登录、不清曲线、不新建另一份采集。显示偏好按每个面板保存。首版不加入自由拖拽布局和每张图的查询编辑器。
 
@@ -119,7 +119,7 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 - Vault 锁定、系统睡眠或网络断开时，不继续用缓存秘密重试登录；展示暂停/断开与缺口，解锁或恢复网络后依既有安全规则处理，不能绕过身份确认。
 - 需要口令、验证码或主机身份确认时逐台处理，其他主机继续；不要同时弹出一串登录框。
 
-首版建议 10 秒更新，可选 30/60 秒。频率是设计值，不是竞品证明的最佳值或严格性能保证。系统信息、磁盘容量可低频，列表不采完整进程/GPU/每核详情。采集失败有限退避，认证或身份变化等待用户，不循环刷日志。
+默认 5 秒更新，可选 1/2/3/5/10/30/60 秒。共享缓存按当前监控的最快需求刷新，不以旧的 4 秒缓存限制 1 秒采集。系统信息、磁盘容量可低频，列表不采完整进程/GPU/每核详情。采集失败有限退避，认证或身份变化等待用户，不循环刷日志。
 
 ## 5. SSH 长连接：复用现有机制的真实边界
 
@@ -155,7 +155,7 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 
 监控读数不写 localStorage、IndexedDB、文件、缓存、备份、同步或常规日志；不通过“页面状态恢复”间接带出采样。诊断仅记录必要的状态与计数，不记录采样正文。
 
-短趋势建议每个唯一采集身份一份有上限的内存缓冲，保留最近 30 分钟、最多 180 点，监控展示最快 10 秒一点。多个面板不各存一份。按时间和数量同时裁剪，失去需求后有限期回收；程序退出全部清空。
+短趋势建议每个唯一采集身份一份有上限的内存缓冲，保留最近 30 分钟、最多 1800 点，监控最快 1 秒一点。多个面板不各存一份。按时间和数量同时裁剪，失去需求后有限期回收；程序退出全部清空。
 
 因此只提供最近 5/15/30 分钟的观察范围，不提供昨天/过去一周等历史查询。实际采样不足所选范围时显示已采时长，断网或暂停期间保留缺口，不补 0、不虚构连贯趋势。100 台 × 180 点 × 六个 8 字节数字约 0.86MB 只是原始数字下限，实际对象和渲染占用仍要实测。
 
@@ -205,7 +205,7 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 - Panel configuration is normalized through an allowlist. It participates in the existing three-way and convergent sync collections, deletion records, auto-sync change notifications, Vault JSON export/import and protective backups. Prepared cloud applies rebase intervening window edits; old payloads without the field preserve local panels.
 - Monitoring runs in the terminal worker, using the existing SSH registry's full identity and joined dials, with an explicit `monitor` lease. Authentication reuses the existing SSH preparation, host-key, keyboard-interactive and jump-host paths. No terminal session or shell is created for monitoring.
 - Ordinary terminal opens retain their existing fresh-login policy. If a terminal already exists, monitoring borrows its compatible transport. Distinct transports with the exact same normalized identity share the metrics cache and baseline too, so a required fresh terminal login does not duplicate collection.
-- Shared collection/history is volatile. Each history keeps at most 180 points from the last 30 minutes, sampled no faster than every 10 seconds. At most 256 unique monitoring identities run at once; the metrics identity cache is bounded to 512 entries and periodically prunes expired histories. No readings, errors, running intent or credentials enter the panel storage shape.
+- Shared collection/history is volatile. Each history keeps at most 1800 points from the last 30 minutes, sampled no faster than every second. At most 256 unique monitoring identities run at once; the metrics identity cache is bounded to 512 entries and periodically prunes expired histories. No readings, errors, running intent or credentials enter the panel storage shape.
 - Known network devices are rejected using the existing renderer banner rules, extracted into one shared module. Recognized single-channel peers are rejected before an extra command runs. Monitor-only samples omit process and GPU queries. A terminal reader upgrades a lightweight sample to a complete one; subsequent shared queries remain complete while a terminal is actively reading. The same existing Linux/macOS parser, disk handling, CPU deltas and network deltas serve terminal and monitoring readers.
 - A real macOS shell exercise found an existing cooked-template escape in the disk awk expression. It now uses a literal prefix comparison, with a generated-command regression test; the actual monitor reads root/volume capacity correctly.
 
