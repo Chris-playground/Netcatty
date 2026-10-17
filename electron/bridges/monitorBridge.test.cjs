@@ -698,7 +698,7 @@ test("fresh monitoring never samples a reused terminal before its restricted ban
   pool.returnTransport(terminal);
 });
 
-test("snapshot deltas send new points only, even with 256 full retained histories", async () => {
+test("snapshot deltas send new points only, even with 256 full retained histories", async (t) => {
   const connections = [];
   const f = fixture({
     startConnection: async (_event, opts) => {
@@ -710,6 +710,7 @@ test("snapshot deltas send new points only, even with 256 full retained historie
   const hosts = Array.from({ length: 256 }, (_, index) => ({ id: `h${index}`, options: { ...options, hostname: `host${index}` } }));
   f.service.reconcile(event(1), [{ ...demand(), hosts }]);
   await until(() => f.timers.length === 256);
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const at = Date.now();
   for (const c of connections) {
     const shared = readSharedStats(c);
@@ -743,7 +744,7 @@ test("snapshot deltas send new points only, even with 256 full retained historie
   assert.deepEqual(f.service.snapshot(event(1), staleIdentity).hosts.h0.stats, initial.hosts.h0.stats);
   assert.equal(f.service.snapshot(event(1), { ...cursor, runtimeId: "old-worker" }).historyMode, "replace");
   const shared = readSharedStats(connections[0]);
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  t.mock.timers.tick(5);
   await sampleSharedStats({ conn: connections[0], _monitorStats: true }, async () =>
     ({ success: true, stats: { ...shared.result.stats, cpu: 67 } }), shared.at + 5000);
   const fresh = f.service.snapshot(event(1), caughtUp);
