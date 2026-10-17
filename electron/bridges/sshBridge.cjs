@@ -1505,17 +1505,22 @@ function registerOwnedAuthResponseHandler(ipcMain, terminalWorkerManager, channe
 
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
+  const trackedMonitorOwners = new WeakSet();
   for (const [channel, handler] of Object.entries(monitorHandlers)) {
-    if (terminalWorkerManager) {
-      const tracked = new WeakSet();
-      ipcMain.handle(channel, (event, payload) => {
-        if (!tracked.has(event.sender)) {
-          tracked.add(event.sender);
-          event.sender.once("destroyed", () => terminalWorkerManager.request("netcatty:monitor:owner-close", event.sender.id, { webContentsId: event.sender.id }).catch(() => {}));
-        }
-        return terminalWorkerManager.request(channel, payload, { webContentsId: event.sender.id });
-      });
-    } else ipcMain.handle(channel, handler);
+    ipcMain.handle(channel, (event, payload) => {
+      const owner = event.sender.id;
+      if (!trackedMonitorOwners.has(event.sender)) {
+        trackedMonitorOwners.add(event.sender);
+        event.sender.once("destroyed", () => {
+          if (terminalWorkerManager) {
+            void terminalWorkerManager.request("netcatty:monitor:owner-close", owner, { webContentsId: owner }).catch(() => {});
+          } else monitorService.removeOwner(owner);
+        });
+      }
+      return terminalWorkerManager
+        ? terminalWorkerManager.request(channel, payload, { webContentsId: owner })
+        : handler(event, payload);
+    });
   }
 
   if (terminalWorkerManager) {
