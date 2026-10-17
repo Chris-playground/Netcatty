@@ -906,6 +906,7 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
           const url = tab.url;
           const navigation = { url, downloading: false };
           record.navigations.set(contentsId, navigation);
+          if (record.visible && record.activeTabId === tab.id && !record.overlayOpen) contents.focus();
           try { await contents.loadURL(url); }
           catch (error) {
             // Chromium rejects loadURL when a navigation becomes a download.
@@ -914,7 +915,6 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
           } finally {
             if (record.navigations.get(contentsId) === navigation) record.navigations.delete(contentsId);
           }
-          if (record.visible && windows.get(record.id) === record && !tab.view.webContents.isDestroyed()) tab.view.webContents.focus();
         }
         break;
       case "back": if (tab && record.route === "connected") tab.view.webContents.navigationHistory?.goBack(); break;

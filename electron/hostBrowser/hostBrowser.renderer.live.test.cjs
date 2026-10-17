@@ -19,6 +19,7 @@ fs.mkdirSync(downloadsPath);
 app.setPath('downloads', downloadsPath);
 let owner, manager, vite, site;
 let pendingPdf;
+let pendingNavigation;
 const pdfBody = Buffer.concat([Buffer.from('%PDF-1.4\n% streamed inline PDF\n'), Buffer.alloc(1048576, 32)]);
 const savedCopy = path.join(userData, 'saved-copy.txt');
 const shellActions = [];
@@ -51,6 +52,10 @@ async function main() {
   await vite.listen();
   const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
   site = http.createServer((request, response) => {
+    if (request.url === '/slow-page') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.write('<title>Slow navigation</title><input autofocus>'); pendingNavigation = response; return;
+    }
     if (request.url === '/inline.pdf') {
       response.writeHead(200, { 'content-type': 'application/pdf;charset=UTF-8', 'content-length': pdfBody.length,
         'content-disposition': "inline; filename*=UTF-8''%E6%85%A2%E9%80%9F%E6%8A%A5%E5%91%8A.pdf" });
@@ -254,6 +259,20 @@ async function main() {
   const downloadScreenshot=path.join(userData,'automatic-downloads.png');
   await capture(downloadScreenshot);
   owner.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  await input('[aria-label="输入网址"]', `${url}slow-page`);
+  await run('document.querySelector("[aria-label=输入网址]").form.requestSubmit()');
+  await until(() => !!pendingNavigation, true, 'slow navigation is waiting for its response to finish');
+  await click('[aria-label="新标签页"]');
+  await until(() => run('document.activeElement.getAttribute("aria-label")'), '输入网址', 'new tab receives input focus while the previous page is loading');
+  await input('[aria-label="输入网址"]', 'keep my address draft');
+  pendingNavigation.end();
+  await until(() => !activePage.isLoading(), true, 'the background page finishes loading');
+  await wait(100);
+  assert.equal(owner.webContents.isFocused(), true, 'background navigation must not steal the new tab input focus');
+  assert.equal(await run('document.activeElement.getAttribute("aria-label")'), '输入网址');
+  assert.equal(await run('document.querySelector("[aria-label=输入网址]").value'), 'keep my address draft');
+  await click('[role=tab]:nth-child(2)');
+  await until(() => owner.contentView.children.includes(root), true, 'return to the loaded page');
   await click('#visibility');
   await until(() => owner.contentView.children.includes(root), false, 'hidden terminal hides only its page');
   await click('#visibility');
