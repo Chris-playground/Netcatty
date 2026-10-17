@@ -140,8 +140,8 @@ test("cloud and backup imports preserve both independently created same-name pan
   assert.deepEqual(
     readMonitorPanels().map((p) => [p.id, p.name]),
     [
-      ["b", "FLEET (2)"],
       ["a", "Fleet"],
+      ["b", "FLEET (2)"],
     ],
   );
   const backup = buildLocalVaultPayload(vault);
