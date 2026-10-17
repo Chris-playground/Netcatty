@@ -14,7 +14,7 @@ export interface MonitorPanel {
 export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
   if (!Array.isArray(value)) return [];
   const ids = new Set<string>();
-  return value.flatMap((raw): MonitorPanel[] => {
+  const panels = value.flatMap((raw): MonitorPanel[] => {
     if (!raw || typeof raw !== "object") return [];
     const p = raw as Record<string, unknown>;
     if (
@@ -55,6 +55,32 @@ export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
       },
     ];
   });
+  // Independent devices can create the same name with different IDs. Keep
+  // every configuration, and choose suffixes by ID so merge order cannot
+  // change which panel is renamed. Reserve existing names before allocating.
+  const reserved = new Set(panels.map((p) => p.name.toLowerCase()));
+  const seenNames = new Set<string>();
+  const namesById = new Map<string, string>();
+  for (const p of [...panels].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  )) {
+    const key = p.name.toLowerCase();
+    if (!seenNames.has(key)) {
+      seenNames.add(key);
+      continue;
+    }
+    let suffix = 2;
+    let name: string;
+    do {
+      const ending = ` (${suffix++})`;
+      name = p.name.slice(0, 120 - ending.length).trimEnd() + ending;
+    } while (reserved.has(name.toLowerCase()));
+    reserved.add(name.toLowerCase());
+    namesById.set(p.id, name);
+  }
+  return panels.map((p) =>
+    namesById.has(p.id) ? { ...p, name: namesById.get(p.id)! } : p,
+  );
 }
 
 /** Rebase only edited fields onto the latest disk entity; deletion wins over a stale editor. */
@@ -75,7 +101,7 @@ export function rebaseMonitorPanel(
     latest.some(
       (p) =>
         p.id !== merged.id &&
-        p.name.toLocaleLowerCase() === merged.name.trim().toLocaleLowerCase(),
+        p.name.toLowerCase() === merged.name.trim().toLowerCase(),
     )
   ) {
     throw new Error("monitor.duplicateName");

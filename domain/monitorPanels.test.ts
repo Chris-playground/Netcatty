@@ -120,3 +120,39 @@ test("convergent replica carries panel creation, edits and deletion", () => {
     [],
   );
 });
+
+test("independent same-name panels remain distinct after merge/import regardless of order", () => {
+  const left = { ...panel, id: "a", name: "Fleet" };
+  const right = { ...panel, id: "b", name: "fleet" };
+  const existingSuffix = { ...panel, id: "c", name: "Fleet (2)" };
+  const normalizeById = (panels: MonitorPanel[]) =>
+    normalizeMonitorPanels(panels).sort((a, b) => a.id.localeCompare(b.id));
+  const merged = mergeSyncPayloads(
+    payload([]),
+    payload([left, existingSuffix]),
+    payload([right]),
+  ).payload.monitorPanels!;
+  const clean = normalizeById(merged);
+  const empty = payload([]);
+  const l = applyLegacySyncPayload(createConvergentSyncState(), empty, payload([left, existingSuffix]), "a", 1);
+  const r = applyLegacySyncPayload(createConvergentSyncState(), empty, payload([right]), "b", 1);
+  const crdt = materializeSyncPayloadFromConvergentState(mergeConvergentSyncStates(l, r), { syncedAt: 2 });
+  assert.deepEqual(normalizeById(crdt.monitorPanels!), clean);
+  assert.deepEqual(
+    clean.map((p) => [p.id, p.name]),
+    [
+      ["a", "Fleet"],
+      ["b", "fleet (3)"],
+      ["c", "Fleet (2)"],
+    ],
+  );
+  assert.deepEqual(normalizeById([...merged].reverse()), clean);
+  assert.deepEqual(normalizeById(clean), clean);
+  const long = normalizeMonitorPanels([
+    left,
+    { ...right, name: "x".repeat(120) },
+    { ...panel, id: "d", name: "x".repeat(120) },
+  ]);
+  assert.ok(long.every((p) => p.name.length <= 120));
+  assert.equal(new Set(long.map((p) => p.name.toLowerCase())).size, 3);
+});

@@ -120,3 +120,37 @@ test("cloud apply preserves panel edits committed after preparation", async () =
     { ...panel, name: "From cloud", hostIds: ["h3"], view: "list" },
   ]);
 });
+
+test("cloud and backup imports preserve both independently created same-name panels", async () => {
+  store.clear();
+  const original = { ...panel, id: "a", name: "Fleet" };
+  const other = { ...panel, id: "b", name: "FLEET" };
+  writeMonitorPanels([original]);
+  await applySyncPayload(
+    {
+      hosts: [],
+      keys: [],
+      snippets: [],
+      customGroups: [],
+      syncedAt: 1,
+      monitorPanels: [other, original],
+    },
+    importers,
+  );
+  assert.deepEqual(
+    readMonitorPanels().map((p) => [p.id, p.name]),
+    [
+      ["b", "FLEET (2)"],
+      ["a", "Fleet"],
+    ],
+  );
+  const backup = buildLocalVaultPayload(vault);
+  delete backup.aiSessions;
+  writeMonitorPanels([]);
+  await applyLocalVaultPayload(backup, importers);
+  assert.equal(readMonitorPanels().length, 2);
+  assert.equal(
+    new Set(readMonitorPanels().map((p) => p.name.toLowerCase())).size,
+    2,
+  );
+});
