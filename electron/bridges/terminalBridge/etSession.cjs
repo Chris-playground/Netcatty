@@ -176,7 +176,7 @@ main();
         let releasePreparedAgent = null;
         try {
           if (connectionOptions.useSshAgent === true || forceFido) {
-            const agent = await prepareSystemSshAgentForAuth(prepOptions, logPrefix);
+            const agent = await prepareSystemSshAgentForAuth({ ...prepOptions, nativeFidoAgent: true }, logPrefix);
             if (typeof agent?._releaseNetcattyFidoAgent === "function") {
               releasePreparedAgent = agent._releaseNetcattyFidoAgent;
             }

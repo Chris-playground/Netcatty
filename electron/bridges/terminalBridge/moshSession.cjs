@@ -158,7 +158,7 @@ function createMoshSessionApi(ctx) {
       let releasePreparedAgent = null;
       try {
         if (options.useSshAgent === true || forceFido) {
-          const agent = await prepareSystemSshAgentForAuth(prepOptions, "[Mosh]");
+          const agent = await prepareSystemSshAgentForAuth({ ...prepOptions, nativeFidoAgent: true }, "[Mosh]");
           if (typeof agent?._releaseNetcattyFidoAgent === "function") {
             releasePreparedAgent = agent._releaseNetcattyFidoAgent;
           }

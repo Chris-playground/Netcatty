@@ -117,10 +117,10 @@ function resolveSshAgentBinary(env = process.env, platform = process.platform) {
 }
 
 function parseAgentStdout(stdout) {
-  const sockMatch = /SSH_AUTH_SOCK=([^;\s]+)/.exec(stdout || "");
+  const sockMatch = /SSH_AUTH_SOCK=([^;\r\n]+)/.exec(stdout || "");
   const pidMatch = /SSH_AGENT_PID=(\d+)/.exec(stdout || "");
   return {
-    socketPath: sockMatch?.[1] || null,
+    socketPath: sockMatch?.[1]?.trim().replace(/^(['"])(.*)\1$/, "$2") || null,
     agentPid: pidMatch ? Number(pidMatch[1]) : null,
   };
 }

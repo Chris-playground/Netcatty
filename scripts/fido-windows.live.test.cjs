@@ -11,6 +11,7 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { once } = require("node:events");
 const { Client, Server, utils } = require("ssh2");
+const { createAgent } = require("ssh2/lib/agent.js");
 const tempDirBridge = require("../electron/bridges/tempDirBridge.cjs");
 const askpass = require("../electron/bridges/fidoAskpass.cjs");
 const prompts = require("../electron/bridges/fidoPromptHandler.cjs");
@@ -34,6 +35,10 @@ test("Windows security-key integration with real user-mode OpenSSH", {
   timeout: 180000,
 }, async t => {
   const dir = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fw-"));
+  const originalGetTempDir = tempDirBridge.getTempDir;
+  const spacedTemp = path.join(dir, "profile space");
+  fs.mkdirSync(spacedTemp);
+  tempDirBridge.getTempDir = () => spacedTemp;
   const control = path.join(dir, "presence");
   const saved = Object.fromEntries(["NETCATTY_SSH_AGENT_PATH", "SSH_SK_PROVIDER", "NETCATTY_FIDO_SIM_CONTROL"].map(key => [key, process.env[key]]));
   const seen = [];
@@ -95,10 +100,11 @@ test("Windows security-key integration with real user-mode OpenSSH", {
     }));
   });
 
-  async function connect(generated, password) {
+  async function connect(generated, password, nativeAgent = false) {
     const options = await enhanceAuthOptionsForFido({
       hostname: "127.0.0.1", port: server.address().port, username: "netcatty",
       privateKey: generated.privateKey, identitiesOnly: true, keyLabel: "Windows test key", password,
+      nativeFidoAgent: nativeAgent,
     }, sender);
     const agent = await prepareSystemSshAgentForAuth(options, "[WindowsFido]");
     assert.ok(agent, "production auth preparation must return an agent");
@@ -113,7 +119,8 @@ test("Windows security-key integration with real user-mode OpenSSH", {
       });
       client.once("close", () => resolve({ error: new Error("Connection closed") }));
     });
-    client.connect({ host: "127.0.0.1", port: server.address().port, username: "netcatty", agent,
+    client.connect({ host: "127.0.0.1", port: server.address().port, username: "netcatty",
+      agent: nativeAgent ? createAgent(agent._netcattyAgentSocket) : agent,
       password, authHandler: password ? ["agent", "password"] : ["agent"], readyTimeout: 15000 });
     return { client, outcome, close() { client.end(); agent._releaseNetcattyFidoAgent?.(); } };
   }
@@ -156,7 +163,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
         const before = seen.length;
         fs.rmSync(`${control}.waiting`, { force: true });
         fs.writeFileSync(control, "waiting");
-        const connection = await connect(generated);
+        const connection = await connect(generated, undefined, true);
         let settled = false;
         connection.outcome.then(() => { settled = true; });
         try {
@@ -214,6 +221,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
     await new Promise(resolve => server.close(resolve));
     shutdownFidoAgentSubsystem();
     askpass.shutdownFidoAskpass();
+    tempDirBridge.getTempDir = originalGetTempDir;
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
