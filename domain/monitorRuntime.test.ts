@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { monitorStateSince, type MonitorHostState } from "./monitorRuntime";
+import { mergeMonitorSnapshotHistory, monitorStateSince, type MonitorHostState, type MonitorSnapshot } from "./monitorRuntime";
 
 const state: MonitorHostState = {
   status: "live", at: 2000, stats: {
@@ -27,4 +27,41 @@ test("only current-run readings are visible without mutating shared history", ()
   assert.equal(monitorStateSince({ ...state, status: "unsupported" }, 2000)?.status, "unsupported");
   assert.equal(monitorStateSince(state, 0)?.points.length, 2);
   assert.equal(state.points.length, 2);
+});
+
+const snapshot = (host: MonitorHostState): MonitorSnapshot => ({
+  historyMode: "replace", runtimeId: "worker", epoch: 0, takenAt: 3000,
+  running: ["p"], startedAt: { p: 0 }, count: 1, hostCount: 1, activeSessions: [], hosts: { h: host },
+});
+test("incremental snapshots retain history, deduplicate races and replace on worker reset", () => {
+  const original = snapshot(state);
+  const point = { ...state.points[1], at: 3000 };
+  const delta: MonitorSnapshot = { ...snapshot({ ...state, points: [state.points[1], point] }), historyMode: "append", takenAt: 4000 };
+  const merged = mergeMonitorSnapshotHistory(original, delta);
+  assert.deepEqual(merged.hosts.h.points.map((point) => point.at), [1000, 2000, 3000]);
+  assert.deepEqual(mergeMonitorSnapshotHistory(merged, delta).hosts.h.points, merged.hosts.h.points);
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...original, takenAt: 2000 }), merged);
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, epoch: 1 }).hosts.h.points.length, 2);
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, historyMode: "replace" }).hosts.h.points.length, 2);
+  assert.equal(original.hosts.h.points.length, 2);
+});
+test("incremental history expires after thirty minutes and remains bounded", () => {
+  const points = Array.from({ length: 1800 }, (_, i) => ({ ...state.points[0], at: 10000 + i * 1000 }));
+  const previous = snapshot({ ...state, points });
+  const next = { ...snapshot({ ...state, points: [{ ...points.at(-1)!, at: 1810000 }] }), historyMode: "append" as const, takenAt: 1810000 };
+  const merged = mergeMonitorSnapshotHistory(previous, next);
+  assert.equal(merged.hosts.h.points.length, 1800);
+  assert.equal(merged.hosts.h.points[0].at, 11000);
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...next, takenAt: 4000000 }).hosts.h.points.length, 0);
+});
+
+test("delayed replies cannot restore a stopped epoch or retired worker", () => {
+  const stopped: MonitorSnapshot = { ...snapshot(state), epoch: 1, takenAt: 4000, running: [], hosts: {}, startedAt: {} };
+  const old = { ...snapshot(state), historyMode: "append" as const };
+  assert.equal(mergeMonitorSnapshotHistory(stopped, old), stopped);
+  assert.equal(mergeMonitorSnapshotHistory(stopped, { ...old, takenAt: 5000 }), stopped);
+  const restarted = { ...stopped, runtimeId: "new-worker", epoch: 0 };
+  assert.equal(mergeMonitorSnapshotHistory(restarted, old), restarted);
+  const fresh = { ...restarted, runtimeId: "next-worker", takenAt: 5000 };
+  assert.equal(mergeMonitorSnapshotHistory(restarted, fresh), fresh);
 });

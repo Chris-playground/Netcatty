@@ -25,6 +25,7 @@ export type MonitorHostState = {
   points: MonitorPoint[];
 };
 export type MonitorSnapshot = {
+  historyMode: "replace" | "append";
   running: string[];
   count: number;
   hostCount: number;
@@ -36,6 +37,34 @@ export type MonitorSnapshot = {
   unavailable?: boolean;
   hosts: Record<string, MonitorHostState>;
 };
+
+export type MonitorHistoryCursor = {
+  runtimeId: string;
+  epoch: number;
+  after: Record<string, number>;
+};
+
+/** Incremental transport keeps the full bounded history in the renderer. */
+export function mergeMonitorSnapshotHistory(previous: MonitorSnapshot, next: MonitorSnapshot): MonitorSnapshot {
+  if (previous.runtimeId !== next.runtimeId) {
+    // An old worker reply can still be in transit after its replacement starts.
+    if (previous.runtimeId && next.runtimeId && next.takenAt <= previous.takenAt) return previous;
+    return next;
+  }
+  if (next.epoch < previous.epoch) return previous;
+  if (next.epoch > previous.epoch) return next;
+  if (next.takenAt < previous.takenAt) return previous;
+  if (next.historyMode === "replace") return next;
+  return {
+    ...next,
+    hosts: Object.fromEntries(Object.entries(next.hosts).map(([id, host]) => {
+      const retained = previous.hosts[id]?.points ?? [];
+      const last = retained.at(-1)?.at ?? 0;
+      return [id, { ...host, points: [...retained, ...host.points.filter((point) => point.at > last)]
+        .filter((point) => next.takenAt - point.at <= 30 * 60000).slice(-1800) }];
+    })),
+  };
+}
 
 /** A panel only displays samples collected during its current cadence/run. */
 export function monitorStateSince(state: MonitorHostState | undefined, startedAt: number | undefined): MonitorHostState | undefined {

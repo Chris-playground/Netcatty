@@ -135,7 +135,7 @@ Vault 左侧在“主机”下方增加“监控”，沿用原有选中态和�
 
 - 当前池没有正式 monitor 用途；现有 [统计入口](../../electron/bridges/sshBridge/sessionOps.cjs)仍依赖终端 session。正式实现需要新增监控用途，并把采样上下文与 CPU/网速前次计数从终端会话解耦。不能创建隐藏终端冒充监控，否则可能带来终端启动脚本和其他副作用。
 - 多面板、详情、终端与窗口对同一兼容身份共用一份采集；只有第一次无可用连接才按既有认证/组继承/跳板/信任检查流程建连。不另造监控专用池，不绕过认证。
-- 多个订阅频率不同时，底层基础读数按最短有效需求；例如终端仍要每 5 秒读数，监控面板选择 30 秒不意味着该机器远端查询变为每 30 秒。各面板可按自身频率呈现，实际共享频率需可解释。
+- 多个订阅频率不同时，底层基础读数按最短有效需求；1 秒等快速监控始终使用轻量采集，进程/GPU 等完整读数只由终端按其自身频率触发，并有独立的 4 秒缓存；例如终端仍要每 5 秒读数，监控面板选择 30 秒不意味着该机器远端查询变为每 30 秒。各面板可按自身频率呈现，实际共享频率需可解释。
 - 长连接指已认证 SSH 传输保持与复用，现有路径仍定时执行查询。它不自动等于持续推流、无远端命令或零堡垒机审计；改为持续采集进程属于另一个明确决策，本方案不默认引入远端落盘脚本或常驻安装。
 
 正式支持范围先以现有 Linux/macOS SSH 统计与已验证跳板方式为准。网络设备、Telnet、单通道/受限方式需明确不可用原因。现有 [SelectHostPanel](../../components/SelectHostPanel.tsx)的默认过滤不足以代表这些能力已经全部处理。
@@ -222,3 +222,7 @@ Additional acceptance evidence:
 - A controlled SSH fixture supplied 100 distinct identities over real connections. All 100 produced their first readings in 876ms; 100 cards rendered (two trend charts each), with a measured renderer heap increase of 6.69MiB. The fixture recorded 100 successful authentications, 100 collection commands plus capability/disk work, and zero shells for this exercise. This tests fixture throughput and rendering, not a production fleet's network latency.
 - Accelerated in-memory history exercise through the production sampler retained exactly 18,000 points for 100 identities, with a measured heap increase of 1.92MiB after collection. This measures the real bounded object representation; it does not claim 30 minutes of production observation.
 - Last successful readings and their timestamp survive sampling failure; missing measurements remain null. A failed host does not block reuse and collection on an already-authenticated host. Capacity is applied after obsolete demand is removed, including replacing a host at the 256-identity bound.
+
+### Fast-cadence transport validation
+
+Renderer polling sends a per-host timestamp cursor. Worker snapshots send only newer points after the first full snapshot; renderer memory merges, deduplicates and bounds history to 1,800 points and 30 minutes. Worker/runtime changes replace history, and older responses cannot overwrite newer state. A 256-host test with full retained histories transfers only 256 new points per polling round, below one percent of the full-history payload. Full terminal stats keep their own four-second cache; one-second monitor requests remain lightweight.

@@ -12,6 +12,7 @@ import {
 import { useMonitorPanels } from "./monitorPanelsStorage";
 import {
   monitorActions,
+  getMonitorHistoryCursor,
   publishMonitorSnapshot,
   publishMonitorUnavailable,
 } from "./monitorRuntimeStore";
@@ -164,7 +165,7 @@ export function useMonitorRuntime() {
       if (pending || !bridge?.monitorSnapshot) return;
       pending = true;
       try {
-        const snapshot = await bridge.monitorSnapshot();
+        const snapshot = await bridge.monitorSnapshot(getMonitorHistoryCursor());
         if (disposed) return;
         if (
           (epoch.current !== null && epoch.current !== snapshot.epoch) ||
