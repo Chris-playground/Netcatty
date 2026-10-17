@@ -388,6 +388,17 @@ function createVaultBackupService({ app, safeStorage, shell }) {
             if (error.code !== "ENOENT") failedCount += 1;
           }
         }
+        // Persist directory changes before reporting success, including on a
+        // retry after a previous sync failure left no backup files to unlink.
+        // Windows does not support opening directory handles this way.
+        if (process.platform !== 'win32') {
+          const dirHandle = await fs.promises.open(dirPath, 'r');
+          try {
+            await dirHandle.sync();
+          } finally {
+            await dirHandle.close();
+          }
+        }
         if (failedCount) throw new Error(`Could not delete ${failedCount} vault backup file(s).`);
         return { deletedCount };
       });

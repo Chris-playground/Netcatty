@@ -776,3 +776,40 @@ test('clearBackups reports partial deletion failures and permits retry', async (
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('clearBackups persists deletion and retries a failed directory sync even when empty', {
+  skip: process.platform === 'win32',
+}, async (t) => {
+  const root = createTempRoot();
+  try {
+    const service = createService(root);
+    await service.createBackup({ payload: samplePayload() });
+    const dir = path.join(root, BACKUP_DIR_NAME);
+    const originalOpen = fs.promises.open;
+    let syncCalls = 0;
+    let closeCalls = 0;
+    t.mock.method(fs.promises, 'open', async (target, ...args) => {
+      const handle = await originalOpen(target, ...args);
+      if (target !== dir) return handle;
+      return {
+        async sync() {
+          syncCalls += 1;
+          assert.deepEqual(fs.readdirSync(dir), []);
+          if (syncCalls === 1) throw new Error('fixture directory sync failed');
+          await handle.sync();
+        },
+        async close() {
+          closeCalls += 1;
+          await handle.close();
+        },
+      };
+    });
+    await assert.rejects(service.clearBackups(), /fixture directory sync failed/);
+    assert.equal(closeCalls, 1);
+    assert.deepEqual(await service.clearBackups(), { deletedCount: 0 });
+    assert.equal(syncCalls, 2);
+    assert.equal(closeCalls, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
