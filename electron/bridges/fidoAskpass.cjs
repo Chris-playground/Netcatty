@@ -182,7 +182,7 @@ function resolveFidoAskpassSocketPath(baseDir, platform = process.platform) {
   if (platform === "win32") {
     return `\\\\.\\pipe\\netcatty-fido-askpass-${randomUUID().slice(0, 8)}`;
   }
-  return path.join(baseDir, "askpass.sock");
+  return path.posix.join(baseDir, "askpass.sock");
 }
 
 function writeSecureFile(filePath, contents, mode = 0o700) {
@@ -243,7 +243,7 @@ function resolveSharedAgentPromptSender() {
     || liveSenderFromResolver(resolveWebContents);
 }
 
-function handleAskpassClient(socket) {
+function handleAskpassClient(socket, platform = process.platform) {
   let buf = "";
   let handled = false;
   const controller = new AbortController();
@@ -302,14 +302,28 @@ function handleAskpassClient(socket) {
     }
     const signing = signingQueue[0]?.leaseId === ownerLeaseId ? signingQueue[0] : null;
     try {
-      const result = await fidoPromptHandler.requestFidoPrompt(sender, {
+      const detachedNotification = notificationOnly && platform === "win32";
+      if (kind === "pin" && platform === "win32") {
+        fidoPromptHandler.cancelFidoPromptRequestsForLease(ownerLeaseId, "pin-requested", true);
+      }
+      const pending = fidoPromptHandler.requestFidoPrompt(sender, {
         kind,
         notificationOnly,
         message: prompt,
         keyName: signing?.keyName || "",
         leaseId: ownerLeaseId,
-        signal: controller.signal,
+        signal: detachedNotification
+          ? (signing?.attemptController || signing?.controller)?.signal : controller.signal,
       });
+      if (detachedNotification) {
+        // MSYS cannot reliably terminate a native Node notification helper.
+        // Acknowledge this non-authorizing notification immediately; retain the
+        // hint under the signing attempt (or key-generation lease) instead.
+        void pending;
+        socket.end('{"ok":true,"response":""}\n');
+        return;
+      }
+      const result = await pending;
       if (socket.destroyed) return;
       if (!result || result.cancelled) {
         if (kind === "pin" && signing) signing.cancelled = true;
@@ -319,14 +333,16 @@ function handleAskpassClient(socket) {
       // Touch/confirm: empty string is fine; PIN: return entered secret.
       const response = kind === "pin" ? (result.response || "") : "";
       if (kind === "pin" && signing) signing.pinSubmitted = true;
-      if (kind === "pin" && response && /user presence|touch|tap/i.test(prompt)
-          && signing?.leaseId === ownerLeaseId && !signing.controller.signal.aborted) {
+      if (kind === "pin" && response
+          && (platform === "win32" || /user presence|touch|tap/i.test(prompt))
+          && ((signing?.leaseId === ownerLeaseId && !signing.controller.signal.aborted)
+            || (platform === "win32" && ownerLeaseId))) {
         // ssh-agent ends its initial notification before asking for a PIN and
         // does not restart it on retry. Keep a device-only waiting hint visible
         // after PIN submission until the actual signature callback completes.
         void fidoPromptHandler.requestFidoPrompt(sender, {
-          kind: "touch", notificationOnly: true, message: prompt, keyName: signing.keyName || "",
-          leaseId: ownerLeaseId, signal: (signing.attemptController || signing.controller).signal,
+          kind: "touch", notificationOnly: true, message: prompt, keyName: signing?.keyName || "",
+          leaseId: ownerLeaseId, signal: (signing?.attemptController || signing?.controller)?.signal,
         });
       }
       socket.end(`${JSON.stringify({ ok: true, response })}\n`);
