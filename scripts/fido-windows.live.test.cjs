@@ -67,7 +67,15 @@ test("Windows security-key integration with real user-mode OpenSSH", {
     client.on("authentication", ctx => {
       if (ctx.method === "publickey") {
         const key = authorized.get(ctx.key.data.toString("base64"));
-        if (key && (!ctx.signature || key.verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true)) {
+        // ssh2's server decoder strips the first string length from signatures.
+        // SK verification also needs that length, plus the untouched flags/counter.
+        let signature;
+        if (ctx.signature && ctx.signature.length >= 5) {
+          const length = Buffer.alloc(4);
+          length.writeUInt32BE(ctx.signature.length - 5);
+          signature = Buffer.concat([length, ctx.signature]);
+        }
+        if (key && (!ctx.signature || (signature && key.verify(ctx.blob, signature, ctx.hashAlgo) === true))) {
           if (ctx.signature) acceptedPublicKeys += 1;
           return ctx.accept();
         }
@@ -99,7 +107,10 @@ test("Windows security-key integration with real user-mode OpenSSH", {
     attachFidoAgentRelease(client, agent);
     const outcome = new Promise(resolve => {
       client.once("ready", () => resolve({ ready: true }));
-      client.once("error", error => resolve({ error }));
+      client.on("error", error => {
+        // Ordinary agent failures allow the explicitly selected password path.
+        if (error.code === "ERR_FIDO_CANCELLED" || error.level !== "agent") resolve({ error });
+      });
       client.once("close", () => resolve({ error: new Error("Connection closed") }));
     });
     client.connect({ host: "127.0.0.1", port: server.address().port, username: "netcatty", agent,
@@ -152,7 +163,8 @@ test("Windows security-key integration with real user-mode OpenSSH", {
           assert.equal(settled, false, "PIN submission alone must not finish login");
           assert.ok(seen.slice(before).some(request => request.kind === "pin"));
           fs.writeFileSync(control, "touch");
-          assert.equal((await connection.outcome).ready, true);
+          const result = await connection.outcome;
+          assert.equal(result.ready, true, result.error?.message);
           const output = await new Promise((resolve, reject) => connection.client.exec("probe", (error, stream) => {
             if (error) return reject(error);
             let text = "";

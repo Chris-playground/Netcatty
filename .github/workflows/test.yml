@@ -89,7 +89,10 @@ jobs:
           cache: npm
 
       - name: Install deps
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      - name: Apply production dependency patches
+        run: npx patch-package --error-on-fail
 
       - name: Install user-mode OpenSSH and software authenticator toolchain
         uses: msys2/setup-msys2@v2
