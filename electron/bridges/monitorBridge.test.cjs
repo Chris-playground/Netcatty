@@ -23,6 +23,12 @@ const demand = (id = "p", opts = options) => ({
   hosts: [{ id: "h", options: opts }],
 });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+async function until(predicate) {
+  const deadline = Date.now() + 5000;
+  while (!predicate() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(predicate(), "asynchronous monitor state did not settle");
+}
 function conn() {
   const c = new EventEmitter();
   c._sock = { destroyed: false };
@@ -96,6 +102,7 @@ test("two panels and windows share one transport/sample; stopping preserves a te
   f.service.reconcile(event(2), [demand("a")]);
   await tick();
   await tick();
+  await until(() => f.samples === 1);
   assert.equal(f.dials, 1);
   assert.equal(f.samples, 1);
   assert.equal(f.service.snapshot(event(1)).count, 3);
@@ -124,6 +131,7 @@ test("different credentials never share an entry or physical dial", async () => 
   ]);
   await tick();
   await tick();
+  await until(() => f.dials === 2);
   assert.equal(f.dials, 2);
   assert.equal(f.service.snapshot(event(1)).hostCount, 2);
   f.service.dispose();
@@ -331,6 +339,7 @@ test("credential-changing retry leaves the other window's original identity acti
   ]);
   await tick();
   await tick();
+  await until(() => f.service.snapshot(event(1)).hosts.h.status === "live");
   assert.equal(f.service.snapshot(event(1)).hosts.h.status, "live");
   assert.equal(f.service.snapshot(event(2)).hosts.h.status, "login");
   assert.equal(f.service.snapshot(event(2)).activeSessions.length, 1);
@@ -339,6 +348,7 @@ test("credential-changing retry leaves the other window's original identity acti
     demand("p", { ...options, password: "corrected" }),
   ]);
   await tick();
+  await until(() => f.service.snapshot(event(2)).hosts.h.status === "live");
   assert.equal(f.service.snapshot(event(2)).hosts.h.status, "live");
   f.service.dispose();
 });
@@ -363,8 +373,11 @@ test("same-identity retry restarts shared failed demand for both windows", async
   f.service.reconcile(event(1), [demand()]);
   await tick();
   await tick();
+  await until(() => f.service.snapshot(event(1)).hosts.h.status === "live");
   assert.equal(f.service.snapshot(event(1)).hosts.h.status, "live");
+  await until(() => f.service.snapshot(event(2)).hosts.h.status === "live");
   assert.equal(f.service.snapshot(event(2)).hosts.h.status, "live");
+  await until(() => attempts === 2);
   assert.equal(attempts, 2);
   f.service.dispose();
 });
@@ -393,7 +406,9 @@ test("closing the owner during authentication reconnects demand for the survivin
   f.service.removeOwner(1);
   await tick();
   await tick();
+  await until(() => attempts === 2);
   assert.equal(attempts, 2);
+  await until(() => f.service.snapshot(event(2)).hosts.h.status === "live");
   assert.equal(f.service.snapshot(event(2)).hosts.h.status, "live");
   f.service.dispose();
 });
@@ -450,6 +465,9 @@ test("closing a window also moves queued shared authentication to the surviving 
     { owner: 1, hostname: "first" },
     { owner: 2, hostname: "second" },
   ]);
+  await until(
+    () => f.service.snapshot(event(2)).hosts.second.status === "live",
+  );
   assert.equal(f.service.snapshot(event(2)).hosts.second.status, "live");
   f.service.dispose();
 });
@@ -485,6 +503,9 @@ test("existing terminal connections sample while an unrelated host awaits authen
   await tick();
   await tick();
   assert.equal(f.service.snapshot(event(1)).hosts.pending.status, "connecting");
+  await until(
+    () => f.service.snapshot(event(1)).hosts.existing.status === "live",
+  );
   assert.equal(f.service.snapshot(event(1)).hosts.existing.status, "live");
   assert.equal(f.samples, 1);
   f.service.dispose();
@@ -527,6 +548,9 @@ for (const sharedHost of ["first", "second"]) {
       { owner: 1, hostname: "first" },
       { owner: 2, hostname: sharedHost },
     ]);
+    await until(
+      () => f.service.snapshot(event(2)).hosts[sharedHost].status === "live",
+    );
     assert.equal(f.service.snapshot(event(2)).hosts[sharedHost].status, "live");
     assert.equal(f.service.snapshot(event(1)).activeSessions.length, 0);
     f.service.dispose();

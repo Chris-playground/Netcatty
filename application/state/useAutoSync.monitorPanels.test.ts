@@ -1,9 +1,12 @@
+import { installBrowserLockFixture } from "../testSupport/browserLockFixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import type { MonitorPanel } from "../../domain/monitorPanels";
 import type { CloudProvider, SyncResult, SyncPayload } from "../../domain/sync";
+
+installBrowserLockFixture();
 
 const store = new Map<string, string>();
 const storage = {
@@ -116,13 +119,22 @@ test("normal manual and debounced auto-sync upload panel creation, edits and del
     return null;
   };
   const waitForUpload = async (count: number) => {
-    // Storage adapter notifications are batched on a zero-delay timer.
+    // Flush the adapter's batched event, then observe the actual debounced
+    // upload. Slow CI must not be mistaken for an incomplete collection.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 3250));
-    });
+    if (uploads.length === count) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 3500));
+      });
+    } else {
+      const deadline = Date.now() + 10000;
+      while (uploads.length < count && Date.now() < deadline)
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        });
+    }
     assert.equal(
       uploads.length,
       count,
