@@ -412,7 +412,9 @@ function createMoshSessionApi(ctx) {
         if (options.useSshAgent === false) {
           sshArgs.push("-o", "IdentityAgent=none");
         } else if (options.useSshAgent && options._resolvedSshAgentSocket) {
-          sshArgs.push("-o", `IdentityAgent=${options._resolvedSshAgentSocket}`);
+          // -o is parsed again as ssh_config syntax, even with argv spawning.
+          const quotedSocket = `"${String(options._resolvedSshAgentSocket).replace(/(["\\])/g, "\\$1")}"`;
+          sshArgs.push("-o", `IdentityAgent=${quotedSocket}`);
           if (options.identitiesOnly && !sshArgs.includes("IdentitiesOnly=yes")) {
             sshArgs.push("-o", "IdentitiesOnly=yes");
           }

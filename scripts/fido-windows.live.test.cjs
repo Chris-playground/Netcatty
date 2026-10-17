@@ -214,7 +214,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
             const result = await run(sshPath, ["-F", "none", "-p", String(server.address().port),
               "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL",
               "-o", "PreferredAuthentications=publickey", "-o", "BatchMode=yes",
-              "-o", `IdentityAgent=${identityAgent}`, "netcatty@127.0.0.1", "probe"],
+              "-o", `IdentityAgent=${JSON.stringify(identityAgent)}`, "netcatty@127.0.0.1", "probe"],
             { env: { ...process.env, SSH_AUTH_SOCK: identityAgent }, timeout: 15000, windowsHide: true });
             assert.equal(result.stdout, "windows-fido-ok");
             assert.ok(seen.slice(before).some(request => request.kind === "pin"));
