@@ -135,6 +135,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
       const result = await run(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c",
         `""${artifacts.wrapperPath}" "Enter PIN for authenticator:""`], {
         env: { ...process.env, ...env }, timeout: 10000, windowsHide: true,
+        windowsVerbatimArguments: true,
       });
       assert.equal(result.stdout.trim(), "123456");
       askpass.releaseFidoAskpassLease(env.NETCATTY_FIDO_ASKPASS_LEASE);

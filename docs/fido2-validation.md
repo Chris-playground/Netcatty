@@ -31,6 +31,35 @@ signature framing. `npm test` skips the opt-in integration simulation.
 This verifies the OpenSSH integration on Linux with a software authenticator.
 Real USB/CTAP devices and Windows/macOS installations still need device testing.
 
+## Native Windows integration check
+
+The `windows-fido` job in `.github/workflows/test.yml` runs native Windows Node
+with real MSYS2 OpenSSH and an MSYS-built version of the disposable provider.
+It exercises Windows named-pipe askpass IPC, enrollment and actual signatures
+for both SK algorithms, PIN plus a separately gated touch, incorrect PIN,
+missing-device cancellation with a saved password, and explicit password
+fallback. A local SSH protocol server verifies the signatures and executes a
+test command. The independent Docker/OpenSSH server check above runs on Linux.
+
+This checks a specific **user-mode MSYS2 OpenSSH** configuration. It does not
+establish support for every Windows OpenSSH distribution, the Windows system
+agent service, Git for Windows, native WebAuthn dialogs, or physical USB devices.
+Windows currently has no `ssh-sk-helper` error observer: recovery must retain
+the generic verification-failed reason rather than guessing which device error
+occurred. The Unix helper's 30-second cancellation deadline also does not apply
+to this Windows path.
+
+For a physical-device check of this configuration, launch Netcatty with
+`NETCATTY_SSH_AGENT_PATH` and `NETCATTY_SSH_KEYGEN_PATH` pointing to the matching
+MSYS2 executables and put that installation's `usr/bin` on `PATH`. Use its real
+built-in FIDO provider; **never** set `SSH_SK_PROVIDER` to the CI fixture. Check
+the complete application flow against a separate SSH server: select the saved
+SK identity on a host, connect, fulfill the actual PIN/touch requests, execute a
+command, and repeat with the device absent, removed, and with PIN cancellation.
+Record the Windows/OpenSSH/device versions and which dialogs are owned by the
+application or OS. A successful software-provider CI run does not replace this
+hardware check.
+
 ## Docker server and gated user presence
 
 ```sh

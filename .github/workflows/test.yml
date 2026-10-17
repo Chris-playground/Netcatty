@@ -99,7 +99,7 @@ jobs:
         with:
           msystem: MSYS
           update: true
-          install: gcc libopenssl-devel openssh
+          install: gcc openssl-devel openssh
 
       - name: Build disposable software authenticator
         shell: msys2 {0}
