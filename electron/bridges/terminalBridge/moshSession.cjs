@@ -145,7 +145,7 @@ function createMoshSessionApi(ctx) {
       }
     }
 
-    async function prepareMoshSshAgentOptions(options, sender) {
+    async function prepareMoshSshAgentOptions(options, sender, sshExe) {
       const {
         enhanceAuthOptionsForFido,
         resolvePreparedAgentSocket,
@@ -158,7 +158,7 @@ function createMoshSessionApi(ctx) {
       let releasePreparedAgent = null;
       try {
         if (options.useSshAgent === true || forceFido) {
-          const agent = await prepareSystemSshAgentForAuth({ ...prepOptions, nativeFidoAgent: true }, "[Mosh]");
+          const agent = await prepareSystemSshAgentForAuth({ ...prepOptions, nativeFidoAgent: true, nativeSshPath: sshExe }, "[Mosh]");
           if (typeof agent?._releaseNetcattyFidoAgent === "function") {
             releasePreparedAgent = agent._releaseNetcattyFidoAgent;
           }
@@ -1011,7 +1011,7 @@ function createMoshSessionApi(ctx) {
         throw new Error("OpenSSH client not found. Netcatty needs ssh to start the remote mosh-server handshake.");
       }
     
-      const preparedOptions = await prepareMoshSshAgentOptions(options, event?.sender);
+      const preparedOptions = await prepareMoshSshAgentOptions(options, event?.sender, sshExe);
       return startMoshSessionViaHandshake(event, preparedOptions, { bareClient, sshExe });
     }
 

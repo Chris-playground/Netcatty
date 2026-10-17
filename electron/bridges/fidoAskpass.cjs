@@ -417,8 +417,8 @@ function ensureFidoAskpass(options = {}) {
   };
 }
 
-function selectFidoAskpassWrapper(wrapperPath, binaryPath, platform = process.platform, env = process.env, exists = fs.existsSync) {
-  if (platform !== "win32" || !binaryPath) return wrapperPath;
+function isWindowsPosixSsh(binaryPath, platform = process.platform, env = process.env, exists = fs.existsSync) {
+  if (platform !== "win32" || !binaryPath) return false;
   const binary = /\.exe$/i.test(binaryPath) ? binaryPath : `${binaryPath}.exe`;
   const candidates = /[\\/]/.test(binaryPath) ? [binary]
     : (env.PATH || env.Path || "").split(";").map(dir => path.win32.join(dir, binary));
@@ -426,13 +426,17 @@ function selectFidoAskpassWrapper(wrapperPath, binaryPath, platform = process.pl
     if (!exists(candidate)) continue;
     const dir = path.win32.dirname(candidate);
     if (exists(path.win32.join(dir, "msys-2.0.dll")) || exists(path.win32.join(dir, "cygwin1.dll"))) {
-      // MSYS runs .cmd files through cmd.exe with different quoting semantics.
-      // Use its own shell/shebang execution so spaces in the helper path survive.
-      return wrapperPath.replace(/\.cmd$/i, ".sh").replace(/\\/g, "/");
+      return true;
     }
     break;
   }
-  return wrapperPath;
+  return false;
+}
+
+function selectFidoAskpassWrapper(wrapperPath, binaryPath, platform = process.platform, env = process.env, exists = fs.existsSync) {
+  // MSYS uses its own shell/shebang execution so spaces in helper paths survive.
+  return isWindowsPosixSsh(binaryPath, platform, env, exists)
+    ? wrapperPath.replace(/\.cmd$/i, ".sh").replace(/\\/g, "/") : wrapperPath;
 }
 
 /**
@@ -519,6 +523,7 @@ module.exports = {
   resolveFidoAskpassSocketPath,
   isWindowsNamedPipePath,
   selectFidoAskpassWrapper,
+  isWindowsPosixSsh,
   // exposed for tests
   getTempBase,
   handleAskpassClient,

@@ -1415,7 +1415,7 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
           };
         }
         if (options.nativeFidoAgent === true && isFidoFlow) {
-          nativeFidoAgent = await require("./fidoNativeAgent.cjs").createNativeFidoAgent(agent);
+          nativeFidoAgent = await require("./fidoNativeAgent.cjs").createNativeFidoAgent(agent, { sshBinaryPath: options.nativeSshPath });
           agent._netcattyAgentSocket = nativeFidoAgent.socketPath;
         }
         if (ownedFidoAgent || askpassLeaseId || sharedAgentIdentities.length > 0 || acquiredFidoAgent) {

@@ -2,14 +2,14 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { generateKeyPairSync } = require("node:crypto");
+const { generateKeyPairSync, randomBytes } = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const net = require("node:net");
 const { once } = require("node:events");
 const { utils } = require("ssh2");
 const { createAgent } = require("ssh2/lib/agent.js");
-const { createNativeFidoAgent } = require("./fidoNativeAgent.cjs");
+const { createNativeFidoAgent, authenticateCygwinSocket } = require("./fidoNativeAgent.cjs");
 const askpass = require("./fidoAskpass.cjs");
 const prompts = require("./fidoPromptHandler.cjs");
 const run = promisify(execFile);
@@ -63,7 +63,7 @@ test("native agent sockets attribute concurrent helper subprocess prompts to the
     }
     const data = Buffer.from("native SSH signing request");
     const signatures = await Promise.all(proxies.map(proxy => sign(createAgent(proxy.socketPath), selected, data)));
-    assert.deepEqual(seen, [2823, 2824]);
+    assert.deepEqual(seen, process.platform === "win32" ? [2823, 2823, 2824, 2824] : [2823, 2824]);
     for (const signature of signatures) assert.equal(selected.verify(data, signature, "sha256"), true);
   } finally {
     for (const proxy of proxies) proxy.close();
@@ -112,12 +112,68 @@ test("unsupported OpenSSH extensions do not corrupt the following identity reque
           types.push(buffered[4]);
           buffered = buffered.subarray(4 + buffered.readUInt32BE());
         }
-        if (types.length >= 2) resolve(types);
+        if (types.length >= 3) resolve(types);
       });
     });
-    // Send an unknown extension with a payload, immediately followed by a
-    // valid identities query on the same native-agent connection.
-    socket.write(Buffer.concat([frame(27, Buffer.from("unsupported-extension-payload")), frame(11)]));
-    assert.deepEqual(await responses, [5, 12]);
+    // Coalesce identities, an unknown payload, and identities in one write.
+    // This also proves parsing advances correctly after a preceding frame.
+    socket.write(Buffer.concat([frame(11), frame(27, Buffer.from("unsupported-extension-payload")), frame(11)]));
+    assert.deepEqual(await responses, [12, 5, 12]);
   } finally { socket.destroy(); proxy.close(); }
+});
+
+
+test("Cygwin socket authenticates fragmented handshakes and rejects a wrong secret", { timeout: 5000 }, async () => {
+  const secret = randomBytes(16);
+  let admitted = 0;
+  const sockets = new Set();
+  const server = net.createServer(socket => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.once("close", () => sockets.delete(socket));
+    authenticateCygwinSocket(socket, secret, authenticated => {
+      admitted += 1;
+      authenticated.on("data", data => authenticated.write(data));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const connect = () => net.createConnection(server.address().port, "127.0.0.1");
+  const bad = connect();
+  const good = connect();
+  const goodConnected = once(good, "connect");
+  try {
+    await once(bad, "connect");
+    const closed = once(bad, "close");
+    bad.write(Buffer.alloc(16));
+    await closed;
+    assert.equal(admitted, 0);
+    await goodConnected;
+    const echo = once(good, "data");
+    good.write(secret.subarray(0, 7));
+    good.write(secret.subarray(7));
+    assert.deepEqual((await echo)[0], secret);
+    const credentials = Buffer.alloc(12);
+    credentials.writeUInt32LE(1001, 4);
+    credentials.writeUInt32LE(1002, 8);
+    const reply = new Promise(resolve => {
+      let bytes = Buffer.alloc(0);
+      good.on("data", chunk => {
+        bytes = Buffer.concat([bytes, chunk]);
+        if (bytes.length >= 17) resolve(bytes);
+      });
+    });
+    good.write(credentials.subarray(0, 5));
+    // Preserve agent bytes coalesced with the end of the credential handshake.
+    good.write(Buffer.concat([credentials.subarray(5), Buffer.from("agent")]));
+    const bytes = await reply;
+    assert.equal(bytes.readUInt32LE(0), process.pid);
+    assert.deepEqual(bytes.subarray(4, 12), credentials.subarray(4));
+    assert.equal(bytes.subarray(12).toString(), "agent");
+    assert.equal(admitted, 1);
+  } finally {
+    bad.destroy(); good.destroy();
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+  }
 });

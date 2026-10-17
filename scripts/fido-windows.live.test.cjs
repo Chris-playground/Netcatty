@@ -97,7 +97,9 @@ test("Windows security-key integration with real user-mode OpenSSH", {
       const session = accept();
       session.on("exec", acceptExec => {
         const stream = acceptExec();
-        stream.end("windows-fido-ok");
+        stream.write("windows-fido-ok");
+        stream.exit(0);
+        stream.end();
       });
     }));
   });
@@ -193,6 +195,33 @@ test("Windows security-key integration with real user-mode OpenSSH", {
         } finally { connection.close(); }
       });
 
+      for (const runtime of ["MSYS", "Win32"]) {
+        await t.test(`${type}: real ${runtime} OpenSSH logs in through its native socket`, async () => {
+          const sshPath = runtime === "MSYS"
+            ? path.join(path.dirname(process.env.NETCATTY_WINDOWS_SSH_AGENT), "ssh.exe")
+            : path.join(process.env.SystemRoot, "System32", "OpenSSH", "ssh.exe");
+          assert.ok(fs.existsSync(sshPath), `${runtime} SSH client must be installed`);
+          const before = seen.length;
+          fs.writeFileSync(control, "touch");
+          const options = await enhanceAuthOptionsForFido({
+            privateKey: generated.privateKey, identitiesOnly: true,
+            nativeFidoAgent: true, nativeSshPath: sshPath,
+          }, sender);
+          const agent = await prepareSystemSshAgentForAuth(options, "[WindowsNativeFido]");
+          try {
+            const identityAgent = agent._netcattyAgentSocket;
+            assert.equal(identityAgent.startsWith("\\\\.\\pipe"), runtime === "Win32");
+            const result = await run(sshPath, ["-F", "none", "-p", String(server.address().port),
+              "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL",
+              "-o", "PreferredAuthentications=publickey", "-o", "BatchMode=yes",
+              "-o", `IdentityAgent=${identityAgent}`, "netcatty@127.0.0.1", "probe"],
+            { env: { ...process.env, SSH_AUTH_SOCK: identityAgent }, timeout: 15000, windowsHide: true });
+            assert.equal(result.stdout, "windows-fido-ok");
+            assert.ok(seen.slice(before).some(request => request.kind === "pin"));
+          } finally { agent._releaseNetcattyFidoAgent?.(); }
+        });
+      }
+
       for (const fallback of [false, true]) {
         await t.test(`${type}: missing device ${fallback ? "allows explicit password fallback" : "cancel never uses saved password"}`, async () => {
           const before = seen.length;
@@ -224,7 +253,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
         } finally { connection.close(); responsePin = "123456"; }
       });
     }
-    assert.equal(acceptedPublicKeys, 2, "server must verify both actual SK signatures");
+    assert.equal(acceptedPublicKeys, 6, "server must verify both SK algorithms through ssh2, MSYS SSH, and Win32 SSH");
     assert.equal(acceptedPasswords, 2, "only explicit fallback may use a password");
   } finally {
     for (const client of clients) client.end();
