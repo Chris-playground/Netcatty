@@ -319,6 +319,7 @@ function createMonitorService({
         if (!host.key || entries.has(host.key) || entries.size >= 256) continue;
         const entry = {
           key: host.key,
+          historyId: randomUUID(),
           hostname: host.options.hostname,
           sessionId: `monitor-${randomUUID()}`,
           holder: {},
@@ -345,12 +346,15 @@ function createMonitorService({
         const shared = entry?.transport
           ? readSharedStats(entry.transport.conn)
           : null;
+        const historyId = entry?.historyId ?? "";
+        const last = cursor?.after?.[host.id];
         hosts[host.id] = {
+          historyId,
           status: entry?.status ?? host.status ?? "limit",
           at: shared?.at ?? 0,
           stats: shared?.result?.success ? shared.result.stats : null,
-          points: append
-            ? (shared?.points ?? []).filter((point) => point.at > (cursor.after?.[host.id] ?? 0))
+          points: append && last?.historyId === historyId
+            ? (shared?.points ?? []).filter((point) => point.at > last.at)
             : shared?.points ?? [],
         };
       }

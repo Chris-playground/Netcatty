@@ -11,6 +11,7 @@ export type MonitorPoint = {
   tx: number | null;
 };
 export type MonitorHostState = {
+  historyId: string;
   status:
     | "queued"
     | "connecting"
@@ -41,7 +42,7 @@ export type MonitorSnapshot = {
 export type MonitorHistoryCursor = {
   runtimeId: string;
   epoch: number;
-  after: Record<string, number>;
+  after: Record<string, { at: number; historyId: string }>;
 };
 
 /** Incremental transport keeps the full bounded history in the renderer. */
@@ -58,6 +59,7 @@ export function mergeMonitorSnapshotHistory(previous: MonitorSnapshot, next: Mon
   return {
     ...next,
     hosts: Object.fromEntries(Object.entries(next.hosts).map(([id, host]) => {
+      if (previous.hosts[id]?.historyId !== host.historyId) return [id, host];
       const retained = previous.hosts[id]?.points ?? [];
       const last = retained.at(-1)?.at ?? 0;
       return [id, { ...host, points: [...retained, ...host.points.filter((point) => point.at > last)]

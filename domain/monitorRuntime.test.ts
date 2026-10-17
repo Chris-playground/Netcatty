@@ -3,6 +3,7 @@ import test from "node:test";
 import { mergeMonitorSnapshotHistory, monitorStateSince, type MonitorHostState, type MonitorSnapshot } from "./monitorRuntime";
 
 const state: MonitorHostState = {
+  historyId: "endpoint-a",
   status: "live", at: 2000, stats: {
     cpu: 50, cpuCores: 4, cpuPerCore: [], memTotal: 100, memUsed: 25,
     memFree: 75, memBuffers: 0, memCached: 0, swapTotal: 0, swapUsed: 0,
@@ -64,4 +65,12 @@ test("delayed replies cannot restore a stopped epoch or retired worker", () => {
   assert.equal(mergeMonitorSnapshotHistory(restarted, old), restarted);
   const fresh = { ...restarted, runtimeId: "next-worker", takenAt: 5000 };
   assert.equal(mergeMonitorSnapshotHistory(restarted, fresh), fresh);
+});
+
+test("a new endpoint replaces retained points even when its first delta races a configuration response", () => {
+  const original = snapshot(state);
+  const changed: MonitorSnapshot = { ...snapshot({ ...state, historyId: "endpoint-b", points: [{ ...state.points[0], at: 2500 }] }), historyMode: "append", takenAt: 4000 };
+  const merged = mergeMonitorSnapshotHistory(original, changed);
+  assert.deepEqual(merged.hosts.h.points.map((point) => point.at), [2500]);
+  assert.equal(merged.hosts.h.historyId, "endpoint-b");
 });

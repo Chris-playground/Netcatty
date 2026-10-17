@@ -718,7 +718,7 @@ test("snapshot deltas send new points only, even with 256 full retained historie
   }
   const initial = f.service.snapshot(event(1));
   const initialBytes = JSON.stringify(initial).length;
-  const cursor = { runtimeId: initial.runtimeId, epoch: initial.epoch, after: Object.fromEntries(hosts.map((host) => [host.id, at])) };
+  const cursor = { runtimeId: initial.runtimeId, epoch: initial.epoch, after: Object.fromEntries(hosts.map((host) => [host.id, { at, historyId: initial.hosts[host.id].historyId }])) };
   for (const c of connections) {
     const points = readSharedStats(c).points;
     points.shift();
@@ -729,8 +729,10 @@ test("snapshot deltas send new points only, even with 256 full retained historie
   assert.equal(delta.historyMode, "append");
   assert.equal(Object.values(delta.hosts).reduce((count, host) => count + host.points.length, 0), 256);
   assert.ok(JSON.stringify(delta).length < initialBytes / 100);
-  const caughtUp = { ...cursor, after: Object.fromEntries(hosts.map((host) => [host.id, at + 1000])) };
+  const caughtUp = { ...cursor, after: Object.fromEntries(hosts.map((host) => [host.id, { at: at + 1000, historyId: initial.hosts[host.id].historyId }])) };
   assert.ok(Object.values(f.service.snapshot(event(1), caughtUp).hosts).every((host) => host.points.length === 0));
+  const staleIdentity = { ...cursor, after: { ...cursor.after, h0: { at: at + 999999, historyId: "old-endpoint" } } };
+  assert.equal(f.service.snapshot(event(1), staleIdentity).hosts.h0.points.length, 1800);
   assert.equal(f.service.snapshot(event(1), { ...cursor, runtimeId: "old-worker" }).historyMode, "replace");
   f.service.dispose();
 });
