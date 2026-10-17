@@ -1,5 +1,6 @@
 /* eslint-disable no-undef */
 const { sampleSharedStats } = require("./sharedStats.cjs");
+const { GPU_ASSIGNMENT, parseGpuStats, withCachedMonitorGpu, cacheFullGpuStats, startMonitorGpuProbe } = require("./monitorGpuStats.cjs");
 const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
 const { listInteractiveShellPids } = require("../sshInteractiveShells.cjs");
 function extraExecUnsupportedError(session) {
@@ -1066,7 +1067,18 @@ function createSessionOpsApi(ctx) {
     }
 
     async function getStatsForContext(session, event, sessionId) {
-      return sampleSharedStats(session, (context) => collectServerStats(context, event, sessionId));
+      const result = await sampleSharedStats(session, (context) => collectServerStats(context, event, sessionId));
+      const conn = session.conn || session.moshStatsConn || session.etStatsConn;
+      if (!conn || !result.success || !result.stats) return result;
+      if (!session._monitorStats) {
+        cacheFullGpuStats(conn, result.stats);
+        return result;
+      }
+      if (!session.singleChannelSsh) {
+        const command = withPosixRemoteWatchdog(`if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then ${GPU_ASSIGNMENT}; echo "GPU:$gpustat"; fi`, 2500);
+        startMonitorGpuProbe(conn, command, {setTimeoutFn:setTimeout,clearTimeoutFn:clearTimeout});
+      }
+      return withCachedMonitorGpu(conn, result);
     }
 
     async function collectServerStats(session, event, sessionId) {
@@ -1302,10 +1314,10 @@ function createSessionOpsApi(ctx) {
         // Bound GPU queries independently so a stuck driver cannot stop CPU/memory
         // polling. Hosts without timeout also omit this optional metric.
         // macOS is skipped: powermetrics needs root, which stats must not.
-        `gpustat=$(gpucsv=$(timeout -s KILL 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null) && printf '%s\\n' "$gpucsv" | awk -F', *' 'NF >= 4 {g++; if($1 ~ /^[0-9]+$/) {n++; u+=$1} if($2 ~ /^[0-9]+$/) {mu+=$2; uc++} if($3 ~ /^[0-9]+$/) {mt+=$3; tc++} if(name=="") name=$4} END{if(n>0) printf "%.0f %s %s %s", u/n, (uc==g ? sprintf("%.0f",mu) : "N/A"), (tc==g ? sprintf("%.0f",mt) : "N/A"), name}' 2>/dev/null || echo "")`,
+        GPU_ASSIGNMENT,
         // Output all stats (using CPURAW and PERCORERAW instead of CPU and PERCORE)
         `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|NET:$net|GPU:$gpustat|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
-      ].filter(command => !session._monitorStats || !command.startsWith('procs=')).join('; ');
+      ].filter(command => !session._monitorStats || (!command.startsWith('procs=') && !command.startsWith('gpustat='))).join('; ');
 
       // Client-side run bound shared by the stats and disk probes; the remote
       // watchdog uses the same value so an abandoned probe self-kills instead
@@ -1567,27 +1579,7 @@ function createSessionOpsApi(ctx) {
                   }
                 }
               } else if (part.startsWith('GPU:')) {
-                // Linux: "<avgUtil> <sumMemUsed> <sumMemTotal> <first GPU name>"
-                const gpuStr = part.substring(4).trim();
-                if (gpuStr && gpuStr !== '') {
-                  const gpuFields = gpuStr.split(/\s+/);
-                  const util = parseInt(gpuFields[0], 10);
-                  if (!isNaN(util)) {
-                    gpu = Math.min(100, Math.max(0, util));
-                    if (gpuFields.length >= 2) {
-                      const memUsed = parseInt(gpuFields[1], 10);
-                      if (!isNaN(memUsed)) gpuMemUsed = memUsed;
-                    }
-                    if (gpuFields.length >= 3) {
-                      const memTotal = parseInt(gpuFields[2], 10);
-                      if (!isNaN(memTotal)) gpuMemTotal = memTotal;
-                    }
-                    if (gpuFields.length >= 4) {
-                      const name = gpuFields.slice(3).join(' ').trim();
-                      if (name) gpuName = name;
-                    }
-                  }
-                }
+                ({gpu,gpuName,gpuMemUsed,gpuMemTotal}=parseGpuStats(part));
               } else if (part.startsWith('HOST:')) {
                 hostname = part.substring(5).trim();
               } else if (part.startsWith('OS:')) {
