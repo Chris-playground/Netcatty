@@ -238,7 +238,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                 </div>
             </div>
 
-            {!restoreAllowed && (
+            {restoreDisabledReason !== null && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
                     <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-1">
                         <AlertTriangle size={14} />

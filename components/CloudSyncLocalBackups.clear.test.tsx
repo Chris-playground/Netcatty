@@ -26,9 +26,10 @@ test('backup cleanup confirms, preserves data on cancel, reports errors and refr
   let fail = true;
   let hasBackup = true;
   let finish: (() => void) | undefined;
+  let finishProbe: ((result: { encryptionAvailable: boolean }) => void) | undefined;
   Object.defineProperty(dom.window, 'netcatty', { configurable: true, value: {
     // Cleanup must remain available even when encrypted backups cannot be read.
-    getVaultBackupCapabilities: async () => ({ encryptionAvailable: false }),
+    getVaultBackupCapabilities: () => new Promise((resolve) => { finishProbe = resolve; }),
     listVaultBackups: async () => hasBackup ? [{
       id: 'fixture', createdAt: 1, reason: 'before_restore', fingerprint: 'fixture',
       preview: { hostCount: 1, keyCount: 0, snippetCount: 0, noteCount: 0, identityCount: 0, portForwardingRuleCount: 0 },
@@ -53,6 +54,11 @@ test('backup cleanup confirms, preserves data on cancel, reports errors and refr
   try {
     await renderer.render(<I18nProvider locale="en"><LocalBackupsPanel onApplyPayload={() => { throw new Error('must not restore'); }} /></I18nProvider>);
     await flushEffects();
+    assert.doesNotMatch(dom.document.body.textContent ?? '', /Master key required/);
+    assert.equal([...dom.document.querySelectorAll('button')].some((el) => el.textContent === 'Restore'), false);
+    await runWithAct(async () => { finishProbe?.({ encryptionAvailable: false }); });
+    await flushEffects();
+    assert.doesNotMatch(dom.document.body.textContent ?? '', /Master key required/);
     assert.equal([...dom.document.querySelectorAll('button')].some((el) => el.textContent === 'Restore'), false);
     await click(button('Clear all backups'));
     let dialog = dom.document.querySelector('[role="dialog"]');
