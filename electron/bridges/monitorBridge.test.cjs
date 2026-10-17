@@ -490,3 +490,45 @@ test("existing terminal connections sample while an unrelated host awaits authen
   f.service.dispose();
   pool.returnTransport(terminal);
 });
+
+for (const sharedHost of ["first", "second"]) {
+  test(`stopping the original owner transfers ${sharedHost === "first" ? "active" : "queued"} shared authentication`, async () => {
+    let rejectFirst;
+    const dials = [];
+    const f = fixture({
+      startConnection: (e, opts) => {
+        dials.push({ owner: e.sender.id, hostname: opts.hostname });
+        if (dials.length === 1)
+          return new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          });
+        return Promise.resolve({
+          transport: pool.createTransport({
+            conn: conn(),
+            endpoint: pool.buildConnectionReuseEndpoint(opts),
+          }),
+        });
+      },
+      cancelConnection: () => rejectFirst?.(new Error("cancelled")),
+    });
+    const hosts = ["first", "second"].map((hostname) => ({
+      id: hostname,
+      options: { ...options, hostname },
+    }));
+    f.service.reconcile(event(1), [{ id: "p", hosts }]);
+    f.service.reconcile(event(2), [
+      { id: "p", hosts: hosts.filter((h) => h.id === sharedHost) },
+    ]);
+    await tick();
+    f.service.reconcile(event(1), []);
+    await tick();
+    await tick();
+    assert.deepEqual(dials, [
+      { owner: 1, hostname: "first" },
+      { owner: 2, hostname: sharedHost },
+    ]);
+    assert.equal(f.service.snapshot(event(2)).hosts[sharedHost].status, "live");
+    assert.equal(f.service.snapshot(event(1)).activeSessions.length, 0);
+    f.service.dispose();
+  });
+}

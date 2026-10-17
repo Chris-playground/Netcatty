@@ -270,6 +270,9 @@ function createMonitorService({
     for (const entry of entries.values())
       if (
         !needed.has(entry.key) ||
+        (!entry.transport &&
+          entry.owner === owner &&
+          !ownKeys.has(entry.key)) ||
         (ownKeys.has(entry.key) && retryKeys.has(entry.key))
       )
         release(entry);
