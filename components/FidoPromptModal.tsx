@@ -14,6 +14,7 @@ export interface FidoPromptRequest {
   message?: string;
   title?: string;
   keyName?: string;
+  notificationOnly?: boolean;
 }
 interface FidoPromptModalProps {
   request: FidoPromptRequest | null;
@@ -39,7 +40,7 @@ export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({ request, onSub
   const visibleRequest = request || lastRequest;
   const isTouch = visibleRequest?.kind === "touch" || visibleRequest?.kind === "confirm";
   const handleSubmit = useCallback(() => {
-    if (!request || isSubmitting || (!isTouch && !pin)) return;
+    if (!request || request.notificationOnly || isSubmitting || (!isTouch && !pin)) return;
     setIsSubmitting(true);
     onSubmit(request.requestId, isTouch ? "" : pin);
   }, [request, isSubmitting, isTouch, pin, onSubmit]);
@@ -65,9 +66,9 @@ export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({ request, onSub
             {isTouch ? (
               <div className="pb-5 pt-2 text-center">
                 <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center" aria-hidden="true">
-                  <span className="fido-touch-ring absolute inset-0 rounded-full border border-primary/25" />
-                  <span className="fido-touch-ring fido-touch-ring-delayed absolute inset-0 rounded-full border border-primary/20" />
-                  <div className="fido-touch-symbol flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/10 bg-primary/8 text-primary">
+                  <span className="fido-touch-ring absolute inset-0 rounded-full bg-primary/5" />
+                  <span className="fido-touch-ring fido-touch-ring-delayed absolute inset-0 rounded-full bg-primary/5" />
+                  <div className="fido-touch-symbol relative flex h-16 w-16 items-center justify-center rounded-full bg-primary/8 text-primary">
                     <Fingerprint size={30} strokeWidth={1.5} />
                   </div>
                 </div>
@@ -77,13 +78,13 @@ export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({ request, onSub
                 </DialogDescription>
                 <div role="status" className="mt-5 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                   <span className="fido-status-dot h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
-                  {t("fido.prompt.touchWaiting")}
+                  {t(visibleRequest.notificationOnly ? "fido.prompt.touchAutomatic" : "fido.prompt.touchWaiting")}
                 </div>
               </div>
             ) : (
               <>
                 <div className="mb-5 flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/10 bg-primary/8 text-primary" aria-hidden="true">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/8 text-primary" aria-hidden="true">
                     <Fingerprint size={21} strokeWidth={1.7} />
                   </div>
                   <div className="min-w-0">
@@ -121,11 +122,11 @@ export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({ request, onSub
             ))}
           </div>
           <div className="-mx-6 -mb-6 mt-5 flex items-center justify-end gap-2 border-t border-border/50 bg-muted/15 px-6 py-3.5">
-            <Button type="button" variant="ghost" className="h-9" onClick={handleCancel} disabled={isSubmitting}>{t("common.cancel")}</Button>
-            <Button type="button" className="h-9 min-w-20 gap-2" onClick={handleSubmit} disabled={isSubmitting || (!isTouch && !pin)}>
+            <Button type="button" variant="ghost" className="h-9" onClick={handleCancel} disabled={isSubmitting}>{t(visibleRequest.notificationOnly ? "common.close" : "common.cancel")}</Button>
+            {!visibleRequest.notificationOnly && <Button type="button" className="h-9 min-w-20 gap-2" onClick={handleSubmit} disabled={isSubmitting || (!isTouch && !pin)}>
               {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
               {t(isSubmitting ? "fido.prompt.verifying" : "common.continue")}
-            </Button>
+            </Button>}
           </div>
         </DialogContent>
       )}

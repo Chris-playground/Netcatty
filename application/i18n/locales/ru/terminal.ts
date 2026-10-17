@@ -663,6 +663,7 @@ export const ruTerminalMessages: Messages = {
   'fido.prompt.touchDesc': 'Коснитесь ключа безопасности, чтобы подтвердить свою личность.',
   'fido.prompt.pinLabel': 'PIN',
   'fido.prompt.touchWaiting': 'Ожидание ответа ключа…',
+  'fido.prompt.touchAutomatic': 'Продолжим автоматически после касания',
   'fido.prompt.touchDone': 'Я коснулся',
   'fido.prompt.timeout': 'Время ожидания FIDO истекло. Попробуйте снова.',
   'fido.error.opensshMissing': 'Нужен OpenSSH с FIDO/libfido2. macOS: brew install openssh libfido2.',

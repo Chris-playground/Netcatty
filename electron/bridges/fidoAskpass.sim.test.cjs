@@ -276,10 +276,11 @@ test("OpenSSH notification helper exit dismisses its pending touch prompt", asyn
   const env = buildFidoAskpassEnv({ resolveWebContents: () => sender });
   try {
     child = spawn(env.SSH_ASKPASS, ["Confirm user presence for key ED25519-SK"], {
-      env: { ...process.env, ...env }, stdio: "ignore",
+      env: { ...process.env, ...env, SSH_ASKPASS_PROMPT: "none" }, stdio: "ignore",
     });
     const request = await requested;
     assert.equal(request.kind, "touch");
+    assert.equal(request.notificationOnly, true);
     const closed = new Promise((resolve) => child.once("close", resolve));
     child.kill("SIGTERM");
     await closed;

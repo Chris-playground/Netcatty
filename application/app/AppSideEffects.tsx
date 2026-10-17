@@ -846,11 +846,8 @@ export function AppSideEffects() {
     const unsubscribe = bridge.onFidoPromptRequest((request) => {
       console.log('[App] FIDO prompt request:', request);
       setFidoPromptQueue((prev) => [...prev, {
-        requestId: request.requestId,
+        ...request,
         kind: request.kind === 'touch' || request.kind === 'confirm' ? request.kind : 'pin',
-        message: request.message,
-        title: request.title,
-        keyName: request.keyName,
       }]);
     });
     return () => { unsubscribe?.(); };

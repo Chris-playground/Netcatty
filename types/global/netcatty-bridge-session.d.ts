@@ -656,6 +656,7 @@ declare global {
       cb: (request: {
         requestId: string;
         kind: "pin" | "touch" | "confirm";
+        notificationOnly?: boolean;
         message?: string;
         title?: string;
         keyName?: string;

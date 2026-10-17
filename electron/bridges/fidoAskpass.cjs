@@ -29,7 +29,8 @@ function fail(code) {
 
 if (!sockPath) fail(1);
 
-const payload = JSON.stringify({ prompt, type: "askpass", leaseId }) + "\n";
+const payload = JSON.stringify({ prompt, type: "askpass", leaseId,
+  mode: process.env.SSH_ASKPASS_PROMPT || "" }) + "\n";
 const client = net.createConnection(sockPath);
 
 let buf = "";
@@ -100,7 +101,7 @@ const signingQueue = [];
 // Serialize hardware signatures and bind each prompt to its calling window
 // until that signature's callback settles.
 function runWithFidoSigningLease(leaseId, operation) {
-  signingQueue.push({ leaseId, operation });
+  signingQueue.push({ leaseId, operation, controller: new AbortController() });
   if (signingQueue.length > 1) return;
   const next = () => {
     const entry = signingQueue[0];
@@ -110,6 +111,7 @@ function runWithFidoSigningLease(leaseId, operation) {
     entry.operation(() => {
       if (finished) return;
       finished = true;
+      entry.controller.abort();
       activeSigningLeaseId = null;
       signingQueue.shift();
       if (signingQueue.length) queueMicrotask(next);
@@ -224,7 +226,12 @@ function handleAskpassClient(socket) {
       return;
     }
     const prompt = String(msg?.prompt || "");
-    const kind = fidoPromptHandler.classifyAskpassPrompt(prompt);
+    // OpenSSH notify_start() uses mode=none: hardware completion, not a UI
+    // answer, authorizes the signature. Exiting this helper only hides the hint.
+    const notificationOnly = msg?.mode === "none";
+    const kind = notificationOnly ? "touch"
+      : msg?.mode === "confirm" ? "confirm"
+      : fidoPromptHandler.classifyAskpassPrompt(prompt);
     const leaseId = typeof msg?.leaseId === "string" ? msg.leaseId : "";
     const leaseResolver = leaseId ? askpassLeases.get(leaseId) : null;
     // Caller-bound leases (ssh-add) win and mark the active signing window.
@@ -252,6 +259,7 @@ function handleAskpassClient(socket) {
     try {
       const result = await fidoPromptHandler.requestFidoPrompt(sender, {
         kind,
+        notificationOnly,
         message: prompt,
         keyName: "FIDO2",
         leaseId: ownerLeaseId,
@@ -264,6 +272,17 @@ function handleAskpassClient(socket) {
       }
       // Touch/confirm: empty string is fine; PIN: return entered secret.
       const response = kind === "pin" ? (result.response || "") : "";
+      const signing = signingQueue[0];
+      if (kind === "pin" && response && /user presence|touch|tap/i.test(prompt)
+          && signing?.leaseId === ownerLeaseId && !signing.controller.signal.aborted) {
+        // ssh-agent ends its initial notification before asking for a PIN and
+        // does not restart it on retry. Keep a device-only waiting hint visible
+        // after PIN submission until the actual signature callback completes.
+        void fidoPromptHandler.requestFidoPrompt(sender, {
+          kind: "touch", notificationOnly: true, message: prompt, keyName: "FIDO2",
+          leaseId: ownerLeaseId, signal: signing.controller.signal,
+        });
+      }
       socket.end(`${JSON.stringify({ ok: true, response })}\n`);
     } catch (err) {
       socket.end(`${JSON.stringify({

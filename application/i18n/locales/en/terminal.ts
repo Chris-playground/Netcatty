@@ -648,6 +648,7 @@ export const enTerminalMessages: Messages = {
   'fido.prompt.touchDesc': 'Touch your security key to confirm it is you.',
   'fido.prompt.pinLabel': 'PIN',
   'fido.prompt.touchWaiting': 'Waiting for your key…',
+  'fido.prompt.touchAutomatic': 'Continues automatically after your touch',
   'fido.prompt.touchDone': 'I touched it',
   'fido.prompt.timeout': 'FIDO prompt timed out. Try connecting again.',
   'fido.error.opensshMissing': 'OpenSSH with FIDO/libfido2 is required. On macOS: brew install openssh libfido2.',

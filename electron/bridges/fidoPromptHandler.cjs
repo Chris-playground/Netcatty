@@ -83,6 +83,7 @@ function cancelFidoPromptRequestsForLease(leaseId, reason = "lease-released") {
  *   message?: string,
  *   title?: string,
  *   keyName?: string,
+ *   notificationOnly?: boolean,
  *   leaseId?: string,
  *   signal?: AbortSignal,
  * }} options
@@ -135,6 +136,7 @@ function requestFidoPrompt(sender, options = {}) {
         message: options.message || "",
         title: options.title || "",
         keyName: options.keyName || "",
+        notificationOnly: options.notificationOnly === true,
       });
     } catch (err) {
       console.error("[FidoPrompt] Failed to send request:", err);

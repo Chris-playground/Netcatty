@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <openssl/evp.h>
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
@@ -18,6 +20,28 @@ static int check_pin(uint8_t flags, const char *pin) {
         && (pin == NULL || strcmp(pin, "123456") != 0))
         return SSH_SK_ERR_PIN_REQUIRED;
     return 0;
+}
+
+/* Optional, test-only physical-presence gate. The host test changes this file
+ * to emulate a touch/unplug; a renderer response cannot bypass this gate. */
+static int await_touch(uint8_t *flags) {
+    const char *control = getenv("NETCATTY_FIDO_SIM_CONTROL");
+    if (!control) return 0;
+    char marker[4096];
+    snprintf(marker, sizeof(marker), "%s.waiting", control);
+    FILE *ready = fopen(marker, "w");
+    if (ready) fclose(ready);
+    for (int i = 0; i < 150; i++) {
+        char action[32] = {0};
+        FILE *input = fopen(control, "r");
+        if (input) { (void)fgets(action, sizeof(action), input); fclose(input); }
+        if (!strncmp(action, "unplugged", 9)) return SSH_SK_ERR_DEVICE_NOT_FOUND;
+        if (!strncmp(action, "no-up", 5)) { *flags &= ~SSH_SK_USER_PRESENCE_REQD; return 0; }
+        if (!strncmp(action, "no-uv", 5)) { *flags &= ~SSH_SK_USER_VERIFICATION_REQD; return 0; }
+        if (!strncmp(action, "touch", 5)) return 0;
+        usleep(20000);
+    }
+    return SSH_SK_ERR_GENERAL;
 }
 
 int sk_enroll(uint32_t alg, const uint8_t *challenge, size_t challenge_len,
@@ -56,6 +80,8 @@ int sk_sign(uint32_t alg, const uint8_t *data, size_t data_len,
     struct sk_sign_response **result) {
     (void)options;
     int status = check_pin(flags, pin);
+    if (status) return status;
+    status = await_touch(&flags);
     if (status) return status;
     EVP_PKEY *key = d2i_AutoPrivateKey(NULL, &handle, handle_len);
     if (!key) return SSH_SK_ERR_GENERAL;

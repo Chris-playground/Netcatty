@@ -740,6 +740,7 @@ export const zhCNTerminalMessages: Messages = {
   'fido.prompt.touchDesc': '轻触安全密钥，确认是你本人在操作。',
   'fido.prompt.pinLabel': 'PIN',
   'fido.prompt.touchWaiting': '等待安全密钥响应…',
+  'fido.prompt.touchAutomatic': '触摸后将自动继续',
   'fido.prompt.touchDone': '已触摸',
   'fido.prompt.timeout': 'FIDO 提示已超时，请重新连接。',
   'fido.error.opensshMissing': '需要带 FIDO/libfido2 的 OpenSSH。macOS：brew install openssh libfido2。',
