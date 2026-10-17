@@ -1,3 +1,4 @@
+import { readMonitorPanels } from './monitorPanelsStorage';
 import { STORAGE_KEY_MONITOR_PANELS } from '../../infrastructure/config/storageKeys';
 /**
  * useAutoSync - Auto-sync Hook for Cloud Sync
@@ -152,6 +153,7 @@ const isRestoreInProgress = (): boolean => {
 
 const getSyncPayloadDataHash = (payload: SyncPayload): string => {
   return JSON.stringify({
+    monitorPanels: payload.monitorPanels,
     hosts: sanitizeHostsForSync(payload.hosts),
     keys: payload.keys,
     identities: payload.identities,
@@ -284,6 +286,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
   const getSyncSnapshot = useCallback(() => {
     return {
+      monitorPanels: readMonitorPanels(),
       hosts: sanitizeHostsForSync(config.hosts),
       keys: config.keys,
       identities: config.identities,
