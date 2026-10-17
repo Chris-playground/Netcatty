@@ -360,6 +360,12 @@ function ensureFidoAskpass(options = {}) {
   askpassScriptPath = path.join(base, "netcatty-fido-askpass.cjs");
   writeSecureFile(askpassScriptPath, FIDO_ASKPASS_SCRIPT, 0o700);
 
+  const posixWrapperPath = path.join(base, "netcatty-fido-askpass.sh");
+  const shellQuote = value => `'${value.replace(/'/g, "'\\''")}'`;
+  const shellPath = value => process.platform === "win32" ? value.replace(/\\/g, "/") : value;
+  writeSecureFile(posixWrapperPath,
+    `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${shellQuote(shellPath(process.execPath))} ${shellQuote(shellPath(askpassScriptPath))} "$@"\n`,
+    0o700);
   if (process.platform === "win32") {
     askpassWrapperPath = path.join(base, "netcatty-fido-askpass.cmd");
     writeSecureFile(
@@ -368,14 +374,7 @@ function ensureFidoAskpass(options = {}) {
       0o700,
     );
   } else {
-    askpassWrapperPath = path.join(base, "netcatty-fido-askpass.sh");
-    const electronExec = JSON.stringify(process.execPath);
-    const scriptExec = JSON.stringify(askpassScriptPath);
-    writeSecureFile(
-      askpassWrapperPath,
-      `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${electronExec} ${scriptExec} "$@"\n`,
-      0o700,
-    );
+    askpassWrapperPath = posixWrapperPath;
   }
 
   if (!isWindowsNamedPipePath(askpassSocketPath) && fs.existsSync(askpassSocketPath)) {
@@ -402,9 +401,27 @@ function ensureFidoAskpass(options = {}) {
   };
 }
 
+function selectFidoAskpassWrapper(wrapperPath, binaryPath, platform = process.platform, env = process.env, exists = fs.existsSync) {
+  if (platform !== "win32" || !binaryPath) return wrapperPath;
+  const binary = /\.exe$/i.test(binaryPath) ? binaryPath : `${binaryPath}.exe`;
+  const candidates = /[\\/]/.test(binaryPath) ? [binary]
+    : (env.PATH || env.Path || "").split(";").map(dir => path.win32.join(dir, binary));
+  for (const candidate of candidates) {
+    if (!exists(candidate)) continue;
+    const dir = path.win32.dirname(candidate);
+    if (exists(path.win32.join(dir, "msys-2.0.dll")) || exists(path.win32.join(dir, "cygwin1.dll"))) {
+      // MSYS runs .cmd files through cmd.exe with different quoting semantics.
+      // Use its own shell/shebang execution so spaces in the helper path survive.
+      return wrapperPath.replace(/\.cmd$/i, ".sh").replace(/\\/g, "/");
+    }
+    break;
+  }
+  return wrapperPath;
+}
+
 /**
  * Environment for ssh-agent / ssh-add / ssh-keygen so PIN/touch use Netcatty UI.
- * @param {{ resolveWebContents?: () => import("electron").WebContents|null }} [options]
+ * @param {{ resolveWebContents?: () => import("electron").WebContents|null, sshBinaryPath?: string, env?: NodeJS.ProcessEnv }} [options]
  */
 function buildFidoAskpassEnv(options = {}) {
   const artifacts = ensureFidoAskpass(options);
@@ -413,7 +430,7 @@ function buildFidoAskpassEnv(options = {}) {
     askpassLeases.set(leaseId, options.resolveWebContents);
   }
   const env = {
-    SSH_ASKPASS: artifacts.wrapperPath,
+    SSH_ASKPASS: selectFidoAskpassWrapper(artifacts.wrapperPath, options.sshBinaryPath, process.platform, options.env),
     SSH_ASKPASS_REQUIRE: "force",
     NETCATTY_FIDO_ASKPASS_SOCK: artifacts.socketPath,
     NETCATTY_FIDO_ASKPASS_LEASE: leaseId,
@@ -485,6 +502,7 @@ module.exports = {
   classifyAskpassPrompt: fidoPromptHandler.classifyAskpassPrompt,
   resolveFidoAskpassSocketPath,
   isWindowsNamedPipePath,
+  selectFidoAskpassWrapper,
   // exposed for tests
   getTempBase,
   handleAskpassClient,

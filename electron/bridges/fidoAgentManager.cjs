@@ -230,7 +230,9 @@ async function acquireFidoAgent(options = {}) {
       // Caller-specific askpass lease — never reuse the starter's resolver.
       return {
         socketPath: shared.socketPath,
-        askpassEnv: buildFidoAskpassEnv({ resolveWebContents: options.resolveWebContents }),
+        askpassEnv: buildFidoAskpassEnv({ resolveWebContents: options.resolveWebContents,
+          sshBinaryPath: resolveSshAgentBinary(options.env || process.env, options.platform || process.platform),
+          env: options.env }),
         owned: shared.owned,
         generation: shared.generation,
         sshAddPath: shared.sshAddPath || null,
@@ -242,7 +244,9 @@ async function acquireFidoAgent(options = {}) {
     refCount += 1;
     return {
       socketPath: agentSocket,
-      askpassEnv: buildFidoAskpassEnv({ resolveWebContents: options.resolveWebContents }),
+      askpassEnv: buildFidoAskpassEnv({ resolveWebContents: options.resolveWebContents,
+        sshBinaryPath: resolveSshAgentBinary(options.env || process.env, options.platform || process.platform),
+        env: options.env }),
       // Preserve ownership of the live singleton (Windows system-pipe fallback is not owned).
       owned: Boolean(agentChild),
       generation: agentGeneration,
@@ -256,8 +260,10 @@ async function acquireFidoAgent(options = {}) {
   startingPromise = (async () => {
     const run = options.execFile || execFileAsync;
     const env = options.env || process.env;
-    const askpassEnv = buildFidoAskpassEnv({ resolveWebContents: options.resolveWebContents });
     const platform = options.platform || process.platform;
+    const sshAgent = resolveSshAgentBinary(env, platform);
+    const askpassEnv = buildFidoAskpassEnv({ resolveWebContents: options.resolveWebContents,
+      sshBinaryPath: sshAgent, env });
     const releaseStarterAskpassLease = () => {
       try {
         releaseFidoAskpassLease(askpassEnv?.NETCATTY_FIDO_ASKPASS_LEASE);
@@ -267,7 +273,6 @@ async function acquireFidoAgent(options = {}) {
     };
 
     try {
-      const sshAgent = resolveSshAgentBinary(env, platform);
       const sshAddPath = companionSshAddPath(sshAgent);
 
       agentDir = path.join(getTempBase(), `netcatty-fido-agent-${randomUUID().slice(0, 8)}`);
