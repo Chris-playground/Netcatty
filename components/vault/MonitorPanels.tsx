@@ -42,7 +42,6 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Combobox } from "../ui/combobox";
-import { ScrollArea } from "../ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -648,7 +647,7 @@ export function MonitorPanels({
                   </SelectContent>
                 </Select>
               </div>
-              <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-section="vault-monitor-list">
                 <div className="p-4">
                   {!rows.length ? (
                     <p className="p-8 text-center text-sm text-muted-foreground">
@@ -809,10 +808,14 @@ export function MonitorPanels({
                                   <MonitorDiskUsage stats={s} />
                                 </td>
                                 <td className="px-3 tabular-nums whitespace-nowrap">
-                                  ↓{" "}
-                                  {rate(s?.networkReady ? s.netRxSpeed : null)}
-                                  <br />↑{" "}
-                                  {rate(s?.networkReady ? s.netTxSpeed : null)}
+                                  <div className="flex items-center gap-1.5">
+                                    <ArrowDown size={13} className="shrink-0 text-sky-600 dark:text-sky-400" />
+                                    {rate(s?.networkReady ? s.netRxSpeed : null)}
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <ArrowUp size={13} className="shrink-0 text-violet-600 dark:text-violet-400" />
+                                    {rate(s?.networkReady ? s.netTxSpeed : null)}
+                                  </div>
                                 </td>
                                 <td className="px-3 whitespace-nowrap">
                                   {state?.at
@@ -830,7 +833,7 @@ export function MonitorPanels({
                     {t("monitor.memoryOnlyHint")}
                   </p>
                 </div>
-              </ScrollArea>
+              </div>
             </>
           )}
         </div>
