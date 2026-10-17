@@ -712,13 +712,19 @@ test("snapshot deltas send new points only, even with 256 full retained historie
   await until(() => f.timers.length === 256);
   const at = Date.now();
   for (const c of connections) {
-    const points = readSharedStats(c).points;
+    const shared = readSharedStats(c);
+    shared.result.stats = { ...shared.result.stats,
+      disks: Array.from({ length: 32 }, (_, index) => ({ mount: `/disk/${index}`, total: 1024, used: 512 })),
+      netInterfaces: Array.from({ length: 32 }, (_, index) => ({ name: `eth${index}`, rx: 10, tx: 20 })),
+      cpuPerCore: Array.from({ length: 64 }, () => 50),
+    };
+    const points = shared.points;
     points.length = 0;
     for (let i = 0; i < 1800; i++) points.push({ at: at - (1799 - i) * 1000, cpu: i % 100, memory: 50, disk: 40, rx: 10, tx: 20 });
   }
   const initial = f.service.snapshot(event(1));
   const initialBytes = JSON.stringify(initial).length;
-  const cursor = { runtimeId: initial.runtimeId, epoch: initial.epoch, after: Object.fromEntries(hosts.map((host) => [host.id, { at, historyId: initial.hosts[host.id].historyId }])) };
+  const cursor = { runtimeId: initial.runtimeId, epoch: initial.epoch, after: Object.fromEntries(hosts.map((host) => [host.id, { at, statsAt: initial.hosts[host.id].at, historyId: initial.hosts[host.id].historyId }])) };
   for (const c of connections) {
     const points = readSharedStats(c).points;
     points.shift();
@@ -728,11 +734,20 @@ test("snapshot deltas send new points only, even with 256 full retained historie
   assert.equal(initial.historyMode, "replace");
   assert.equal(delta.historyMode, "append");
   assert.equal(Object.values(delta.hosts).reduce((count, host) => count + host.points.length, 0), 256);
+  assert.ok(Object.values(delta.hosts).every((host) => !Object.hasOwn(host, "stats")));
   assert.ok(JSON.stringify(delta).length < initialBytes / 100);
-  const caughtUp = { ...cursor, after: Object.fromEntries(hosts.map((host) => [host.id, { at: at + 1000, historyId: initial.hosts[host.id].historyId }])) };
+  const caughtUp = { ...cursor, after: Object.fromEntries(hosts.map((host) => [host.id, { ...cursor.after[host.id], at: at + 1000 }])) };
   assert.ok(Object.values(f.service.snapshot(event(1), caughtUp).hosts).every((host) => host.points.length === 0));
   const staleIdentity = { ...cursor, after: { ...cursor.after, h0: { at: at + 999999, historyId: "old-endpoint" } } };
   assert.equal(f.service.snapshot(event(1), staleIdentity).hosts.h0.points.length, 1800);
+  assert.deepEqual(f.service.snapshot(event(1), staleIdentity).hosts.h0.stats, initial.hosts.h0.stats);
   assert.equal(f.service.snapshot(event(1), { ...cursor, runtimeId: "old-worker" }).historyMode, "replace");
+  const shared = readSharedStats(connections[0]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await sampleSharedStats({ conn: connections[0], _monitorStats: true }, async () =>
+    ({ success: true, stats: { ...shared.result.stats, cpu: 67 } }), shared.at + 5000);
+  const fresh = f.service.snapshot(event(1), caughtUp);
+  assert.equal(fresh.hosts.h0.stats.cpu, 67);
+  assert.ok(Object.entries(fresh.hosts).every(([id, host]) => id === "h0" || !Object.hasOwn(host, "stats")));
   f.service.dispose();
 });

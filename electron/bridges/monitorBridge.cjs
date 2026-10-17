@@ -352,7 +352,9 @@ function createMonitorService({
           historyId,
           status: entry?.status ?? host.status ?? "limit",
           at: shared?.at ?? 0,
-          stats: shared?.result?.success ? shared.result.stats : null,
+          ...(append && last?.historyId === historyId && last.statsAt === (shared?.at ?? 0)
+            ? {}
+            : { stats: shared?.result?.success ? shared.result.stats : null }),
           points: append && last?.historyId === historyId
             ? (shared?.points ?? []).filter((point) => point.at > last.at)
             : shared?.points ?? [],

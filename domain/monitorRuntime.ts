@@ -22,7 +22,8 @@ export type MonitorHostState = {
     | "disconnected"
     | "limit";
   at: number;
-  stats: MonitorStats | null;
+  /** Omitted by incremental replies when the receiver already has this sample. */
+  stats?: MonitorStats | null;
   points: MonitorPoint[];
 };
 export type MonitorSnapshot = {
@@ -42,7 +43,7 @@ export type MonitorSnapshot = {
 export type MonitorHistoryCursor = {
   runtimeId: string;
   epoch: number;
-  after: Record<string, { at: number; historyId: string }>;
+  after: Record<string, { at: number; statsAt: number; historyId: string }>;
 };
 
 /** Incremental transport keeps the full bounded history in the renderer. */
@@ -62,7 +63,8 @@ export function mergeMonitorSnapshotHistory(previous: MonitorSnapshot, next: Mon
       if (previous.hosts[id]?.historyId !== host.historyId) return [id, host];
       const retained = previous.hosts[id]?.points ?? [];
       const last = retained.at(-1)?.at ?? 0;
-      return [id, { ...host, points: [...retained, ...host.points.filter((point) => point.at > last)]
+      return [id, { ...host, stats: host.stats === undefined ? previous.hosts[id]?.stats : host.stats,
+        points: [...retained, ...host.points.filter((point) => point.at > last)]
         .filter((point) => next.takenAt - point.at <= 30 * 60000).slice(-1800) }];
     })),
   };

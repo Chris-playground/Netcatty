@@ -74,3 +74,15 @@ test("a new endpoint replaces retained points even when its first delta races a 
   assert.deepEqual(merged.hosts.h.points.map((point) => point.at), [2500]);
   assert.equal(merged.hosts.h.historyId, "endpoint-b");
 });
+
+test("unchanged stats are retained by reference while fresh, cleared and new-endpoint stats replace them", () => {
+  const previous = snapshot(state);
+  const delta = { ...snapshot({ ...state, stats: undefined, points: [] }), historyMode: "append" as const, takenAt: 4000 };
+  const merged = mergeMonitorSnapshotHistory(previous, delta);
+  assert.equal(merged.hosts.h.stats, state.stats);
+  assert.deepEqual(merged.hosts.h.points, state.points);
+  const fresh = { ...state.stats!, cpu: 67 };
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, hosts: { h: { ...state, stats: fresh, points: [] } } }).hosts.h.stats, fresh);
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, hosts: { h: { ...state, stats: null, points: [] } } }).hosts.h.stats, null);
+  assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, hosts: { h: { ...state, historyId: "endpoint-b", stats: null, points: [] } } }).hosts.h.stats, null);
+});
