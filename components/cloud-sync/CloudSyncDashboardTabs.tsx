@@ -27,6 +27,7 @@ import { GoogleDriveIcon, OneDriveIcon, ProviderCard, Toggle } from './CloudSync
 import { LocalBackupsPanel } from './CloudSyncLocalBackupsPanel';
 import { ConvergentSyncPanel } from './ConvergentSyncPanel';
 import { SettingsAnchor } from '../settings/settings-ui';
+import { focusSettingsAnchor } from '../settings/settingsFocus';
 
 type SyncController = ReturnType<typeof useCloudSync>;
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -295,6 +296,22 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                 </TabsList>
 
                 <TabsContent value="providers" className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
+                        <div>
+                            <div className="text-sm font-medium">{t('cloudSync.autoSync.title')}</div>
+                            <div className="text-xs text-muted-foreground">{t('cloudSync.autoSync.manageHint')}</div>
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                setActiveTab('status');
+                                void focusSettingsAnchor('sync-auto-sync');
+                            }}
+                        >
+                            {t('cloudSync.autoSync.manage')}
+                        </Button>
+                    </div>
                     <SettingsAnchor anchorId="sync-providers" className="space-y-3">
                     <ProviderCard
                         provider="github"

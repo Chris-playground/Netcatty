@@ -385,6 +385,8 @@ export const esTerminalMessages: Messages = {
   'cloudSync.changeKey': 'Cambiar clave',
   'cloudSync.providers.title': 'Proveedores de nube',
   'cloudSync.syncAll': 'Sincronizar todos los proveedores conectados',
+  'cloudSync.autoSync.manage': 'Configurar sincronización automática',
+  'cloudSync.autoSync.manageHint': 'Activa o desactiva la sincronización automática en Estado.',
   'cloudSync.autoSync.title': 'Sincronización automática',
   'cloudSync.autoSync.desc': 'Sincronizar automáticamente cuando se realicen cambios',
   'cloudSync.strategy.title': 'Estrategia de sincronización',

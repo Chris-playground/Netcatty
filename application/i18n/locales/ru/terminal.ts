@@ -404,6 +404,8 @@ export const ruTerminalMessages: Messages = {
   'cloudSync.changeKey': 'Изменить ключ',
   'cloudSync.providers.title': 'Облачные провайдеры',
   'cloudSync.syncAll': 'Синхронизировать всех подключённых провайдеров',
+  'cloudSync.autoSync.manage': 'Настройки автосинхронизации',
+  'cloudSync.autoSync.manageHint': 'Включите или отключите автосинхронизацию на вкладке «Статус».',
   'cloudSync.autoSync.title': 'Автосинхронизация',
   'cloudSync.autoSync.desc': 'Автоматически синхронизировать при внесении изменений',
   'cloudSync.strategy.title': 'Стратегия синхронизации',
