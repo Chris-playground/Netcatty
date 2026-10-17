@@ -296,3 +296,24 @@ test("OpenSSH notification helper exit dismisses its pending touch prompt", asyn
     shutdownFidoAskpass();
   }
 });
+
+test("late prompts for a released signing lease never reach another window", async () => {
+  let otherPrompts = 0;
+  const owner = { id: 810, isDestroyed: () => false, send() {} };
+  const other = { id: 811, isDestroyed: () => false, send() { otherPrompts++; } };
+  const env = buildFidoAskpassEnv({ resolveWebContents: () => owner });
+  buildFidoAskpassEnv({ resolveWebContents: () => other });
+  const api = require("./fidoAskpass.cjs");
+  let finish;
+  api.runWithFidoSigningLease(env.NETCATTY_FIDO_ASKPASS_LEASE, done => { finish = done; });
+  api.releaseFidoAskpassLease(env.NETCATTY_FIDO_ASKPASS_LEASE);
+  try {
+    const artifacts = ensureFidoAskpass();
+    const result = await runAskpassHelper({
+      wrapperPath: artifacts.wrapperPath, socketPath: artifacts.socketPath,
+      prompt: "Enter PIN for authenticator:", envExtra: { NETCATTY_FIDO_ASKPASS_LEASE: "" },
+    });
+    assert.equal(result.code, 1);
+    assert.equal(otherPrompts, 0);
+  } finally { finish(); shutdownFidoAskpass(); }
+});

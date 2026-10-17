@@ -61,3 +61,16 @@ test("attachFidoAgentRelease no-ops without conn or release hook", () => {
 
   assert.equal(releaseCount, 0);
 });
+
+test("explicit FIDO cancellation ends the transport instead of trying another credential", () => {
+  const conn = new EventEmitter();
+  let ended = 0;
+  conn.end = () => { ended++; };
+  attachFidoAgentRelease(conn, { _releaseNetcattyFidoAgent() {} });
+  conn.emit("error", Object.assign(new Error("cancelled"), { code: "ERR_FIDO_CANCELLED" }));
+  assert.equal(ended, 1);
+  conn.emit("error", new Error("ordinary agent error"));
+  assert.equal(ended, 1);
+  conn.emit("close");
+  assert.equal(conn.listenerCount("error"), 0);
+});

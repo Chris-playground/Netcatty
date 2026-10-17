@@ -79,7 +79,9 @@ function cancelFidoPromptRequestsForLease(leaseId, reason = "lease-released") {
 /**
  * @param {Electron.WebContents|null|undefined} sender
  * @param {{
- *   kind: "pin" | "touch" | "confirm",
+ *   kind: "pin" | "touch" | "confirm" | "recovery",
+ *   reason?: string,
+ *   allowPasswordFallback?: boolean,
  *   message?: string,
  *   title?: string,
  *   keyName?: string,
@@ -97,7 +99,7 @@ function requestFidoPrompt(sender, options = {}) {
       return;
     }
 
-    const kind = options.kind === "touch" || options.kind === "confirm" ? options.kind : "pin";
+    const kind = ["touch", "confirm", "recovery"].includes(options.kind) ? options.kind : "pin";
     const leaseId = typeof options.leaseId === "string" ? options.leaseId : "";
     const requestId = generateRequestId(kind);
     const timeoutId = setTimeout(() => {
@@ -137,6 +139,8 @@ function requestFidoPrompt(sender, options = {}) {
         title: options.title || "",
         keyName: options.keyName || "",
         notificationOnly: options.notificationOnly === true,
+        reason: options.reason,
+        allowPasswordFallback: options.allowPasswordFallback === true,
       });
     } catch (err) {
       console.error("[FidoPrompt] Failed to send request:", err);

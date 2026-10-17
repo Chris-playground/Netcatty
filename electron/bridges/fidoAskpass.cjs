@@ -96,6 +96,44 @@ let lastLeasedSigningResolver = null;
 let lastLeasedSigningLeaseId = null;
 let activeSigningLeaseId = null;
 const signingQueue = [];
+let helperTimeoutMs = 30000;
+
+function setHelperTimeoutForTests(value) {
+  if (value != null && (!Number.isFinite(value) || value <= 0)) throw new Error("Invalid FIDO helper timeout");
+  helperTimeoutMs = value == null ? 30000 : value;
+}
+
+function observeSkHelper(socket, entry, initial = "") {
+  if (!entry) { socket.end('{"ack":true}\n'); return; }
+  if (entry.controller.signal.aborted) { socket.end('{"cancel":true}\n'); return; }
+  let buffer = initial;
+  const timer = setTimeout(() => {
+    entry.timedOut = true;
+    if (!socket.destroyed) socket.write('{"cancel":true}\n');
+  }, helperTimeoutMs);
+  const cancelHelper = () => {
+    if (!socket.destroyed) socket.write('{"cancel":true}\n');
+  };
+  const onAbort = cancelHelper;
+  entry.controller.signal.addEventListener("abort", onAbort, { once: true });
+  const consume = chunk => {
+    buffer += chunk;
+    const nl = buffer.indexOf("\n");
+    if (nl === -1) return;
+    let result;
+    try { result = JSON.parse(buffer.slice(0, nl)); } catch { socket.destroy(); return; }
+    if (result.phase !== "result") return;
+    clearTimeout(timer);
+    entry.helperError = Number.isInteger(result.errorCode) ? result.errorCode : null;
+    socket.end('{"ack":true}\n');
+  };
+  socket.on("data", consume);
+  socket.once("close", () => {
+    clearTimeout(timer);
+    entry.controller.signal.removeEventListener("abort", onAbort);
+  });
+  if (buffer) consume("");
+}
 
 // A shared OpenSSH agent cannot pass a per-request lease to its helper.
 // Serialize hardware signatures and bind each prompt to its calling window
@@ -111,11 +149,12 @@ function runWithFidoSigningLease(leaseId, operation) {
     entry.operation(() => {
       if (finished) return;
       finished = true;
+      entry.attemptController?.abort();
       entry.controller.abort();
       activeSigningLeaseId = null;
       signingQueue.shift();
       if (signingQueue.length) queueMicrotask(next);
-    });
+    }, entry);
   };
   next();
 }
@@ -188,7 +227,8 @@ function liveSenderFromResolver(resolver) {
  * focus / any open window, then the sticky global fallback.
  */
 function resolveSharedAgentPromptSender() {
-  if (activeSigningLeaseId && askpassLeases.has(activeSigningLeaseId)) {
+  // An active but released/dead caller must not fall through to another window.
+  if (activeSigningLeaseId) {
     return liveSenderFromResolver(askpassLeases.get(activeSigningLeaseId));
   }
   const fromLastLease = liveSenderFromResolver(lastLeasedSigningResolver);
@@ -225,6 +265,10 @@ function handleAskpassClient(socket) {
       socket.end(`${JSON.stringify({ ok: false, error: "bad_json" })}\n`);
       return;
     }
+    if (msg?.type === "sk-helper") {
+      observeSkHelper(socket, signingQueue[0], buf.slice(nl + 1));
+      return;
+    }
     const prompt = String(msg?.prompt || "");
     // OpenSSH notify_start() uses mode=none: hardware completion, not a UI
     // answer, authorizes the signature. Exiting this helper only hides the hint.
@@ -256,31 +300,33 @@ function handleAskpassClient(socket) {
       socket.end(`${JSON.stringify({ ok: false, error: "no_window" })}\n`);
       return;
     }
+    const signing = signingQueue[0]?.leaseId === ownerLeaseId ? signingQueue[0] : null;
     try {
       const result = await fidoPromptHandler.requestFidoPrompt(sender, {
         kind,
         notificationOnly,
         message: prompt,
-        keyName: "FIDO2",
+        keyName: signing?.keyName || "",
         leaseId: ownerLeaseId,
         signal: controller.signal,
       });
       if (socket.destroyed) return;
       if (!result || result.cancelled) {
+        if (kind === "pin" && signing) signing.cancelled = true;
         socket.end(`${JSON.stringify({ ok: false, error: "cancelled" })}\n`);
         return;
       }
       // Touch/confirm: empty string is fine; PIN: return entered secret.
       const response = kind === "pin" ? (result.response || "") : "";
-      const signing = signingQueue[0];
+      if (kind === "pin" && signing) signing.pinSubmitted = true;
       if (kind === "pin" && response && /user presence|touch|tap/i.test(prompt)
           && signing?.leaseId === ownerLeaseId && !signing.controller.signal.aborted) {
         // ssh-agent ends its initial notification before asking for a PIN and
         // does not restart it on retry. Keep a device-only waiting hint visible
         // after PIN submission until the actual signature callback completes.
         void fidoPromptHandler.requestFidoPrompt(sender, {
-          kind: "touch", notificationOnly: true, message: prompt, keyName: "FIDO2",
-          leaseId: ownerLeaseId, signal: signing.controller.signal,
+          kind: "touch", notificationOnly: true, message: prompt, keyName: signing.keyName || "",
+          leaseId: ownerLeaseId, signal: (signing.attemptController || signing.controller).signal,
         });
       }
       socket.end(`${JSON.stringify({ ok: true, response })}\n`);
@@ -383,6 +429,9 @@ function releaseFidoAskpassLease(leaseId) {
   if (typeof leaseId !== "string" || !leaseId) return;
   const released = askpassLeases.get(leaseId);
   askpassLeases.delete(leaseId);
+  for (const entry of signingQueue) {
+    if (entry.leaseId === leaseId) entry.controller.abort();
+  }
   try {
     fidoPromptHandler.cancelFidoPromptRequestsForLease(leaseId, "lease-released");
   } catch {
@@ -430,6 +479,7 @@ module.exports = {
   ensureFidoAskpass,
   buildFidoAskpassEnv,
   runWithFidoSigningLease,
+  setHelperTimeoutForTests,
   releaseFidoAskpassLease,
   shutdownFidoAskpass,
   classifyAskpassPrompt: fidoPromptHandler.classifyAskpassPrompt,

@@ -847,15 +847,16 @@ export function AppSideEffects() {
       console.log('[App] FIDO prompt request:', request);
       setFidoPromptQueue((prev) => [...prev, {
         ...request,
-        kind: request.kind === 'touch' || request.kind === 'confirm' ? request.kind : 'pin',
+        kind: request.kind === 'touch' || request.kind === 'confirm' || request.kind === 'recovery' ? request.kind : 'pin',
       }]);
     });
     return () => { unsubscribe?.(); };
   }, []);
 
   const handleFidoPromptSubmit = useCallback((requestId: string, response: string) => {
+    if (response === 'fallback') toast.info(t('fido.recovery.passwordFallback'));
     return handleFidoPromptSubmitImpl(() => ({ netcattyBridge, requestId, setFidoPromptQueue }), requestId, response);
-  }, []);
+  }, [t]);
 
   const handleFidoPromptCancel = useCallback((requestId: string) => {
     return handleFidoPromptCancelImpl(() => ({ netcattyBridge, requestId, setFidoPromptQueue }), requestId);

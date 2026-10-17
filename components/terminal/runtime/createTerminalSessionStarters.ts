@@ -712,6 +712,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           certificate: attempt.key?.certificate,
           publicKey: attempt.key?.publicKey,
           keyId: attempt.key?.id,
+          keyLabel: attempt.key?.label,
           keySource: attempt.key?.source,
           passphrase: attempt.key
             ? (effectivePassphrase || sanitizeCredentialValue(attempt.key.passphrase))
@@ -884,7 +885,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.setIsConnectionAwaitingUserInput?.(false);
       ctx.setIsConnectionPastTcpDial?.(false);
 
-      const message = err instanceof Error ? err.message : String(err);
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const message = rawMessage.includes("Security key authentication cancelled")
+        ? tr("fido.prompt.cancelled", "Security key authentication cancelled.")
+        : rawMessage;
       const authError = isAuthError(err);
 
       if (isJumpHostAuthError(err, message)) {

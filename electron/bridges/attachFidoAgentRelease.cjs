@@ -18,6 +18,14 @@ function attachFidoAgentRelease(conn, agent) {
   };
   conn.once("close", releaseOwned);
   conn.once("end", releaseOwned);
+  const onError = error => {
+    if (error?.code !== "ERR_FIDO_CANCELLED") return;
+    // ssh2 would otherwise try another key/password after an agent failure.
+    // Explicitly cancelling hardware authentication must end this connection.
+    try { conn.end?.(); } catch { /* already closed */ }
+  };
+  conn.on("error", onError);
+  conn.once("close", () => conn.removeListener("error", onError));
   return releaseOwned;
 }
 

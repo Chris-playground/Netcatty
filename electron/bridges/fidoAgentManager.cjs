@@ -275,7 +275,10 @@ async function acquireFidoAgent(options = {}) {
 
       // Keep SSH_ASKPASS on the agent so verify-required sk-helper prompts work,
       // but never bake the starter's caller lease into the shared process env.
-      const agentProcessEnv = { ...env, ...askpassEnvForAgentProcess(askpassEnv) };
+      const agentProcessEnv = {
+        ...env, ...askpassEnvForAgentProcess(askpassEnv),
+        ...require("./fidoSkHelper.cjs").buildSkHelperEnv(sshAgent, askpassEnv, env, platform),
+      };
 
       // Windows: try a Netcatty-owned named pipe first (ssh2 speaks it natively),
       // then a filesystem socket for MSYS/Git user-mode agents.

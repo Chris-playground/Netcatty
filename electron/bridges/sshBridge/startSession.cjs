@@ -2566,7 +2566,7 @@ function createStartSessionApi(ctx) {
           conn.on("error", (err) => {
             // ssh2 reports agent failures before trying the next auth method.
             // Keep the connection and its authentication deadline alive.
-            if (err.level === "agent") {
+            if (err.level === "agent" && err.code !== "ERR_FIDO_CANCELLED") {
               log("non-fatal agent auth error (will try next method)", {
                 sessionId,
                 hostname: options.hostname,

@@ -1403,21 +1403,17 @@ async function prepareSystemSshAgentForAuth(options, logPrefix = "[SSHAuth]") {
             callback = signOptions;
             signOptions = undefined;
           }
-          runWithFidoSigningLease(askpassLeaseId, (finish) => {
+          runWithFidoSigningLease(askpassLeaseId, (finish, context) => {
             if (fidoResourcesReleased) {
               finish();
               callback(new Error("FIDO authentication session has ended"));
               return;
             }
-            const settle = (...args) => {
-              finish();
-              callback(...args);
-            };
-            try {
-              sign(key, data, signOptions, settle);
-            } catch (error) {
-              settle(error);
-            }
+            require("./fidoSignFlow.cjs").signWithRecovery(context, options,
+              settle => sign(key, data, signOptions, settle)).then(result => {
+                finish();
+                callback(result.error, result.signature);
+              }, error => { finish(); callback(error); });
           });
         };
       }

@@ -22,6 +22,17 @@ static int check_pin(uint8_t flags, const char *pin) {
     return 0;
 }
 
+static int check_device(void) {
+    const char *control = getenv("NETCATTY_FIDO_SIM_CONTROL");
+    if (!control) return 0;
+    char action[32] = {0};
+    FILE *input = fopen(control, "r");
+    if (input) { (void)fgets(action, sizeof(action), input); fclose(input); }
+    if (!strncmp(action, "unplugged", 9)) return SSH_SK_ERR_DEVICE_NOT_FOUND;
+    if (!strncmp(action, "unsupported", 11)) return SSH_SK_ERR_UNSUPPORTED;
+    return 0;
+}
+
 /* Optional, test-only physical-presence gate. The host test changes this file
  * to emulate a touch/unplug; a renderer response cannot bypass this gate. */
 static int await_touch(uint8_t *flags) {
@@ -79,7 +90,9 @@ int sk_sign(uint32_t alg, const uint8_t *data, size_t data_len,
     uint8_t flags, const char *pin, struct sk_option **options,
     struct sk_sign_response **result) {
     (void)options;
-    int status = check_pin(flags, pin);
+    int status = check_device();
+    if (status) return status;
+    status = check_pin(flags, pin);
     if (status) return status;
     status = await_touch(&flags);
     if (status) return status;

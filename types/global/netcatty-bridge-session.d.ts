@@ -655,7 +655,9 @@ declare global {
     onFidoPromptRequest?(
       cb: (request: {
         requestId: string;
-        kind: "pin" | "touch" | "confirm";
+        kind: "pin" | "touch" | "confirm" | "recovery";
+        reason?: "device-unavailable" | "timeout" | "pin-failed" | "failed";
+        allowPasswordFallback?: boolean;
         notificationOnly?: boolean;
         message?: string;
         title?: string;
