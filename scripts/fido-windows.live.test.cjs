@@ -18,6 +18,7 @@ const prompts = require("../electron/bridges/fidoPromptHandler.cjs");
 const { generateFidoSshKeyPair } = require("../electron/bridges/fidoSshKeygen.cjs");
 const { enhanceAuthOptionsForFido, prepareSystemSshAgentForAuth } = require("../electron/bridges/sshAuthHelper.cjs");
 const { shutdownFidoAgentSubsystem } = require("../electron/bridges/fidoAgentManager.cjs");
+const manager = require("../electron/bridges/fidoAgentManager.cjs");
 const { attachFidoAgentRelease } = require("../electron/bridges/attachFidoAgentRelease.cjs");
 const run = promisify(execFile);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -36,6 +37,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
 }, async t => {
   const dir = fs.mkdtempSync(path.join(tempDirBridge.getTempDir(), "fw-"));
   const originalGetTempDir = tempDirBridge.getTempDir;
+  const originalAcquire = manager.acquireFidoAgent;
   const spacedTemp = path.join(dir, "profile space");
   fs.mkdirSync(spacedTemp);
   tempDirBridge.getTempDir = () => spacedTemp;
@@ -129,6 +131,14 @@ test("Windows security-key integration with real user-mode OpenSSH", {
     assert.ok(process.env.NETCATTY_WINDOWS_SSH_AGENT, "Windows OpenSSH agent path is required");
     assert.ok(process.env.NETCATTY_WINDOWS_SSH_KEYGEN, "Windows OpenSSH keygen path is required");
     process.env.NETCATTY_SSH_AGENT_PATH = process.env.NETCATTY_WINDOWS_SSH_AGENT;
+    manager.acquireFidoAgent = options => originalAcquire({ ...options, execFile: async (binary, args, options) => {
+      try { return await run(binary, args, options); }
+      catch (error) {
+        // Agent startup has no secret input; surface binding errors in CI.
+        console.log("[WindowsFido] agent startup rejected", args, error.stderr || error.message);
+        throw error;
+      }
+    } });
     process.env.SSH_SK_PROVIDER = "/usr/lib/netcatty-fido-test-provider.dll";
     process.env.NETCATTY_FIDO_SIM_CONTROL = control.replace(/\\/g, "/");
     server.listen(0, "127.0.0.1");
@@ -222,6 +232,7 @@ test("Windows security-key integration with real user-mode OpenSSH", {
     shutdownFidoAgentSubsystem();
     askpass.shutdownFidoAskpass();
     tempDirBridge.getTempDir = originalGetTempDir;
+    manager.acquireFidoAgent = originalAcquire;
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }

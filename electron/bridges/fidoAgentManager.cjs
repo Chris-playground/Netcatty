@@ -290,7 +290,7 @@ async function acquireFidoAgent(options = {}) {
       const sockCandidates = platform === "win32"
         ? [
           `\\\\.\\pipe\\netcatty-fido-agent-${randomUUID().slice(0, 8)}`,
-          path.join(agentDir, "agent.sock"),
+          path.join(agentDir, "agent.sock").replace(/\\/g, "/"),
         ]
         : [path.join(agentDir, "agent.sock")];
 
