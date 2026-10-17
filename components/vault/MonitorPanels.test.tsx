@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import React from "react";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { I18nProvider } from "../../application/i18n/I18nProvider";
@@ -20,8 +21,37 @@ const point = (ago: number, cpu: number | null): MonitorPoint => ({
   tx: null,
 });
 const trend = (points: MonitorPoint[]) => new JSDOM(renderToStaticMarkup(
-  <MonitorTrend points={points} field="cpu" range={5} interval={10} label="CPU trend" />,
+  <MonitorTrend clock={0} points={points} field="cpu" range={5} interval={10} label="CPU trend" />,
 )).window.document;
+
+test("unchanged series reuse geometry but age out when the viewport clock advances", async (t) => {
+  const dom = new JSDOM("<div id='root'></div>");
+  const globals = { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true };
+  const originals = Object.fromEntries(Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+  let current = now;
+  t.mock.method(Date, "now", () => current);
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  const samples = [point(1000, 42)];
+  try {
+    await act(async () => root.render(<MonitorTrend clock={0} points={samples} field="cpu" range={5} interval={60} label="CPU" />));
+    const path = dom.window.document.querySelector("svg g path")!.getAttribute("d");
+    current += 1000;
+    await act(async () => root.render(<MonitorTrend clock={0} points={samples} field="cpu" range={5} interval={60} label="CPU updated" />));
+    assert.equal(dom.window.document.querySelector("svg g path")!.getAttribute("d"), path);
+    current += 6 * 60000;
+    await act(async () => root.render(<MonitorTrend clock={1} points={samples} field="cpu" range={5} interval={60} label="CPU updated" />));
+    assert.equal(dom.window.document.querySelectorAll("svg g path, svg circle").length, 0);
+  } finally {
+    await act(async () => root.unmount());
+    for (const key of Object.keys(globals)) {
+      const descriptor = originals[key];
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.window.close();
+  }
+});
 
 test("empty trends do not draw a reading", (t) => {
   t.mock.method(Date, "now", () => now);
@@ -61,8 +91,8 @@ test("trend lines and shaded areas break at missing readings and collection gaps
 
 test("multiple host charts use independent gradient references", () => {
   const document = new JSDOM(renderToStaticMarkup(<>
-    <MonitorTrend points={[]} field="cpu" range={5} interval={10} label="CPU" />
-    <MonitorTrend points={[]} field="memory" range={5} interval={10} label="Memory" />
+    <MonitorTrend clock={0} points={[]} field="cpu" range={5} interval={10} label="CPU" />
+    <MonitorTrend clock={0} points={[]} field="memory" range={5} interval={10} label="Memory" />
   </>)).window.document;
   const ids = [...document.querySelectorAll("linearGradient")].map((g) => g.id);
   assert.equal(new Set(ids).size, 2);

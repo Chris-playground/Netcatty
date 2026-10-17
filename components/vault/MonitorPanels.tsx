@@ -35,7 +35,7 @@ import {
   type MonitorPoint,
 } from "../../domain/monitorRuntime";
 import type { Host } from "../../domain/models";
-import { findMonitorChartPoint } from "../../domain/monitorChart";
+import { buildMonitorTrendGeometry, findMonitorChartPoint } from "../../domain/monitorChart";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -72,6 +72,7 @@ import { MonitorDiskUsage } from "./MonitorDiskUsage";
 import { VaultHeaderSearch, VaultPageHeader } from "./VaultPageHeader";
 import { toast } from "../ui/toast";
 
+const emptyMonitorPoints: MonitorPoint[] = [];
 const percent = (n: number | null | undefined) =>
   n == null || !Number.isFinite(n) ? "--" : `${n.toFixed(1)}%`;
 const capacity = (n: number | null | undefined) =>
@@ -92,11 +93,12 @@ const monitorAsideHeaderClass =
 const monitorAsideClass = "border-border/30 shadow-[-12px_0_24px_hsl(var(--foreground)/0.04)]";
 
 /** Sparse lines: never bridge a missing sample or invent history before monitoring started. */
-export function MonitorTrend({
+export const MonitorTrend = React.memo(function MonitorTrend({
   points,
   field,
   range,
   interval,
+  clock,
   label,
   className,
 }: {
@@ -104,46 +106,17 @@ export function MonitorTrend({
   field: "cpu" | "memory" | "rx" | "tx";
   range: number;
   interval: number;
+  clock: number;
   label: string;
   className?: string;
 }) {
   const gradientId = useId();
   const { resolvedLocale } = useI18n();
   const [hoverAt, setHoverAt] = useState<number | null>(null);
-  const end = Date.now(),
-    start = end - range * 60000;
-  const visible = points.filter((p) => p.at >= start && p.at <= end);
-  const max =
-    field === "cpu" || field === "memory"
-      ? 100
-      : Math.max(1, ...visible.map((p) => p[field] ?? 0));
-  const segments: { path: string; firstX: number; x: number; y: number }[] = [];
-  let current: (typeof segments)[number] | null = null;
-  let previous: MonitorPoint | null = null;
-  for (const p of visible) {
-    const value = p[field];
-    if (value == null) {
-      if (current) segments.push(current);
-      current = null;
-      previous = null;
-      continue;
-    }
-    if (previous && p.at - previous.at > interval * 2500) {
-      if (current) segments.push(current);
-      current = null;
-    }
-    const x = Math.max(
-      0,
-      Math.min(300, ((p.at - start) / (end - start)) * 300),
-    );
-    const y = 58 - (Math.min(max, Math.max(0, value)) / max) * 54;
-    const coordinate = `${x.toFixed(2)} ${y.toFixed(2)}`;
-    current = current
-      ? { ...current, path: `${current.path} L ${coordinate}`, x, y }
-      : { path: `M ${coordinate}`, firstX: x, x, y };
-    previous = p;
-  }
-  if (current) segments.push(current);
+  const { end, start, visible, max, segments } = useMemo(
+    () => buildMonitorTrendGeometry(points, field, range, interval, Math.max(Date.now(), clock * 5000)),
+    [points, field, range, interval, clock],
+  );
   const hovered = hoverAt == null ? undefined : visible.find((p) => p.at === hoverAt);
   const hoveredValue = hovered?.[field];
   const hoverX = hovered ? ((hovered.at - start) / (end - start)) * 300 : 0;
@@ -218,7 +191,7 @@ export function MonitorTrend({
       )}
     </div>
   );
-}
+});
 
 export function MonitorPanels({
   hosts,
@@ -435,7 +408,8 @@ export function MonitorPanels({
           </div>
           {panel && (
             <MonitorTrend
-              points={state?.points ?? []}
+              clock={Math.floor(runtime.takenAt / 5000)}
+              points={state?.points ?? emptyMonitorPoints}
               field="cpu"
               range={panel.range}
               interval={panel.interval}
@@ -457,7 +431,8 @@ export function MonitorPanels({
           </div>
           {panel && (
             <MonitorTrend
-              points={state?.points ?? []}
+              clock={Math.floor(runtime.takenAt / 5000)}
+              points={state?.points ?? emptyMonitorPoints}
               field="memory"
               range={panel.range}
               interval={panel.interval}
@@ -1135,14 +1110,16 @@ export function MonitorPanels({
                 {panel && (
                   <>
                     <MonitorTrend
-                      points={detailState?.points ?? []}
+                      clock={Math.floor(runtime.takenAt / 5000)}
+                      points={detailState?.points ?? emptyMonitorPoints}
                       field="rx"
                       range={panel.range}
                       interval={panel.interval}
                       label={t("monitor.downloadTrend")}
                     />
                     <MonitorTrend
-                      points={detailState?.points ?? []}
+                      clock={Math.floor(runtime.takenAt / 5000)}
+                      points={detailState?.points ?? emptyMonitorPoints}
                       field="tx"
                       range={panel.range}
                       interval={panel.interval}

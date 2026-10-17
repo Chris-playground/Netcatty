@@ -63,23 +63,44 @@ export function mergeMonitorSnapshotHistory(previous: MonitorSnapshot, next: Mon
       if (previous.hosts[id]?.historyId !== host.historyId) return [id, host];
       const retained = previous.hosts[id]?.points ?? [];
       const last = retained.at(-1)?.at ?? 0;
+      const added = host.points.filter((point) => point.at > last);
+      const points = added.length || (retained[0] && next.takenAt - retained[0].at > 30 * 60000)
+        ? [...retained, ...added].filter((point) => next.takenAt - point.at <= 30 * 60000).slice(-1800)
+        : retained;
       return [id, { ...host, stats: host.stats === undefined ? previous.hosts[id]?.stats : host.stats,
-        points: [...retained, ...host.points.filter((point) => point.at > last)]
-        .filter((point) => next.takenAt - point.at <= 30 * 60000).slice(-1800) }];
+        points }];
     })),
   };
+}
+
+const filteredHistories = new WeakMap<MonitorPoint[], Map<number, MonitorPoint[]>>();
+function pointsSince(points: MonitorPoint[], startedAt: number) {
+  if (!points.length || points[0].at > startedAt) return points;
+  let cache = filteredHistories.get(points);
+  if (!cache) {
+    cache = new Map();
+    filteredHistories.set(points, cache);
+  }
+  let filtered = cache.get(startedAt);
+  if (!filtered) {
+    filtered = points.filter((point) => point.at > startedAt);
+    cache.set(startedAt, filtered);
+    if (cache.size > 32) cache.delete(cache.keys().next().value!);
+  }
+  return filtered;
 }
 
 /** A panel only displays samples collected during its current cadence/run. */
 export function monitorStateSince(state: MonitorHostState | undefined, startedAt: number | undefined): MonitorHostState | undefined {
   if (!state || typeof startedAt !== "number") return undefined;
   const fresh = state.at > startedAt;
+  if (fresh && (!state.points.length || state.points[0].at > startedAt)) return state;
   return {
     ...state,
     at: fresh ? state.at : 0,
     stats: fresh ? state.stats : null,
     status: !fresh && state.status === "live" ? "queued" : state.status,
-    points: state.points.filter((point) => point.at > startedAt),
+    points: pointsSince(state.points, startedAt),
   };
 }
 export type MonitorPanelDemand = {

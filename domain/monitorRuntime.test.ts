@@ -28,6 +28,9 @@ test("only current-run readings are visible without mutating shared history", ()
   assert.equal(monitorStateSince({ ...state, status: "unsupported" }, 2000)?.status, "unsupported");
   assert.equal(monitorStateSince(state, 0)?.points.length, 2);
   assert.equal(state.points.length, 2);
+  assert.equal(monitorStateSince(state, 1500)?.points, fresh.points);
+  assert.equal(monitorStateSince({ ...state }, 1500)?.points, fresh.points);
+  assert.notEqual(monitorStateSince(state, 1000)?.points, fresh.points);
 });
 
 const snapshot = (host: MonitorHostState): MonitorSnapshot => ({
@@ -80,6 +83,8 @@ test("unchanged stats are retained by reference while fresh, cleared and new-end
   const delta = { ...snapshot({ ...state, stats: undefined, points: [] }), historyMode: "append" as const, takenAt: 4000 };
   const merged = mergeMonitorSnapshotHistory(previous, delta);
   assert.equal(merged.hosts.h.stats, state.stats);
+  assert.equal(merged.hosts.h.points, state.points);
+  assert.equal(monitorStateSince(merged.hosts.h, 0), merged.hosts.h);
   assert.deepEqual(merged.hosts.h.points, state.points);
   const fresh = { ...state.stats!, cpu: 67 };
   assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, hosts: { h: { ...state, stats: fresh, points: [] } } }).hosts.h.stats, fresh);
