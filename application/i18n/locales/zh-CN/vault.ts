@@ -789,8 +789,6 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.changeKey': '更改 Key',
   'cloudSync.providers.title': '云服务',
   'cloudSync.syncAll': '同步所有已连接的服务',
-  'cloudSync.autoSync.manage': '自动同步设置',
-  'cloudSync.autoSync.manageHint': '前往“状态”页开启或关闭自动同步。',
   'cloudSync.autoSync.title': '自动同步',
   'cloudSync.autoSync.desc': '发生变更时自动同步',
   'cloudSync.strategy.title': '同步策略',

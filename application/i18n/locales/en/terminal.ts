@@ -386,8 +386,6 @@ export const enTerminalMessages: Messages = {
   'cloudSync.changeKey': 'Change Key',
   'cloudSync.providers.title': 'Cloud Providers',
   'cloudSync.syncAll': 'Sync All Connected Providers',
-  'cloudSync.autoSync.manage': 'Auto-sync settings',
-  'cloudSync.autoSync.manageHint': 'Turn automatic syncing on or off in Status.',
   'cloudSync.autoSync.title': 'Auto-sync',
   'cloudSync.autoSync.desc': 'Automatically sync when changes are made',
   'cloudSync.strategy.title': 'Sync strategy',
