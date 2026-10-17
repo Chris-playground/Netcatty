@@ -86,6 +86,12 @@ export async function trimLocalVaultBackups(maxCount = getLocalVaultBackupMaxCou
   await bridge?.trimVaultBackups?.({ maxCount });
 }
 
+export async function clearLocalVaultBackups(): Promise<void> {
+  const bridge = netcattyBridge.get();
+  if (!bridge?.clearVaultBackups) throw new Error('Local backup cleanup is unavailable.');
+  await bridge.clearVaultBackups();
+}
+
 export async function getLocalVaultBackupCapabilities(): Promise<{
   encryptionAvailable: boolean;
 }> {
