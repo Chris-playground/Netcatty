@@ -105,7 +105,49 @@ function createMonitorService({
       entry.timer?.unref?.();
     }
   }
+  async function attachTransport(entry, transport) {
+    if (entry.cancelled || disposed) {
+      const holder = {};
+      pool.borrowTransport(transport, {
+        kind: pool.LEASE_KINDS.monitor,
+        holder,
+      });
+      pool.returnTransport(holder);
+      return;
+    }
+    // Borrow before awaiting module loading: stop can always find this lease.
+    entry.transport = transport;
+    pool.borrowTransport(transport, {
+      kind: pool.LEASE_KINDS.monitor,
+      holder: entry.holder,
+    });
+    entry.connecting = false;
+    const { detectVendorFromSshVersion } =
+      await import("../../domain/sshServerVendor.mjs");
+    if (entry.cancelled || disposed) return;
+    if (
+      detectVendorFromSshVersion(transport.conn?._remoteVer) ||
+      require("../../domain/singleChannelSshBanner.shared.cjs").remoteSoftwareRequiresSingleChannel(
+        transport.conn?._remoteVer,
+      )
+    ) {
+      pool.returnTransport(entry.holder);
+      entry.transport = null;
+      publishState(entry, "unsupported");
+      return;
+    }
+    void collect(entry);
+  }
   function connect(entry, event, options) {
+    const reusable = pool.findTransportByEndpoint(
+      pool.buildConnectionReuseEndpoint(options),
+    );
+    if (reusable) {
+      void attachTransport(entry, reusable).catch(() => {
+        if (!entry.cancelled) publishState(entry, "error");
+      });
+      return;
+    }
     // All new authentications are serialized. Shared transports need no prompt.
     dialTail = dialTail
       .catch(() => {})
@@ -141,41 +183,7 @@ function createMonitorService({
               );
             pool.completeTransportDial(coordination, transport);
           }
-          const { detectVendorFromSshVersion } =
-            await import("../../domain/sshServerVendor.mjs");
-          if (entry.cancelled || disposed) {
-            // Cancellation can arrive during authentication or module loading.
-            const holder = {};
-            pool.borrowTransport(transport, {
-              kind: pool.LEASE_KINDS.monitor,
-              holder,
-            });
-            pool.returnTransport(holder);
-            return;
-          }
-          if (
-            detectVendorFromSshVersion(transport.conn?._remoteVer) ||
-            require("../../domain/singleChannelSshBanner.shared.cjs").remoteSoftwareRequiresSingleChannel(
-              transport.conn?._remoteVer,
-            )
-          ) {
-            const holder = {};
-            pool.borrowTransport(transport, {
-              kind: pool.LEASE_KINDS.monitor,
-              holder,
-            });
-            pool.returnTransport(holder);
-            entry.connecting = false;
-            publishState(entry, "unsupported");
-            return;
-          }
-          entry.transport = transport;
-          pool.borrowTransport(transport, {
-            kind: pool.LEASE_KINDS.monitor,
-            holder: entry.holder,
-          });
-          entry.connecting = false;
-          void collect(entry);
+          await attachTransport(entry, transport);
         } catch (error) {
           if (coordination?.role === "leader")
             pool.failTransportDial(coordination, error);
