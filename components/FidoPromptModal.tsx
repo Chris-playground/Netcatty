@@ -1,22 +1,13 @@
-/**
- * FIDO2 PIN / touch presence modal for OpenSSH sk-* flows.
- */
-import { Fingerprint, KeyRound, Loader2, Usb } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+/** PIN entry and user-presence prompts from OpenSSH. */
+import { Eye, EyeOff, Fingerprint, Loader2 } from "lucide-react";
+import React, { useCallback, useEffect, useId, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Button } from "./ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
 export type FidoPromptKind = "pin" | "touch" | "confirm";
-
 export interface FidoPromptRequest {
   requestId: string;
   kind: FidoPromptKind;
@@ -24,137 +15,121 @@ export interface FidoPromptRequest {
   title?: string;
   keyName?: string;
 }
-
 interface FidoPromptModalProps {
   request: FidoPromptRequest | null;
   onSubmit: (requestId: string, response: string) => void;
   onCancel: (requestId: string) => void;
 }
 
-export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({
-  request,
-  onSubmit,
-  onCancel,
-}) => {
+export const FidoPromptModal: React.FC<FidoPromptModalProps> = ({ request, onSubmit, onCancel }) => {
   const { t } = useI18n();
+  // Retain the content during Radix's closing animation, but clear the PIN.
+  const [lastRequest, setLastRequest] = useState(request);
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
+  const descriptionId = useId();
+  useEffect(() => { if (request) setLastRequest(request); }, [request]);
   useEffect(() => {
-    if (request) {
-      setPin("");
-      setShowPin(false);
-      setIsSubmitting(false);
-    }
-  }, [request]);
+    setPin("");
+    setShowPin(false);
+    setIsSubmitting(false);
+  }, [request?.requestId]);
 
-  const isTouch = request?.kind === "touch" || request?.kind === "confirm";
-
+  const visibleRequest = request || lastRequest;
+  const isTouch = visibleRequest?.kind === "touch" || visibleRequest?.kind === "confirm";
   const handleSubmit = useCallback(() => {
-    if (!request || isSubmitting) return;
-    if (!isTouch && !pin) return;
+    if (!request || isSubmitting || (!isTouch && !pin)) return;
     setIsSubmitting(true);
     onSubmit(request.requestId, isTouch ? "" : pin);
   }, [request, isSubmitting, isTouch, pin, onSubmit]);
-
   const handleCancel = useCallback(() => {
-    if (!request) return;
-    onCancel(request.requestId);
+    if (request) onCancel(request.requestId);
   }, [request, onCancel]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !isSubmitting && (isTouch || pin)) {
-        e.preventDefault();
-        handleSubmit();
-      }
-    },
-    [handleSubmit, isSubmitting, isTouch, pin],
-  );
-
-  if (!request) return null;
-
-  const title = request.title
-    || (isTouch ? t("fido.prompt.touchTitle") : t("fido.prompt.pinTitle"));
-  const description = request.message?.trim()
-    || (isTouch
-      ? t("fido.prompt.touchDesc", { keyName: request.keyName || "FIDO2" })
-      : t("fido.prompt.pinDesc", { keyName: request.keyName || "FIDO2" }));
+  const message = visibleRequest?.message?.trim();
+  const hasPinAndTouch = !isTouch && /user presence|touch|tap/i.test(message || "");
+  const isErrorPrompt = /incorrect|invalid|wrong|failed|retries|attempts|错误|錯誤|剩余|剩餘/i.test(message || "");
 
   return (
-    <Dialog open={!!request} onOpenChange={(open) => !open && handleCancel()}>
-      <DialogContent className="sm:max-w-[460px]" hideCloseButton>
-        <DialogHeader>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-              {isTouch
-                ? <Usb className="h-5 w-5 text-primary" />
-                : <Fingerprint className="h-5 w-5 text-primary" />}
-            </div>
-            <div className="min-w-0 flex-1">
-              <DialogTitle>{title}</DialogTitle>
-              <DialogDescription className="mt-1 break-words">
-                {description}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="space-y-4 py-2">
-          {!isTouch && (
-            <div className="space-y-2">
-              <Label htmlFor="fido-pin-input">{t("fido.prompt.pinLabel")}</Label>
-              <div className="relative">
-                <Input
-                  id="fido-pin-input"
-                  type={showPin ? "text" : "password"}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  autoFocus
-                  className="pr-10"
-                  autoComplete="off"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
-                  onClick={() => setShowPin((v) => !v)}
-                >
-                  <KeyRound size={14} />
-                </Button>
+    <Dialog open={!!request} onOpenChange={open => !open && handleCancel()}>
+      {visibleRequest && (
+        <DialogContent
+          hideCloseButton
+          aria-describedby={descriptionId}
+          overlayClassName="fido-prompt-overlay bg-black/20"
+          className="fido-prompt-dialog w-[calc(100%_-_2rem)] max-w-[400px] gap-0 overflow-hidden rounded-xl border-border/70 p-6 sm:rounded-xl"
+          style={{ boxShadow: '0 20px 60px -20px rgb(0 0 0 / 0.28)' }}
+        >
+          <div key={visibleRequest.requestId} className="fido-prompt-stage">
+            {isTouch ? (
+              <div className="pb-5 pt-2 text-center">
+                <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center" aria-hidden="true">
+                  <span className="fido-touch-ring absolute inset-0 rounded-full border border-primary/25" />
+                  <span className="fido-touch-ring fido-touch-ring-delayed absolute inset-0 rounded-full border border-primary/20" />
+                  <div className="fido-touch-symbol flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/10 bg-primary/8 text-primary">
+                    <Fingerprint size={30} strokeWidth={1.5} />
+                  </div>
+                </div>
+                <DialogTitle className="text-base">{visibleRequest.title || t("fido.prompt.touchTitle")}</DialogTitle>
+                <DialogDescription id={descriptionId} className="mt-2 text-sm leading-relaxed">
+                  {t("fido.prompt.touchDesc", { keyName: visibleRequest.keyName || "FIDO2" })}
+                </DialogDescription>
+                <div role="status" className="mt-5 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <span className="fido-status-dot h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+                  {t("fido.prompt.touchWaiting")}
+                </div>
               </div>
-            </div>
-          )}
-
-          {isTouch && (
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-              {t("fido.prompt.touchWaiting")}
-            </div>
-          )}
-
-          <div className="flex gap-2 justify-end pt-2">
-            <Button type="button" variant="ghost" onClick={handleCancel} disabled={isSubmitting}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSubmitting || (!isTouch && !pin)}
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                t("common.continue")
-              )}
+            ) : (
+              <>
+                <div className="mb-5 flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/10 bg-primary/8 text-primary" aria-hidden="true">
+                    <Fingerprint size={21} strokeWidth={1.7} />
+                  </div>
+                  <div className="min-w-0">
+                    <DialogTitle className="text-base">{visibleRequest.title || t("fido.prompt.pinTitle")}</DialogTitle>
+                    <DialogDescription id={descriptionId} className="mt-1 text-xs leading-relaxed">
+                      {t(hasPinAndTouch ? "fido.prompt.pinTouchDesc" : "fido.prompt.pinDesc", { keyName: visibleRequest.keyName || "FIDO2" })}
+                    </DialogDescription>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fido-pin-input" className="text-xs">{t("fido.prompt.pinLabel")}</Label>
+                  <div className="relative">
+                    <Input id="fido-pin-input" type={showPin ? "text" : "password"}
+                      value={pin} onChange={e => setPin(e.target.value)} disabled={isSubmitting}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") { e.preventDefault(); handleSubmit(); }
+                      }} autoFocus className="h-11 pr-11" autoComplete="off" spellCheck={false} />
+                    <Button type="button" variant="ghost" size="icon" disabled={isSubmitting}
+                      className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground"
+                      aria-label={t(showPin ? "fido.prompt.hidePin" : "fido.prompt.showPin")}
+                      aria-pressed={showPin} onClick={() => setShowPin(value => !value)}>
+                      {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+            {message && (isErrorPrompt ? (
+              <p role="alert" className="mt-3 break-words text-xs leading-relaxed text-destructive">{message}</p>
+            ) : (
+              <details className="mt-3 text-xs text-muted-foreground">
+                <summary className="w-fit cursor-pointer rounded-sm text-[11px] outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{t("fido.prompt.details")}</summary>
+                <p className="mt-2 break-words leading-relaxed">{message}</p>
+              </details>
+            ))}
+          </div>
+          <div className="-mx-6 -mb-6 mt-5 flex items-center justify-end gap-2 border-t border-border/50 bg-muted/15 px-6 py-3.5">
+            <Button type="button" variant="ghost" className="h-9" onClick={handleCancel} disabled={isSubmitting}>{t("common.cancel")}</Button>
+            <Button type="button" className="h-9 min-w-20 gap-2" onClick={handleSubmit} disabled={isSubmitting || (!isTouch && !pin)}>
+              {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+              {t(isSubmitting ? "fido.prompt.verifying" : "common.continue")}
             </Button>
           </div>
-        </div>
-      </DialogContent>
+        </DialogContent>
+      )}
     </Dialog>
   );
 };
-
 export default FidoPromptModal;
