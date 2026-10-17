@@ -532,17 +532,15 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
     await fs.promises.writeFile(path.join(secondDir, "target.bin"), secondOriginal);
     await fs.promises.symlink(path.basename(firstDir), parentLink);
 
-    const originalRename = fs.promises.rename;
-    let renameCalls = 0;
-    fs.promises.rename = async (...args) => {
-      await originalRename(...args);
-      renameCalls += 1;
-      if (renameCalls === 1) {
+    const originalCopyFile = fs.promises.copyFile;
+    fs.promises.copyFile = async (...args) => {
+      await originalCopyFile(...args);
+      if (String(args[1]).endsWith(".ready")) {
         await fs.promises.unlink(parentLink);
         await fs.promises.symlink(path.basename(secondDir), parentLink);
       }
     };
-    t.after(() => { fs.promises.rename = originalRename; });
+    t.after(() => { fs.promises.copyFile = originalCopyFile; });
 
     await assert.rejects(
       () => sftpBridge.downloadSftpToLocal(null, {
@@ -618,6 +616,9 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
       },
       async downloadFile(_remotePath, localPath) {
         await fs.promises.writeFile(localPath, downloaded, { mode: 0o644 });
+        // Unified transfers pre-create their stage as 0600. writeFile's mode
+        // only applies to creation; make a real mode change necessary here.
+        await fs.promises.chmod(localPath, 0o644);
         return { fileSize: downloaded.length, transferred: downloaded.length };
       },
     };
@@ -661,6 +662,7 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
       },
       async downloadFile(_remotePath, localPath) {
         await fs.promises.writeFile(localPath, downloaded, { mode: 0o644 });
+        await fs.promises.chmod(localPath, 0o644);
         return { fileSize: downloaded.length, transferred: downloaded.length };
       },
     };
@@ -710,6 +712,7 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
       },
       async downloadFile(_remotePath, localPath) {
         await fs.promises.writeFile(localPath, downloaded, { mode: 0o644 });
+        await fs.promises.chmod(localPath, 0o644);
         return { fileSize: downloaded.length, transferred: downloaded.length };
       },
     };
@@ -773,11 +776,9 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
     fs.writeFileSync(localPath, original);
 
     const originalRename = fs.promises.rename;
-    let renameCalls = 0;
     fs.promises.rename = async (...args) => {
       await originalRename(...args);
-      renameCalls += 1;
-      if (renameCalls === 2) controller.abort();
+      if (String(args[1]).endsWith(".backup")) controller.abort();
     };
     t.after(() => { fs.promises.rename = originalRename; });
 
@@ -907,15 +908,13 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
     fs.writeFileSync(localPath, Buffer.from("existing-local-content"));
 
     const originalRename = fs.promises.rename;
-    let renameCalls = 0;
     let readyPath = null;
     let backupPath = null;
     fs.promises.rename = async (...args) => {
-      renameCalls += 1;
       await originalRename(...args);
-      if (renameCalls === 1) readyPath = args[1];
-      if (renameCalls === 2) {
+      if (String(args[1]).endsWith(".backup")) {
         backupPath = args[1];
+        readyPath = backupPath.replace(/\.backup$/, ".ready");
         controller.abort();
       }
     };
