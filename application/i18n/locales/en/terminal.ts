@@ -439,6 +439,7 @@ export const enTerminalMessages: Messages = {
   'cloudSync.history.download': 'Download',
   'cloudSync.history.resolved': 'Resolved',
   'cloudSync.history.error': 'Error',
+  'cloudSync.localBackups.clearBusy': 'Finish restoring or recovering the vault before clearing backups.',
   'cloudSync.localBackups.clear': 'Clear all backups',
   'cloudSync.localBackups.clearConfirmTitle': 'Clear local backup history?',
   'cloudSync.localBackups.clearConfirmDesc': 'Permanently delete all local vault backups on this device. Your current hosts, saved credentials and cloud copies will remain. This does not prepare the device for handover. New backups will still be created during normal use.',

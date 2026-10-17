@@ -14,6 +14,9 @@ test('backup cleanup confirms, preserves data on cancel, reports errors and refr
   };
   const previous = new Map(Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+  Object.defineProperty(dom.window.navigator, 'locks', { configurable: true, value: {
+    request: async (_name: string, _options: unknown, callback: (lock: object) => Promise<void>) => callback({}),
+  } });
   const { LocalBackupsPanel } = await import('./cloud-sync/CloudSyncLocalBackupsPanel');
   const { toast } = await import('./ui/toast');
   const renderer = await createDomRenderer(dom.document);

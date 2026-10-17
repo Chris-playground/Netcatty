@@ -438,6 +438,7 @@ export const esTerminalMessages: Messages = {
   'cloudSync.history.download': 'Descarga',
   'cloudSync.history.resolved': 'Resuelto',
   'cloudSync.history.error': 'Error',
+  'cloudSync.localBackups.clearBusy': 'Finaliza la restauración o recuperación de la bóveda antes de eliminar las copias.',
   'cloudSync.localBackups.clear': 'Eliminar todas las copias',
   'cloudSync.localBackups.clearConfirmTitle': '¿Eliminar el historial de copias locales?',
   'cloudSync.localBackups.clearConfirmDesc': 'Elimina permanentemente todas las copias locales de la bóveda en este dispositivo. Los hosts actuales, las credenciales guardadas y las copias en la nube se conservan. Esto no prepara el dispositivo para entregarlo a otra persona. Se seguirán creando nuevas copias durante el uso normal.',

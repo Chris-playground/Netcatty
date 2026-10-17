@@ -457,6 +457,7 @@ export const ruTerminalMessages: Messages = {
   'cloudSync.history.download': 'Скачивание',
   'cloudSync.history.resolved': 'Разрешено',
   'cloudSync.history.error': 'Ошибка',
+  'cloudSync.localBackups.clearBusy': 'Завершите восстановление хранилища перед удалением резервных копий.',
   'cloudSync.localBackups.clear': 'Удалить все копии',
   'cloudSync.localBackups.clearConfirmTitle': 'Удалить историю локальных копий?',
   'cloudSync.localBackups.clearConfirmDesc': 'Все локальные резервные копии хранилища на этом устройстве будут удалены безвозвратно. Текущие хосты, сохранённые учётные данные и облачные копии останутся. Это не очистка устройства для передачи другому человеку. При обычном использовании новые копии будут создаваться по-прежнему.',

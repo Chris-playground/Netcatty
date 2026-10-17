@@ -842,6 +842,7 @@ export const zhTWVaultMessages: Messages = {
   'cloudSync.history.download': '下載',
   'cloudSync.history.resolved': '已解決',
   'cloudSync.history.error': '錯誤',
+  'cloudSync.localBackups.clearBusy': '請先完成資料還原或處理中斷的還原，再清空備份。',
   'cloudSync.localBackups.clear': '清空全部備份',
   'cloudSync.localBackups.clearConfirmTitle': '清空本機備份歷史？',
   'cloudSync.localBackups.clearConfirmDesc': '將永久刪除此裝置上全部主機庫的歷史備份。目前的主機、儲存的憑證和雲端副本仍會保留，這不代表裝置已完成交接清理。日後正常使用時仍會產生新備份。',

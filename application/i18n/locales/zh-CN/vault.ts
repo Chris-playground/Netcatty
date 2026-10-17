@@ -842,6 +842,7 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.history.download': '下载',
   'cloudSync.history.resolved': '已解决',
   'cloudSync.history.error': '错误',
+  'cloudSync.localBackups.clearBusy': '请先完成资料恢复或处理中断的恢复，再清空备份。',
   'cloudSync.localBackups.clear': '清空全部备份',
   'cloudSync.localBackups.clearConfirmTitle': '清空本地备份历史？',
   'cloudSync.localBackups.clearConfirmDesc': '将永久删除此设备上全部主机库的历史备份。当前主机、保存的凭据和云端副本仍会保留，这不代表设备已完成交接清理。以后正常使用时仍会生成新备份。',

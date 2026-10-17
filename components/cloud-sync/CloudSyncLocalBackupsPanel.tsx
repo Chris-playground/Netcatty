@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useLocalVaultBackups } from '../../application/state/useLocalVaultBackups';
 import {
+    LocalVaultBackupBusyError,
     MAX_LOCAL_VAULT_BACKUP_MAX_COUNT,
     MIN_LOCAL_VAULT_BACKUP_MAX_COUNT,
     withRestoreBarrier,
@@ -187,8 +188,10 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
             await clearBackups();
             setShowClearDialog(false);
             toast.success(t('cloudSync.localBackups.clearSuccess'));
-        } catch {
-            toast.error(t('cloudSync.localBackups.clearFailed'), t('sync.toast.errorTitle'));
+        } catch (error) {
+            toast.error(t(error instanceof LocalVaultBackupBusyError
+                ? 'cloudSync.localBackups.clearBusy'
+                : 'cloudSync.localBackups.clearFailed'), t('sync.toast.errorTitle'));
         } finally {
             setIsClearing(false);
         }
