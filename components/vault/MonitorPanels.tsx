@@ -692,7 +692,7 @@ export function MonitorPanels({
                     rowProps={({ id, host, state }) => ({
                       ...dragProps(id),
                       className: cn(
-                        "group cursor-default [&>td]:bg-card/70 hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl [&>td]:min-w-0 [&>td]:px-3 [&>td]:py-3 [&>td]:flex [&>td]:items-center",
+                        "group cursor-default [&>td]:bg-card/70 hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td]:min-w-0 [&>td]:px-3 [&>td]:py-3 [&>td]:flex [&>td]:items-center",
                         dragging?.panelId === panel.id &&
                           dragging.hostId === id &&
                           "cursor-grabbing opacity-40",
@@ -932,12 +932,12 @@ export function MonitorPanels({
                             : "--"}
                         </td>
                         <td>{stateBadge(host, state)}</td>
-                        <td className="sticky right-0 z-10 justify-center !bg-card">
+                        <td className="sticky right-0 z-10 justify-center !bg-background before:pointer-events-none before:absolute before:inset-0 before:rounded-r-xl before:bg-card/70 group-hover:before:bg-card">
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-muted-foreground"
+                            className="relative h-7 w-7 text-muted-foreground"
                             data-monitor-terminal={id}
                             aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
                             title={t("monitor.openTerminal")}

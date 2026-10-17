@@ -302,6 +302,37 @@ async function main() {
       ),
       "sticky actions retain the right page gutter at every horizontal scroll position",
     );
+    const geometry = await run(
+      `(()=>{const r=document.querySelector('tbody tr td:last-child').getBoundingClientRect();return {width:innerWidth,height:innerHeight,right:r.right,top:r.top,bottom:r.bottom}})()`,
+    );
+    const captured = await owner.webContents.capturePage();
+    const bitmap = captured.toBitmap();
+    const scale = Math.sqrt(
+      bitmap.length / (4 * geometry.width * geometry.height),
+    );
+    const pixelWidth = Math.round(geometry.width * scale);
+    const pixel = (x, y) => {
+      const start =
+        4 * (Math.floor(y * scale) * pixelWidth + Math.floor(x * scale));
+      return [...bitmap.subarray(start, start + 4)];
+    };
+    const backdrop = pixel(geometry.width - 4, geometry.top + 1);
+    assert.deepEqual(
+      pixel(geometry.right - 1, geometry.top + 1),
+      backdrop,
+      `top-right corner stays visibly rounded at scroll ${position}`,
+    );
+    assert.deepEqual(
+      pixel(geometry.right - 1, geometry.bottom - 2),
+      backdrop,
+      `bottom-right corner stays visibly rounded at scroll ${position}`,
+    );
+    assert.notDeepEqual(
+      pixel(geometry.right - 2, (geometry.top + geometry.bottom) / 2),
+      backdrop,
+      "rounded action still paints the row background",
+    );
+    if (position === 0) await screenshot("monitor-rounded-row-start.png");
   }
 
   await scroll("0");
