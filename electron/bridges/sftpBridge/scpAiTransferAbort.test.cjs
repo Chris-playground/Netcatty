@@ -532,15 +532,18 @@ describe("AI/MCP SCP transfer abort on shipped download/upload entry points", ()
     await fs.promises.writeFile(path.join(secondDir, "target.bin"), secondOriginal);
     await fs.promises.symlink(path.basename(firstDir), parentLink);
 
-    const originalCopyFile = fs.promises.copyFile;
-    fs.promises.copyFile = async (...args) => {
-      await originalCopyFile(...args);
-      if (String(args[1]).endsWith(".ready")) {
-        await fs.promises.unlink(parentLink);
-        await fs.promises.symlink(path.basename(secondDir), parentLink);
-      }
-    };
-    t.after(() => { fs.promises.copyFile = originalCopyFile; });
+    // Preparation renames on the same filesystem and copies across devices.
+    for (const operation of ["rename", "copyFile"]) {
+      const original = fs.promises[operation];
+      fs.promises[operation] = async (...args) => {
+        await original(...args);
+        if (String(args[1]).endsWith(".ready")) {
+          await fs.promises.unlink(parentLink);
+          await fs.promises.symlink(path.basename(secondDir), parentLink);
+        }
+      };
+      t.after(() => { fs.promises[operation] = original; });
+    }
 
     await assert.rejects(
       () => sftpBridge.downloadSftpToLocal(null, {
