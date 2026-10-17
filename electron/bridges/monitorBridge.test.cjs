@@ -411,3 +411,27 @@ test("replacing a host at the capacity limit admits its replacement immediately"
   assert.equal(result.hosts.h256.status, "queued");
   f.service.dispose();
 });
+
+
+test("closing a window also moves queued shared authentication to the surviving window", async () => {
+  let rejectFirst;
+  const dials = [];
+  const f = fixture({
+    startConnection: (e, opts) => {
+      dials.push({ owner: e.sender.id, hostname: opts.hostname });
+      if (opts.hostname === "first") return new Promise((_resolve, reject) => { rejectFirst = reject; });
+      return Promise.resolve({ transport: pool.createTransport({ conn: conn(), endpoint: pool.buildConnectionReuseEndpoint(opts) }) });
+    },
+    cancelConnection: () => rejectFirst?.(new Error("cancelled")),
+  });
+  const second = { id: "second", options: { ...options, hostname: "second" } };
+  f.service.reconcile(event(1), [{ id: "p", hosts: [{ id: "first", options: { ...options, hostname: "first" } }, second] }]);
+  f.service.reconcile(event(2), [{ id: "p", hosts: [second] }]);
+  await tick();
+  f.service.removeOwner(1);
+  await tick();
+  await tick();
+  assert.deepEqual(dials, [{ owner: 1, hostname: "first" }, { owner: 2, hostname: "second" }]);
+  assert.equal(f.service.snapshot(event(2)).hosts.second.status, "live");
+  f.service.dispose();
+});

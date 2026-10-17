@@ -349,7 +349,7 @@ function createMonitorService({
     const needed = new Set([...panels.values()].flatMap((p) => p.keys));
     for (const entry of entries.values()) {
       if (!needed.has(entry.key)) release(entry);
-      else if (entry.connecting && entry.owner === owner) release(entry);
+      else if (!entry.transport && entry.owner === owner) release(entry);
     }
     admitEntries();
   }
