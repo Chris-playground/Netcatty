@@ -90,3 +90,17 @@ test("worker IPC installs one owner teardown across all monitor handlers", async
     { webContentsId: 42 },
   ]);
 });
+
+
+test("worker receiving handlers accept the actual IPC sender without WebContents lifecycle methods", async () => {
+  const { createWorkerSender } = require("../terminalWorker/process.cjs");
+  const handlers = register();
+  const e = { sender: createWorkerSender({ postMessage() {} }, 73) };
+  assert.equal(e.sender.once, undefined);
+  await handlers.get("netcatty:monitor:update")(e, [{ id: "p", hosts: [] }]);
+  assert.equal(handlers.get("netcatty:monitor:snapshot")(e).count, 1);
+  handlers.get("netcatty:monitor:retry")(e, "missing");
+  handlers.get("netcatty:monitor:owner-close")(e, 73);
+  assert.equal(handlers.get("netcatty:monitor:snapshot")(e).count, 0);
+  handlers.get("netcatty:monitor:stop-all")(e);
+});

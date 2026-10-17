@@ -1509,7 +1509,7 @@ function registerHandlers(ipcMain, options = {}) {
   for (const [channel, handler] of Object.entries(monitorHandlers)) {
     ipcMain.handle(channel, (event, payload) => {
       const owner = event.sender.id;
-      if (!trackedMonitorOwners.has(event.sender)) {
+      if (typeof event.sender.once === "function" && !trackedMonitorOwners.has(event.sender)) {
         trackedMonitorOwners.add(event.sender);
         event.sender.once("destroyed", () => {
           if (terminalWorkerManager) {
