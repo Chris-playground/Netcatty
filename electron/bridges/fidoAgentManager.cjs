@@ -275,7 +275,9 @@ async function acquireFidoAgent(options = {}) {
     try {
       const sshAddPath = companionSshAddPath(sshAgent);
 
-      agentDir = path.join(getTempBase(), `netcatty-fido-agent-${randomUUID().slice(0, 8)}`);
+      // MSYS/Cygwin sockaddr_un still has the Unix 108-byte path limit. The
+      // managed base already identifies Netcatty; keep the socket suffix short.
+      agentDir = path.join(getTempBase(), `fa-${randomUUID().slice(0, 8)}`);
       fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
 
       // Keep SSH_ASKPASS on the agent so verify-required sk-helper prompts work,
