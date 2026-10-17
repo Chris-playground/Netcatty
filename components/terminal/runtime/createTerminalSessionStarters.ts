@@ -37,6 +37,7 @@ import {
   sanitizeCredentialValue,
 } from "../../../domain/credentials";
 import { resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshAuth";
+import { requiresFidoSshAgentAuth } from "../../../domain/fidoSsh";
 import {
   hostRestrictsExtraSshChannels,
   resolveHostKeepalive,
@@ -109,6 +110,32 @@ const createPluginConnectionRequestId = (): string => {
   const randomId = globalThis.crypto?.randomUUID?.()
     ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 18)}`;
   return `plugin-connection-${randomId}`.slice(0, 128);
+};
+
+/**
+ * Private key material for the bridge.
+ * Soft keys: PEM/OpenSSH private key for ssh2.
+ * FIDO2 SK: still send the OpenSSH key *handle* so the main process can
+ * ssh-add it into the system agent (signing stays on the hardware).
+ * Reference keys: path-only (no inline material).
+ */
+const resolveBridgePrivateKeyMaterial = (
+  key: SSHKey | undefined | null,
+  options?: { forceAgent?: boolean },
+): string | undefined => {
+  if (!key || key.source === "reference") return undefined;
+  // Soft-key agent mode still omits inline privateKey when the agent will sign.
+  if (
+    options?.forceAgent
+    && !requiresFidoSshAgentAuth({
+      type: key.type,
+      publicKey: key.publicKey,
+      privateKey: key.privateKey,
+    })
+  ) {
+    return undefined;
+  }
+  return sanitizeCredentialValue(key.privateKey);
 };
 
 const formatPluginDiagnosticLines = (
@@ -451,7 +478,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         authMethod: jumpAuth.authMethod,
         requiresMfa: !!jumpHost.requiresMfa,
         password: jumpPassword,
-        privateKey: jumpKey?.source === 'reference' ? undefined : jumpPrivateKey,
+        privateKey: resolveBridgePrivateKeyMaterial(jumpKey, {
+          forceAgent: jumpAgentAuth.useSshAgent === true && !jumpKey?.certificate,
+        }),
         certificate: jumpKey?.certificate,
         passphrase: jumpPassphrase,
         publicKey: jumpKey?.publicKey,
@@ -679,7 +708,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           sftpReuseOptions: sftpReuseOptions?.password || sftpReuseOptions?.username !== effectiveUsername
             ? undefined
             : sftpReuseOptions,
-          privateKey: attempt.key?.source === 'reference' ? undefined : (sanitizeCredentialValue(attempt.key?.privateKey) || undefined),
+          privateKey: resolveBridgePrivateKeyMaterial(attempt.key),
           certificate: attempt.key?.certificate,
           publicKey: attempt.key?.publicKey,
           keyId: attempt.key?.id,
@@ -1269,7 +1298,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         authMethod,
         requiresMfa: !!ctx.host.requiresMfa,
         password: effectivePassword,
-        privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : (sanitizeCredentialValue(key?.privateKey) || undefined),
+        privateKey: resolveBridgePrivateKeyMaterial(key, {
+          forceAgent: usesSystemAgent && !key?.certificate,
+        }),
         certificate: key?.certificate,
         keyId: key?.id,
         passphrase: key && (!usesSystemAgent || Boolean(key.certificate))
@@ -1563,7 +1594,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           username: jumpAuth.username || "root",
           authMethod: jumpAuth.authMethod,
           password: jumpPassword,
-          privateKey: (jumpAgentAuth.useSshAgent && !jumpKey?.certificate) || jumpKey?.source === 'reference' ? undefined : jumpPrivateKey,
+          privateKey: resolveBridgePrivateKeyMaterial(jumpKey, {
+            forceAgent: jumpAgentAuth.useSshAgent === true && !jumpKey?.certificate,
+          }),
           certificate: jumpKey?.certificate,
           passphrase: jumpAgentAuth.useSshAgent && !jumpKey?.certificate ? undefined : jumpPassphrase,
           keyId: jumpAuth.keyId,
@@ -1602,7 +1635,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         hostId: ctx.host.id,
         username: resolvedAuth.username || "root",
         password: effectivePassword,
-        privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : (sanitizeCredentialValue(key?.privateKey) || undefined),
+        privateKey: resolveBridgePrivateKeyMaterial(key, {
+          forceAgent: usesSystemAgent && !key?.certificate,
+        }),
         certificate: key?.certificate,
         keyId: key?.id,
         passphrase: key && (!usesSystemAgent || Boolean(key.certificate))
