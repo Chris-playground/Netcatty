@@ -95,6 +95,19 @@ test("disk usage retains a root-only reading and leaves missing data unknown", (
   assert.ok(!unknown.includes("0.0%"));
 });
 
+test("cards show the two largest capacities without changing the source disk order", () => {
+  const disks = [
+    { mountPoint: "/small", used: 49, total: 50, percent: 98 },
+    { mountPoint: "/data", used: 100, total: 1000, percent: 10 },
+    { mountPoint: "/backup", used: 0, total: 500, percent: 0 },
+  ];
+  const document = new JSDOM(renderToStaticMarkup(
+    <MonitorDiskUsage stats={{ disks, diskPercent: 98 }} limit={2} />,
+  )).window.document;
+  assert.deepEqual([...document.querySelectorAll("span[title]")].map((e) => e.textContent), ["/data", "/backup"]);
+  assert.deepEqual(disks.map((disk) => disk.mountPoint), ["/small", "/data", "/backup"]);
+});
+
 for (const view of ["list", "charts"] as const) {
   test(`${view} keeps saved custom icons, colors and OS logos`, (t) => {
     const storage = new Map<string, string>();

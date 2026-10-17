@@ -85,6 +85,10 @@ const rate = (n: number | null | undefined) =>
       ? `${(n / 1048576).toFixed(1)} MiB/s`
       : `${(n / 1024).toFixed(1)} KiB/s`;
 
+const monitorAsideHeaderClass =
+  "relative h-14 py-0 border-b-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:origin-bottom after:[transform:scaleY(.5)] after:bg-border/40 after:content-['']";
+const monitorAsideClass = "border-border/30 shadow-[-12px_0_24px_hsl(var(--foreground)/0.04)]";
+
 /** Sparse lines: never bridge a missing sample or invent history before monitoring started. */
 export function MonitorTrend({
   points,
@@ -406,18 +410,12 @@ export function MonitorPanels({
   };
   const hostDetail = hosts.find((h) => h.id === detail);
   const detailState = detail ? runtime.hosts[detail] : undefined;
-  const hasAside = !!editor || !!detail;
   return (
     <section
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
       data-section="vault-monitor"
     >
-      <div
-        className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-200",
-          hasAside && "max-[1000px]:hidden",
-        )}
-      >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <VaultPageHeader>
           <Gauge size={18} />
           <h1 className="font-semibold text-sm">{t("monitor.title")}</h1>
@@ -510,11 +508,6 @@ export function MonitorPanels({
                   {t(running ? "monitor.stop" : "monitor.start")}
                 </Button>
               </div>
-              {panel.description && (
-                <p className="px-4 pb-2 text-xs text-muted-foreground">
-                  {panel.description}
-                </p>
-              )}
               <div className="flex flex-wrap items-center gap-2 px-4 py-2">
                 <div className="flex h-8 rounded-md bg-muted/50 p-0.5">
                   {(["list", "charts"] as const).map((view) => (
@@ -615,12 +608,12 @@ export function MonitorPanels({
                       {t("monitor.noMatches")}
                     </p>
                   ) : panel.view === "charts" ? (
-                    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-4">
+                    <div className="grid auto-rows-fr grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-4">
                       {rows.map(({ id, host, state }) => (
                         <button
                           key={id}
                           className={cn(
-                            "min-w-0 overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card focus-visible:outline focus-visible:outline-primary",
+                            "flex h-full min-w-0 flex-col overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card focus-visible:outline focus-visible:outline-primary",
                             status(host, state) !== "live" &&
                               "text-muted-foreground",
                           )}
@@ -652,7 +645,7 @@ export function MonitorPanels({
                                 <HardDrive size={13} className="text-amber-600 dark:text-amber-400" />
                                 <span>{t("monitor.disks")}</span>
                               </div>
-                              <MonitorDiskUsage stats={state?.stats} />
+                              <MonitorDiskUsage stats={state?.stats} limit={2} />
                             </div>
                             <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] tabular-nums">
                               <span className="flex items-center gap-1.5 py-1">
@@ -673,7 +666,7 @@ export function MonitorPanels({
                               </span>
                             </div>
                           </div>
-                          <p className="mt-4 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <p className="mt-auto flex items-center gap-1.5 pt-4 text-[10px] text-muted-foreground">
                             <Clock3 size={11} />
                             {state?.at
                               ? t("monitor.updatedAt", {
@@ -685,9 +678,9 @@ export function MonitorPanels({
                       ))}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-border/60">
-                      <table className="w-full min-w-[840px] text-xs">
-                        <thead className="bg-muted/30 text-muted-foreground">
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[840px] border-separate border-spacing-x-0 border-spacing-y-2 text-xs">
+                        <thead className="text-muted-foreground">
                           <tr>
                             {[
                               "host",
@@ -714,7 +707,7 @@ export function MonitorPanels({
                               <tr
                                 key={id}
                                 className={cn(
-                                  "border-t border-border/40 hover:bg-muted/30",
+                                  "[&>td]:bg-card/70 [&>td]:transition-colors hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl",
                                   status(host, state) !== "live" &&
                                     "text-muted-foreground",
                                 )}
@@ -792,9 +785,12 @@ export function MonitorPanels({
             open
             onClose={() => setEditor(null)}
             title={t(editor.base ? "monitor.edit" : "monitor.create")}
-            layout="inline"
+            layout="overlay"
+            resizable
+            resizeAriaLabel={t("vault.panel.resizeWidth")}
+            headerClassName={monitorAsideHeaderClass}
             width="w-[380px]"
-            className="max-[1000px]:!w-full max-[1000px]:border-l-0"
+            className={monitorAsideClass}
           >
             <AsidePanelContent>
               <div className="space-y-2">
@@ -940,8 +936,11 @@ export function MonitorPanels({
             onContinue={() => setSelecting(false)}
             title={t("monitor.chooseHosts")}
             subtitle={t("monitor.selectionHint")}
-            layout="inline"
-            className="max-[1000px]:!w-full max-[1000px]:border-l-0"
+            layout="overlay"
+            resizable
+            resizeAriaLabel={t("vault.panel.resizeWidth")}
+            headerClassName={monitorAsideHeaderClass}
+            className={monitorAsideClass}
           />
         )}
         {detail && (
@@ -950,9 +949,12 @@ export function MonitorPanels({
             onClose={() => setDetail(null)}
             title={hostDetail?.label ?? t("monitor.missingHost")}
             subtitle={hostDetail?.hostname}
-            layout="inline"
+            layout="overlay"
+            resizable
+            resizeAriaLabel={t("vault.panel.resizeWidth")}
+            headerClassName={monitorAsideHeaderClass}
             width="w-[380px]"
-            className="max-[1000px]:!w-full max-[1000px]:border-l-0"
+            className={monitorAsideClass}
           >
             <AsidePanelContent>
               <div className="flex items-center gap-3">

@@ -39,7 +39,6 @@ test("portable panel sanitizer strips all runtime data and preserves ordered ref
       stats: { cpu: 42 },
       points: [1],
       running: true,
-      attentionOnly: true,
       error: "secret",
     },
   ]);
