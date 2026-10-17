@@ -51,3 +51,14 @@ export function monitorGridColumns(width: number, count: number): number {
     Math.min(count, Math.floor((Math.max(0, width) + 16) / 296)),
   );
 }
+
+/** Only optional columns can be hidden, including when restoring old or corrupt settings. */
+export function normalizeMonitorHiddenColumns(value: unknown): MonitorColumn[] {
+  return MONITOR_COLUMNS.filter(
+    ({ key }) =>
+      key !== "host" &&
+      key !== "terminal" &&
+      Array.isArray(value) &&
+      value.includes(key),
+  ).map(({ key }) => key);
+}

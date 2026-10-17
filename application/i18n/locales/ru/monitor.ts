@@ -37,6 +37,7 @@ export const ruMonitorMessages = {
   "monitor.responseLatency": "Задержка ответа (включая обработку на сервере)",
   "monitor.tags": "Теги",
   "monitor.notes": "Заметки",
+  "monitor.visibleColumns": "Видимые столбцы",
   "monitor.terminal": "Терминал",
   "monitor.resizeColumn": "Изменить ширину столбца «{column}»",
   "monitor.host": "Сервер",

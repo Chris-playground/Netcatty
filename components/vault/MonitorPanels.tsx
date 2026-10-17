@@ -39,6 +39,7 @@ import type { Host } from "../../domain/models";
 import { buildMonitorTrendGeometry, findMonitorChartPoint } from "../../domain/monitorChart";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { ContextMenuItem } from "../ui/context-menu";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
@@ -218,22 +219,15 @@ export function MonitorPanels({
   } | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<{ hostId: string; username: string; password: string } | null>(null);
   const [deleting, setDeleting] = useState<MonitorPanel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [login, setLogin] = useState({
-    hostId: "",
-    username: "",
-    password: "",
-  });
-  useEffect(
-    () => setLogin({ hostId: "", username: "", password: "" }),
-    [detail],
-  );
   const panel = panels.find((p) => p.id === selected) ?? panels[0];
   const running = !!panel && runtime.running.includes(panel.id);
   const startEdit = (base: MonitorPanel | null) => {
     setDetail(null);
+    setRecovery(null);
     setSelecting(false);
     setError(null);
     setEditor({
@@ -474,6 +468,10 @@ export function MonitorPanels({
   };
   const hostDetail = hosts.find((h) => h.id === detail);
   const detailState = detail && panel ? monitorStateSince(runtime.hosts[detail], runtime.startedAt[panel.id]) : undefined;
+  const detailAvailable = status(hostDetail, detailState) === "live";
+  useEffect(() => {
+    if (detail && !detailAvailable) setDetail(null);
+  }, [detail, detailAvailable]);
   return (
     <section
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
@@ -689,6 +687,18 @@ export function MonitorPanels({
                     pinnedId={
                       dragging?.panelId === panel.id ? dragging.hostId : undefined
                     }
+                    renderMenu={({ id, host, state }) => (
+                      <>
+                        <ContextMenuItem disabled={!host} onSelect={() => host && onConnect(host)}>
+                          {t("monitor.openTerminal")}
+                        </ContextMenuItem>
+                        {host && running && ["login", "error", "disconnected"].includes(status(host, state)) && (
+                          <ContextMenuItem data-monitor-retry={id} onSelect={() => setRecovery({hostId: id, username: host.username ?? "", password: ""})}>
+                            {t("monitor.retry")}
+                          </ContextMenuItem>
+                        )}
+                      </>
+                    )}
                     rowProps={({ id, host, state }) => ({
                       ...dragProps(id),
                       className: cn(
@@ -697,7 +707,7 @@ export function MonitorPanels({
                           dragging.hostId === id &&
                           "cursor-grabbing opacity-40",
                         dropTarget === id && "[&>td]:bg-accent",
-                        status(host, state) !== "live" && "text-muted-foreground",
+                        status(host, state) !== "live" && "text-muted-foreground opacity-50",
                       ),
                     })}
                     renderCard={({ id, host, state }) => (
@@ -709,12 +719,15 @@ export function MonitorPanels({
                             dragging.hostId === id &&
                             "cursor-grabbing opacity-40",
                           dropTarget === id && "bg-accent",
+                          status(host, state) !== "live" && "opacity-50",
                         )}
                       >
                         <button
                           type="button"
                           className="flex h-full w-full min-w-0 cursor-default flex-col p-4 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+                          aria-disabled={status(host, state) !== "live"}
                           onClick={() => {
+                            if (status(host, state) !== "live") return;
                             setEditor(null);
                             setDetail(id);
                           }}
@@ -822,13 +835,14 @@ export function MonitorPanels({
                         </Button>
                       </article>
                     )}
-                    renderCells={({ id, host, state }) => (
-                      <>
-                        <td>
+                    renderCells={({ id, host, state }) => ({
+                      host: (<td>
                           <button
                             type="button"
-                            className="flex w-full min-w-0 items-center gap-2.5 text-left hover:underline"
+                            className="flex w-full min-w-0 items-center gap-2.5 text-left aria-disabled:no-underline hover:underline"
+                            aria-disabled={status(host, state) !== "live"}
                             onClick={() => {
+                              if (status(host, state) !== "live") return;
                               setEditor(null);
                               setDetail(id);
                             }}
@@ -854,26 +868,26 @@ export function MonitorPanels({
                               </div>
                             </div>
                           </button>
-                        </td>
-                        <td>
+                        </td>),
+                      latency: (<td>
                           <MonitorHostLatency value={state?.stats?.latencyMs} responseValue={state?.stats?.responseLatencyMs} />
-                        </td>
-                        <td>
+                        </td>),
+                      tags: (<td>
                           <MonitorHostTags tags={host?.tags} />
-                        </td>
-                        <td>
+                        </td>),
+                      notes: (<td>
                           <div className="min-w-0 w-full">
                             <MonitorHostNotes notes={host?.notes} focusable />
                           </div>
-                        </td>
-                        <td className="tabular-nums">
+                        </td>),
+                      cpu: (<td className="tabular-nums">
                           <ResourceBar
                             className="w-full"
                             label=""
                             value={state?.stats?.cpu}
                           />
-                        </td>
-                        <td className="tabular-nums">
+                        </td>),
+                      memory: (<td className="tabular-nums">
                           <ResourceBar
                             className="w-full"
                             label=""
@@ -885,13 +899,13 @@ export function MonitorPanels({
                                 : null
                             }
                           />
-                        </td>
-                        <td>
+                        </td>),
+                      disks: (<td>
                           <div className="w-full min-w-0">
                             <MonitorDiskUsage stats={state?.stats} />
                           </div>
-                        </td>
-                        <td
+                        </td>),
+                      network: (<td
                           data-monitor-cell="network"
                           className="tabular-nums whitespace-nowrap"
                         >
@@ -925,14 +939,14 @@ export function MonitorPanels({
                               )}
                             </div>
                           </div>
-                        </td>
-                        <td className="whitespace-nowrap tabular-nums">
+                        </td>),
+                      updated: (<td className="whitespace-nowrap tabular-nums">
                           {state?.at
                             ? new Date(state.at).toLocaleTimeString()
                             : "--"}
-                        </td>
-                        <td>{stateBadge(host, state)}</td>
-                        <td className="sticky right-0 z-10 justify-center !bg-background before:pointer-events-none before:absolute before:inset-0 before:rounded-r-xl before:bg-card/70 group-hover:before:bg-card">
+                        </td>),
+                      status: (<td>{stateBadge(host, state)}</td>),
+                      terminal: (<td className="sticky right-0 z-10 justify-center !bg-background before:pointer-events-none before:absolute before:inset-0 before:rounded-r-xl before:bg-card/70 group-hover:before:bg-card">
                           <Button
                             type="button"
                             variant="ghost"
@@ -949,9 +963,8 @@ export function MonitorPanels({
                           >
                             <Terminal size={14} />
                           </Button>
-                        </td>
-                      </>
-                    )}
+                        </td>)
+                    })}
                   />
                 </TooltipProvider>
               )}
@@ -1125,7 +1138,7 @@ export function MonitorPanels({
             className={monitorAsideClass}
           />
         )}
-        {detail && (
+        {detail && detailAvailable && (
           <AsidePanel
             dataSection="vault-monitor-detail"
             open
@@ -1139,7 +1152,7 @@ export function MonitorPanels({
             width="w-[380px]"
             className={monitorAsideClass}
           >
-            <AsidePanelContent>
+            <AsidePanelContent scrollMode="native">
               <div className="flex items-center gap-3">
                 {hostDetail && <DistroAvatar host={hostDetail} fallback={hostDetail.label} size="lg" />}
                 <div className="min-w-0 flex-1">
@@ -1147,72 +1160,6 @@ export function MonitorPanels({
                   {stateBadge(hostDetail, detailState)}
                 </div>
               </div>
-              {["login", "error", "disconnected"].includes(
-                detailState?.status ?? "",
-              ) && (
-                <>
-                  <p className="text-xs text-muted-foreground">
-                    {t("monitor.loginHint")}
-                  </p>
-                  <div className="space-y-2">
-                    <Label htmlFor="monitor-login-user">
-                      {t("monitor.username")}
-                    </Label>
-                    <Input
-                      id="monitor-login-user"
-                      autoComplete="off"
-                      value={
-                        login.hostId === detail
-                          ? login.username
-                          : (hostDetail?.username ?? "")
-                      }
-                      onChange={(e) =>
-                        setLogin((prev) => ({
-                          hostId: detail,
-                          username: e.target.value,
-                          password: prev.hostId === detail ? prev.password : "",
-                        }))
-                      }
-                    />
-                    <Label htmlFor="monitor-login-password">
-                      {t("monitor.password")}
-                    </Label>
-                    <Input
-                      id="monitor-login-password"
-                      type="password"
-                      autoComplete="new-password"
-                      value={login.hostId === detail ? login.password : ""}
-                      onChange={(e) =>
-                        setLogin((prev) => ({
-                          hostId: detail,
-                          username:
-                            prev.hostId === detail
-                              ? prev.username
-                              : (hostDetail?.username ?? ""),
-                          password: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      monitorActions.retry(
-                        detail,
-                        login.hostId === detail && login.password
-                          ? {
-                              username: login.username,
-                              password: login.password,
-                            }
-                          : undefined,
-                      );
-                      setLogin({ hostId: "", username: "", password: "" });
-                    }}
-                  >
-                    {t("monitor.retry")}
-                  </Button>
-                </>
-              )}
               {renderMetrics(detailState, true)}
               {detailState?.stats && (
                 detailState.stats.gpu != null ||
@@ -1342,24 +1289,6 @@ export function MonitorPanels({
                 <p>{detailState?.stats?.kernelRelease ?? "--"}</p>
                 <p>{detailState?.stats?.hostname ?? "--"}</p>
               </div>
-              {detailState?.status === "unsupported" && (
-                <p className="text-xs text-muted-foreground">
-                  {t("monitor.unsupportedHint")}
-                </p>
-              )}
-              {!hostDetail && panel && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void patchPanel({
-                      hostIds: panel.hostIds.filter((id) => id !== detail),
-                    });
-                    setDetail(null);
-                  }}
-                >
-                  {t("monitor.removeHost")}
-                </Button>
-              )}
             </AsidePanelContent>
             <AsidePanelFooter>
               <Button
@@ -1373,6 +1302,32 @@ export function MonitorPanels({
             </AsidePanelFooter>
           </AsidePanel>
         )}
+      <Dialog open={!!recovery} onOpenChange={(open) => !open && setRecovery(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("monitor.retry")}</DialogTitle>
+            <DialogDescription>{t("monitor.loginHint")}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            if (!recovery) return;
+            monitorActions.retry(recovery.hostId, recovery.password ? {username: recovery.username, password: recovery.password} : undefined);
+            setRecovery(null);
+          }} className="space-y-4">
+            <p className="truncate text-sm font-medium">{hostById.get(recovery?.hostId ?? "")?.label}</p>
+            <div className="space-y-2">
+              <Label htmlFor="monitor-login-user">{t("monitor.username")}</Label>
+              <Input id="monitor-login-user" autoComplete="off" value={recovery?.username ?? ""} onChange={(event) => setRecovery(previous => previous && {...previous, username: event.target.value})} />
+              <Label htmlFor="monitor-login-password">{t("monitor.password")}</Label>
+              <Input id="monitor-login-password" type="password" autoComplete="new-password" value={recovery?.password ?? ""} onChange={(event) => setRecovery(previous => previous && {...previous, password: event.target.value})} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRecovery(null)}>{t("common.cancel")}</Button>
+              <Button type="submit">{t("monitor.retry")}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={!!deleting}
         onOpenChange={(open) => !open && setDeleting(null)}

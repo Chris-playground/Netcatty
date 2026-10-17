@@ -4,6 +4,7 @@ import {
   MONITOR_COLUMNS,
   clampMonitorColumnWidth,
   normalizeMonitorColumnWidths,
+  normalizeMonitorHiddenColumns,
   monitorGridColumns,
 } from "./monitorTableLayout";
 
@@ -39,4 +40,24 @@ test("virtual card rows adapt to narrow panes and do not allocate empty columns"
   assert.equal(monitorGridColumns(1248, 1000), 4);
   assert.equal(monitorGridColumns(1248, 2), 2);
   assert.equal(monitorGridColumns(0, 1000), 1);
+});
+
+test("hidden columns always preserve host and terminal and discard unknown settings", () => {
+  assert.deepEqual(
+    normalizeMonitorHiddenColumns([
+      "host",
+      "terminal",
+      "cpu",
+      "cpu",
+      "unknown",
+      "status",
+    ]),
+    ["cpu", "status"],
+  );
+  assert.deepEqual(normalizeMonitorHiddenColumns(null), []);
+  assert.deepEqual(normalizeMonitorHiddenColumns({ cpu: true }), []);
+  assert.equal(
+    normalizeMonitorHiddenColumns(MONITOR_COLUMNS.map((c) => c.key)).length,
+    MONITOR_COLUMNS.length - 2,
+  );
 });

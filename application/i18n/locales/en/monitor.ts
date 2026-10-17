@@ -38,6 +38,7 @@ export const enMonitorMessages = {
   "monitor.responseLatency": "Response latency (includes remote processing)",
   "monitor.tags": "Tags",
   "monitor.notes": "Notes",
+  "monitor.visibleColumns": "Visible columns",
   "monitor.terminal": "Terminal",
   "monitor.resizeColumn": "Resize {column} column",
   "monitor.host": "Host",

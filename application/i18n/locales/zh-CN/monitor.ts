@@ -36,6 +36,7 @@ export const zhCNMonitorMessages = {
   "monitor.responseLatency": "响应延迟（含远端处理）",
   "monitor.tags": "标签",
   "monitor.notes": "备注",
+  "monitor.visibleColumns": "显示的列",
   "monitor.terminal": "终端",
   "monitor.resizeColumn": "调整「{column}」列宽",
   "monitor.host": "主机",

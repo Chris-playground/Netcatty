@@ -38,6 +38,7 @@ export const esMonitorMessages = {
   "monitor.responseLatency": "Latencia de respuesta (incluye procesamiento remoto)",
   "monitor.tags": "Etiquetas",
   "monitor.notes": "Notas",
+  "monitor.visibleColumns": "Columnas visibles",
   "monitor.terminal": "Terminal",
   "monitor.resizeColumn": "Ajustar la columna {column}",
   "monitor.host": "Equipo",

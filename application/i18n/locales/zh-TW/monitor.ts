@@ -36,6 +36,7 @@ export const zhTWMonitorMessages = {
   "monitor.responseLatency": "回應延遲（含遠端處理）",
   "monitor.tags": "標籤",
   "monitor.notes": "備註",
+  "monitor.visibleColumns": "顯示的欄位",
   "monitor.terminal": "終端",
   "monitor.resizeColumn": "調整「{column}」欄寬",
   "monitor.host": "主機",

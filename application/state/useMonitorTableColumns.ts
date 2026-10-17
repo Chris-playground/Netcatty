@@ -2,10 +2,14 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import {
   clampMonitorColumnWidth,
   normalizeMonitorColumnWidths,
+  normalizeMonitorHiddenColumns,
   type MonitorColumn,
 } from "../../domain/monitorTableLayout";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
-import { STORAGE_KEY_MONITOR_TABLE_COLUMNS } from "../../infrastructure/config/storageKeys";
+import {
+  STORAGE_KEY_MONITOR_TABLE_COLUMNS,
+  STORAGE_KEY_MONITOR_HIDDEN_COLUMNS,
+} from "../../infrastructure/config/storageKeys";
 
 export function useMonitorTableColumns() {
   const [widths, setWidths] = useState(() =>
@@ -13,6 +17,21 @@ export function useMonitorTableColumns() {
       localStorageAdapter.read(STORAGE_KEY_MONITOR_TABLE_COLUMNS),
     ),
   );
+  const [hidden, setHidden] = useState(() =>
+    normalizeMonitorHiddenColumns(
+      localStorageAdapter.read(STORAGE_KEY_MONITOR_HIDDEN_COLUMNS),
+    ),
+  );
+  const currentHidden = useRef(hidden);
+  const setVisible = (key: MonitorColumn, visible: boolean) => {
+    const previous = currentHidden.current;
+    const next = normalizeMonitorHiddenColumns(
+      visible ? previous.filter((item) => item !== key) : [...previous, key],
+    );
+    currentHidden.current = next;
+    setHidden(next);
+    localStorageAdapter.write(STORAGE_KEY_MONITOR_HIDDEN_COLUMNS, next);
+  };
   const current = useRef(widths);
   const cleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
@@ -80,5 +99,5 @@ export function useMonitorTableColumns() {
     window.addEventListener("pointercancel", finish);
     window.addEventListener("blur", blur);
   };
-  return { widths, resize, startResize };
+  return { widths, resize, startResize, hidden, setVisible };
 }

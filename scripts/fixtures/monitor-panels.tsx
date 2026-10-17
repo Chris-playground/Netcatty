@@ -2,7 +2,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { I18nProvider } from "../../application/i18n/I18nProvider";
 import { writeMonitorPanels } from "../../application/state/monitorPanelsStorage";
-import { publishMonitorSnapshot } from "../../application/state/monitorRuntimeStore";
+import {
+  monitorActions,
+  publishMonitorSnapshot,
+} from "../../application/state/monitorRuntimeStore";
 import { MonitorPanels } from "../../components/vault/MonitorPanels";
 import type { Host } from "../../domain/models";
 import type { MonitorSnapshot } from "../../domain/monitorRuntime";
@@ -30,8 +33,21 @@ document.documentElement.classList.add("dark");
 document.documentElement.style.setProperty("--radius", "8px");
 const root = createRoot(document.getElementById("root")!);
 let connections: string[] = [];
+let retries: {
+  id: string;
+  credentials?: { username: string; password: string };
+}[] = [];
+monitorActions.retry = (id, credentials) => {
+  retries.push({ id, credentials });
+};
 let revision = 0;
-function seed(count = 2, view: "list" | "charts" = "charts", locale = "zh-CN") {
+let latestSnapshot: MonitorSnapshot;
+function seed(
+  count = 2,
+  view: "list" | "charts" = "charts",
+  locale = "zh-CN",
+  pointCount = 12,
+) {
   const now = Date.now();
   const hosts: Host[] = Array.from({ length: count }, (_, i) => ({
     id: `host-${i}`,
@@ -79,7 +95,7 @@ function seed(count = 2, view: "list" | "charts" = "charts", locale = "zh-CN") {
     count: 1,
     hostCount: count,
     activeSessions: [],
-    startedAt: { fixture: now - 60000 },
+    startedAt: { fixture: now - Math.max(60000, pointCount * 1000) },
     hosts: Object.fromEntries(
       hosts.map((host, i) => [
         host.id,
@@ -133,8 +149,8 @@ function seed(count = 2, view: "list" | "charts" = "charts", locale = "zh-CN") {
             gpuMemUsed: i === 0 ? 8192 : i === 2 ? 0 : null,
             gpuMemTotal: i === 0 ? 24576 : i === 2 ? 16384 : null,
           },
-          points: Array.from({ length: 12 }, (_, j) => ({
-            at: now - 55000 + j * 5000,
+          points: Array.from({ length: pointCount }, (_, j) => ({
+            at: now - (pointCount - 1 - j) * (pointCount === 12 ? 5000 : 1000),
             cpu: 20 + ((i + j) % 40),
             memory: 25,
             disk: 35,
@@ -145,8 +161,10 @@ function seed(count = 2, view: "list" | "charts" = "charts", locale = "zh-CN") {
       ]),
     ),
   };
+  latestSnapshot = snapshot;
   publishMonitorSnapshot(snapshot);
   connections = [];
+  retries = [];
   root.render(
     <I18nProvider locale={locale}>
       <div className="flex h-screen min-w-0 bg-background text-foreground">
@@ -163,6 +181,38 @@ function seed(count = 2, view: "list" | "charts" = "charts", locale = "zh-CN") {
   );
 }
 Object.assign(window, {
-  monitorFixture: { seed, connections: () => connections },
+  monitorFixture: {
+    seed,
+    connections: () => connections,
+    retries: () => retries,
+    status: (id: string, status: string, age = 0) => {
+      latestSnapshot = {
+        ...latestSnapshot,
+        takenAt: Date.now(),
+        hosts: {
+          ...latestSnapshot.hosts,
+          [id]: {
+            ...latestSnapshot.hosts[id],
+            at: Date.now() - age,
+            status: status as MonitorSnapshot["hosts"][string]["status"],
+          },
+        },
+      };
+      publishMonitorSnapshot(latestSnapshot);
+    },
+    refresh: () => {
+      latestSnapshot = {
+        ...latestSnapshot,
+        takenAt: Date.now(),
+        hosts: Object.fromEntries(
+          Object.entries(latestSnapshot.hosts).map(([id, state]) => [
+            id,
+            { ...state, at: Date.now(), points: [...state.points] },
+          ]),
+        ),
+      };
+      publishMonitorSnapshot(latestSnapshot);
+    },
+  },
 });
 seed(Number(new URLSearchParams(location.search).get("count")) || 2);

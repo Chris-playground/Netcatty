@@ -525,6 +525,269 @@ async function main() {
       "no missing translation keys",
     );
   }
+
+  const openColumnMenu = async () => {
+    const point = await run(
+      `(()=>{document.querySelector('[data-section=vault-monitor-list]').scrollLeft=0;const r=document.querySelector('thead').getBoundingClientRect();return {x:Math.round(r.left+40),y:Math.round(r.top+20)}})()`,
+    );
+    for (const type of ["mouseDown", "mouseUp"])
+      owner.webContents.sendInputEvent({
+        type,
+        button: "right",
+        clickCount: 1,
+        ...point,
+      });
+    await until(
+      () => run('!!document.querySelector("[data-monitor-column-menu]")'),
+      "header right-click opens column choices",
+    );
+  };
+  await run("window.monitorFixture.seed(8,'list','zh-CN')");
+  await until(
+    () => run('document.querySelectorAll("th").length===11'),
+    "all columns start visible",
+  );
+  await openColumnMenu();
+  assert.equal(
+    await run(
+      `['host','terminal'].every(k=>{const e=document.querySelector('[data-monitor-toggle-column='+k+']');return e.getAttribute('aria-checked')==='true'&&e.getAttribute('aria-disabled')==='true'})`,
+    ),
+    true,
+    "host and terminal cannot be hidden",
+  );
+  const optional = columnOrder.filter((k) => !["host", "terminal"].includes(k));
+  for (const key of optional)
+    await click(`[data-monitor-toggle-column=${key}]`);
+  assert.deepEqual(
+    await run(
+      '[...document.querySelectorAll("th")].map(e=>e.dataset.monitorColumn)',
+    ),
+    ["host", "terminal"],
+  );
+  assert.ok(
+    await run(
+      '[...document.querySelectorAll("tbody tr")].every(e=>e.children.length===2)',
+    ),
+    "hidden headings and row cells stay aligned",
+  );
+  owner.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+  owner.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  await run("window.monitorFixture.seed(8,'list','zh-CN')");
+  await until(
+    () => run('document.querySelectorAll("th").length===2'),
+    "column visibility survives reopening",
+  );
+  const hostWidthBefore = await run(
+    'document.querySelector("tbody tr td").getBoundingClientRect().width',
+  );
+  await run(
+    'document.querySelector("[data-monitor-column=host] [role=separator]").focus()',
+  );
+  owner.webContents.sendInputEvent({ type: "keyDown", keyCode: "Right" });
+  owner.webContents.sendInputEvent({ type: "keyUp", keyCode: "Right" });
+  await until(
+    () =>
+      run(
+        `document.querySelector('tbody tr td').getBoundingClientRect().width===${hostWidthBefore + 8}`,
+      ),
+    "host visibly resizes after other columns are hidden",
+  );
+  await openColumnMenu();
+  for (const key of optional)
+    await click(`[data-monitor-toggle-column=${key}]`);
+  owner.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+  owner.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  await until(
+    () => run('document.querySelectorAll("th").length===11'),
+    "hidden columns can be restored",
+  );
+  for (const view of ["list", "charts"]) {
+    await run(`window.monitorFixture.seed(3,'${view}','zh-CN')`);
+    await until(
+      () => run('!!document.querySelector("[data-monitor-host=host-0]")'),
+      "status fixtures render",
+    );
+    for (const status of [
+      "login",
+      "error",
+      "disconnected",
+      "unsupported",
+      "queued",
+      "connecting",
+      "limit",
+    ]) {
+      await run(`window.monitorFixture.status('host-0','${status}')`);
+      await until(
+        () =>
+          run(
+            `document.querySelector('[data-monitor-host=host-0] button').getAttribute('aria-disabled')==='true'`,
+          ),
+        "unavailable host has disabled detail action",
+      );
+      assert.equal(
+        await run(
+          "getComputedStyle(document.querySelector('[data-monitor-host=host-0]')).opacity",
+        ),
+        "0.5",
+        "unavailable host is dimmed",
+      );
+      await click("[data-monitor-host=host-0] button");
+      assert.equal(
+        await run(
+          '!!document.querySelector("[data-section=vault-monitor-detail]")',
+        ),
+        false,
+        "unavailable host does not open details",
+      );
+    }
+    await run("window.monitorFixture.status('host-0','live',60000)");
+    await until(
+      () =>
+        run(
+          `document.querySelector('[data-monitor-host=host-0] button').getAttribute('aria-disabled')==='true'`,
+        ),
+      "stale readings cannot open details",
+    );
+    await click("[data-monitor-host=host-0] button");
+    assert.equal(
+      await run(
+        '!!document.querySelector("[data-section=vault-monitor-detail]")',
+      ),
+      false,
+      "stale host stays unavailable",
+    );
+    await click("[data-monitor-terminal=host-0]");
+    assert.deepEqual(
+      await run("window.monitorFixture.connections()"),
+      ["host-0"],
+      "login host can still open a terminal",
+    );
+    await run("window.monitorFixture.status('host-0','login')");
+    const recoveryPoint = await run(
+      `(()=>{const e=document.querySelector('[data-monitor-host=host-0]');e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return {x:Math.round(r.left+30),y:Math.round(r.top+20)}})()`,
+    );
+    for (const type of ["mouseDown", "mouseUp"])
+      owner.webContents.sendInputEvent({
+        type,
+        button: "right",
+        clickCount: 1,
+        ...recoveryPoint,
+      });
+    await until(
+      () => run('!!document.querySelector("[data-monitor-retry=host-0]")'),
+      "unavailable host context menu offers recovery",
+    );
+    await click("[data-monitor-retry=host-0]");
+    await until(
+      () => run('!!document.querySelector("#monitor-login-password")'),
+      "recovery dialog opens separately from details",
+    );
+    assert.equal(
+      await run(
+        '!!document.querySelector("[data-section=vault-monitor-detail]")',
+      ),
+      false,
+    );
+    await click("#monitor-login-password");
+    owner.webContents.insertText("fixture-password");
+    await click("[role=dialog] button[type=submit]");
+    await until(
+      () => run('!document.querySelector("#monitor-login-password")'),
+      "recovery clears password inputs",
+    );
+    assert.deepEqual(
+      await run("window.monitorFixture.retries()"),
+      [
+        {
+          id: "host-0",
+          credentials: { username: "fixture", password: "fixture-password" },
+        },
+      ],
+      "recovery forwards one-time credentials to the existing monitor retry path",
+    );
+    await run("window.monitorFixture.status('host-0','live')");
+    await until(
+      () =>
+        run(
+          `document.querySelector('[data-monitor-host=host-0] button').getAttribute('aria-disabled')==='false'`,
+        ),
+      "recovered host enables details",
+    );
+    await click("[data-monitor-host=host-0] button");
+    await until(
+      () =>
+        run('!!document.querySelector("[data-section=vault-monitor-detail]")'),
+      "live host opens details",
+    );
+    await run("window.monitorFixture.status('host-0','login')");
+    await until(
+      () =>
+        run('!document.querySelector("[data-section=vault-monitor-detail]")'),
+      "unavailable details close immediately",
+    );
+  }
+
+  owner.setSize(1280, 650);
+  await run("window.monitorFixture.seed(3,'charts','zh-CN',1800)");
+  await until(
+    () => run('!!document.querySelector("[data-monitor-host=host-0]")'),
+    "long monitoring history renders",
+  );
+  await click("[data-monitor-host=host-0] button");
+  await until(
+    () => run('!!document.querySelector("[data-aside-scroll-viewport]")'),
+    "native monitoring detail scroll opens",
+  );
+  await until(
+    () =>
+      run(
+        `document.querySelector('[data-section=vault-monitor-detail]').getAnimations().every(a=>a.playState==='finished')`,
+      ),
+    "sidebar opening animation finishes before wheel input",
+  );
+  const wheelPoint = await run(
+    `(()=>{const v=document.querySelector('[data-aside-scroll-viewport]');const r=v.getBoundingClientRect();window.monitorRefreshTimer=setInterval(()=>window.monitorFixture.refresh(),200);window.monitorWheelProbe={events:0,blocking:0};window.monitorWheelListener=e=>{window.monitorWheelProbe.events++;if(e.cancelable)window.monitorWheelProbe.blocking++;};document.addEventListener('wheel',window.monitorWheelListener,{passive:true});return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+180)}})()`,
+  );
+  for (let i = 0; i < 60; i++) {
+    owner.webContents.sendInputEvent({
+      type: "mouseWheel",
+      ...wheelPoint,
+      deltaY: -12,
+      deltaX: 0,
+      canScroll: true,
+    });
+    await wait(17);
+  }
+  await until(
+    () =>
+      run(
+        "document.querySelector('[data-aside-scroll-viewport]').scrollTop>200",
+      ),
+    "wheel reaches lower detail sections with a half-hour history",
+  );
+  const wheelResult = await run("window.monitorWheelProbe");
+  assert.ok(
+    wheelResult.events > 40,
+    "real wheel input reached monitoring details",
+  );
+  assert.equal(
+    wheelResult.blocking,
+    0,
+    "detail wheel input does not wait for a cancellable handler",
+  );
+  assert.equal(
+    await run(
+      "document.querySelector('[data-section=vault-monitor-list]').scrollTop",
+    ),
+    0,
+    "sidebar scroll leaves host collection in place",
+  );
+  await screenshot("monitor-native-detail-scroll.png");
+  await run(
+    "clearInterval(window.monitorRefreshTimer);document.removeEventListener('wheel',window.monitorWheelListener)",
+  );
+  await click("[data-section=vault-monitor-detail] button:has(.lucide-x)");
+  owner.setSize(1280, 900);
   await run(
     `(()=>{document.documentElement.classList.remove('dark');for(const [k,v] of Object.entries({background:'0 0% 100%',foreground:'210 20% 15%',card:'210 20% 97%',secondary:'210 20% 94%',muted:'210 20% 95%','muted-foreground':'210 10% 45%',border:'210 20% 88%',popover:'0 0% 100%','popover-foreground':'210 20% 15%'}))document.documentElement.style.setProperty('--'+k,v)})()`,
   );
@@ -547,6 +810,9 @@ async function main() {
       statusBeforeAction: true,
       allColumnsResize: true,
       persistedWidths: true,
+      visibleColumns: true,
+      unavailableHosts: true,
+      nativeDetailScroll: true,
       variableRowHeights: true,
       filterAfterScroll: true,
       locales: 5,
