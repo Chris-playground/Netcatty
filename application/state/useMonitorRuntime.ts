@@ -31,7 +31,7 @@ export function useMonitorRuntime() {
   } = useAppVaultRuntime();
   const { terminalSettings } = useAppSettingsRuntime();
   const { locked } = useAppLockChrome();
-  const [running, setRunning] = useState<string[]>([]);
+  const [running, setRunning] = useState(() => new Map<string, string>());
   const [retryVersion, setRetryVersion] = useState(0);
   const epoch = useRef<number | null>(null);
   const runtimeId = useRef<string | null>(null);
@@ -40,12 +40,16 @@ export function useMonitorRuntime() {
   );
   useEffect(() => {
     monitorActions.start = (id) =>
-      setRunning((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      setRunning((prev) => new Map(prev).set(id, crypto.randomUUID()));
     monitorActions.stop = (id) =>
-      setRunning((prev) => prev.filter((p) => p !== id));
+      setRunning((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
     monitorActions.stopAll = () => {
       credentials.current.clear();
-      setRunning([]);
+      setRunning(new Map());
       void netcattyBridge.get()?.monitorStopAll?.();
     };
     monitorActions.retry = (id, override) => {
@@ -65,7 +69,7 @@ export function useMonitorRuntime() {
   useEffect(() => {
     if (locked || !isInitialized) {
       credentials.current.clear();
-      setRunning([]);
+      setRunning(new Map());
     }
   }, [locked, isInitialized]);
   useEffect(() => {
@@ -78,9 +82,10 @@ export function useMonitorRuntime() {
       locked || !isInitialized
         ? []
         : panels
-            .filter((p) => running.includes(p.id))
+            .filter((p) => running.has(p.id))
             .map((panel) => ({
               id: panel.id,
+              runId: running.get(panel.id)!,
               interval: panel.interval,
               hosts: panel.hostIds.map((id) => {
                 const host = hosts.find((h) => h.id === id);
@@ -134,7 +139,7 @@ export function useMonitorRuntime() {
       .then(publishMonitorSnapshot)
       .catch(() => {
         credentials.current.clear();
-        setRunning((prev) => (prev.length ? [] : prev));
+        setRunning((prev) => (prev.size ? new Map() : prev));
         publishMonitorUnavailable();
       });
   }, [
@@ -167,14 +172,14 @@ export function useMonitorRuntime() {
             runtimeId.current !== snapshot.runtimeId)
         ) {
           credentials.current.clear();
-          setRunning([]);
+          setRunning(new Map());
         }
         epoch.current = snapshot.epoch;
         runtimeId.current = snapshot.runtimeId;
         publishMonitorSnapshot(snapshot);
       } catch {
         credentials.current.clear();
-        setRunning((prev) => (prev.length ? [] : prev));
+        setRunning((prev) => (prev.size ? new Map() : prev));
         publishMonitorUnavailable();
       } finally {
         pending = false;

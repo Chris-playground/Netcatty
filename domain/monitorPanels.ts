@@ -10,7 +10,7 @@ export interface MonitorPanel {
   view: "list" | "charts";
   interval: (typeof MONITOR_INTERVALS)[number];
   range: 5 | 15 | 30;
-  sort: "manual" | "name" | "cpu" | "memory" | "disk";
+  sort: "manual" | "name";
 }
 
 export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
@@ -48,13 +48,7 @@ export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
           ? p.interval as MonitorPanel["interval"]
           : DEFAULT_MONITOR_INTERVAL,
         range: p.range === 5 || p.range === 15 ? p.range : 30,
-        sort:
-          p.sort === "name" ||
-          p.sort === "cpu" ||
-          p.sort === "memory" ||
-          p.sort === "disk"
-            ? p.sort
-            : "manual",
+        sort: p.sort === "name" ? "name" : "manual",
       },
     ];
   });
@@ -84,6 +78,17 @@ export function normalizeMonitorPanels(value: unknown): MonitorPanel[] {
   return panels.map((p) =>
     namesById.has(p.id) ? { ...p, name: namesById.get(p.id)! } : p,
   );
+}
+
+/** Move within the displayed ordering, then persist it as the saved ordering. */
+export function reorderMonitorHosts(hostIds: string[], from: string, to: string): string[] {
+  const fromIndex = hostIds.indexOf(from);
+  const toIndex = hostIds.indexOf(to);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return hostIds;
+  const next = [...hostIds];
+  next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, from);
+  return next;
 }
 
 /** Rebase only edited fields onto the latest disk entity; deletion wins over a stale editor. */

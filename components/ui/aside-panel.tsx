@@ -354,7 +354,7 @@ function ModalAsidePanel({ children, onClose }: { children: React.ReactElement; 
     });
     return (
         <DialogPrimitive.Root open onOpenChange={(next) => !next && onClose()}>
-            <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/25 app-no-drag monitor-backdrop-enter" data-section="aside-modal-backdrop" />
+            <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-transparent app-no-drag" data-section="aside-modal-backdrop" />
             <DialogPrimitive.Content
                 asChild
                 aria-modal="true"

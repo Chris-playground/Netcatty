@@ -19,8 +19,32 @@ const options = {
 };
 const demand = (id = "p", opts = options) => ({
   id,
+  runId: "first-run",
   interval: 10,
   hosts: [{ id: "h", options: opts }],
+});
+
+test("each start and interval change begins fresh panel history while other panels keep theirs", () => {
+  let now = 1000;
+  const f = fixture({ now: () => now });
+  const a = { ...demand("a"), hosts: [] };
+  const b = { ...demand("b"), hosts: [] };
+  f.service.reconcile(event(1), [a, b]);
+  assert.deepEqual(f.service.snapshot(event(1)).startedAt, { a: 1000, b: 1000 });
+  now = 2000;
+  f.service.reconcile(event(1), [a, b]);
+  assert.deepEqual(f.service.snapshot(event(1)).startedAt, { a: 1000, b: 1000 });
+  const changed = { ...a, interval: 5 };
+  f.service.reconcile(event(1), [changed, b]);
+  assert.deepEqual(f.service.snapshot(event(1)).startedAt, { a: 2000, b: 1000 });
+  now = 3000;
+  f.service.reconcile(event(1), [{ ...changed, runId: "second-run" }, b]);
+  assert.deepEqual(f.service.snapshot(event(1)).startedAt, { a: 3000, b: 1000 });
+  f.service.reconcile(event(1), [b]);
+  now = 4000;
+  f.service.reconcile(event(1), [changed, b]);
+  assert.deepEqual(f.service.snapshot(event(1)).startedAt, { a: 4000, b: 1000 });
+  f.service.dispose();
 });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 async function until(predicate) {

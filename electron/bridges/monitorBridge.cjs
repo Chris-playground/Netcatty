@@ -247,13 +247,17 @@ function createMonitorService({
         hosts.push({ id: host.id, key });
         hosts[hosts.length - 1].options = options;
       }
+      const interval = [1, 2, 3, 5, 10, 30, 60].includes(panel.interval) ? panel.interval : 5;
+      const previous = panels.get(id);
       panels.set(id, {
         event,
         owner,
         id: panel.id,
         keys,
         hosts,
-        interval: [1, 2, 3, 5, 10, 30, 60].includes(panel.interval) ? panel.interval : 5,
+        interval,
+        runId: panel.runId,
+        startedAt: previous && previous.interval === interval && previous.runId === panel.runId ? previous.startedAt : now(),
       });
     }
     for (const [id, panel] of panels)
@@ -349,6 +353,7 @@ function createMonitorService({
         ),
       ],
       running: own.map((p) => p.id),
+      startedAt: Object.fromEntries(own.map((p) => [p.id, p.startedAt])),
       count: panels.size,
       hostCount: entries.size,
       hosts,

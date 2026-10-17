@@ -8,6 +8,7 @@ const empty: MonitorSnapshot = {
   runtimeId: "",
   takenAt: 0,
   activeSessions: [],
+  startedAt: {},
   hosts: {},
 };
 let snapshot = empty;

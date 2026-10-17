@@ -28,8 +28,9 @@ import {
   monitorActions,
   useMonitorSnapshot,
 } from "../../application/state/monitorRuntimeStore";
-import { DEFAULT_MONITOR_INTERVAL, MONITOR_INTERVALS, type MonitorPanel } from "../../domain/monitorPanels";
+import { DEFAULT_MONITOR_INTERVAL, MONITOR_INTERVALS, reorderMonitorHosts, type MonitorPanel } from "../../domain/monitorPanels";
 import {
+  monitorStateSince,
   type MonitorHostState,
   type MonitorPoint,
 } from "../../domain/monitorRuntime";
@@ -233,6 +234,8 @@ export function MonitorPanels({
   const runtime = useMonitorSnapshot();
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [dragging, setDragging] = useState<{ panelId: string; hostId: string } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [editor, setEditor] = useState<{
     base: MonitorPanel | null;
     draft: MonitorPanel;
@@ -330,36 +333,57 @@ export function MonitorPanels({
       toast.error(t("monitor.saveFailed"));
     }
   };
+  const orderedHostIds = useMemo(() => {
+    if (!panel) return [];
+    return panel.sort === "manual" ? panel.hostIds : [...panel.hostIds].sort((a, b) =>
+      (hosts.find((host) => host.id === a)?.label ?? a).localeCompare(hosts.find((host) => host.id === b)?.label ?? b),
+    );
+  }, [panel, hosts]);
   const rows = useMemo(() => {
     if (!panel) return [];
     const q = search.trim().toLocaleLowerCase();
-    const rows = panel.hostIds.map((id) => ({
+    const rows = orderedHostIds.map((id) => ({
       id,
       host: hosts.find((h) => h.id === id),
-      state: runtime.hosts[id],
+      state: monitorStateSince(runtime.hosts[id], runtime.startedAt[panel.id]),
     }));
-    const filtered = rows.filter(
+    return rows.filter(
       ({ host }) => !q ||
         `${host?.label ?? ""} ${host?.hostname ?? ""} ${host?.group ?? ""}`
           .toLocaleLowerCase()
           .includes(q),
     );
-    return panel.sort === "manual"
-      ? filtered
-      : filtered.sort((a, b) => {
-          if (panel.sort === "name")
-            return (a.host?.label ?? a.id).localeCompare(b.host?.label ?? b.id);
-          const score = (state: MonitorHostState | undefined) =>
-            panel.sort === "cpu"
-              ? state?.stats?.cpu
-              : panel.sort === "memory"
-                ? state?.stats?.memTotal && state.stats.memUsed != null
-                  ? (state.stats.memUsed / state.stats.memTotal) * 100
-                  : null
-                : state?.stats?.diskPercent;
-          return (score(b.state) ?? -1) - (score(a.state) ?? -1);
-        });
-  }, [panel, hosts, runtime, search]);
+  }, [panel, orderedHostIds, hosts, runtime, search]);
+  const dragProps = (hostId: string): React.HTMLAttributes<HTMLElement> & { "data-monitor-host": string } => ({
+    draggable: true,
+    "data-monitor-host": hostId,
+    onDragStart: (event) => {
+      if (!panel) return;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", hostId);
+      setDragging({ panelId: panel.id, hostId });
+    },
+    onDragOver: (event) => {
+      if (!panel || dragging?.panelId !== panel.id || dragging.hostId === hostId) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget(hostId);
+    },
+    onDrop: (event) => {
+      if (!panel || dragging?.panelId !== panel.id) return;
+      event.preventDefault();
+      if (dragging.hostId !== hostId) void patchPanel({
+        hostIds: reorderMonitorHosts(orderedHostIds, dragging.hostId, hostId),
+        sort: "manual",
+      });
+      setDragging(null);
+      setDropTarget(null);
+    },
+    onDragEnd: () => {
+      setDragging(null);
+      setDropTarget(null);
+    },
+  });
   const status = (host: Host | undefined, state?: MonitorHostState) =>
     !host
       ? "missing"
@@ -446,7 +470,7 @@ export function MonitorPanels({
     );
   };
   const hostDetail = hosts.find((h) => h.id === detail);
-  const detailState = detail ? runtime.hosts[detail] : undefined;
+  const detailState = detail && panel ? monitorStateSince(runtime.hosts[detail], runtime.startedAt[panel.id]) : undefined;
   return (
     <section
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
@@ -630,7 +654,7 @@ export function MonitorPanels({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {["manual", "name", "cpu", "memory", "disk"].map((v) => (
+                    {["manual", "name"].map((v) => (
                       <SelectItem key={v} value={v}>
                         {t(`monitor.sort.${v}`)}
                       </SelectItem>
@@ -649,8 +673,11 @@ export function MonitorPanels({
                       {rows.map(({ id, host, state }) => (
                         <button
                           key={id}
+                          {...dragProps(id)}
                           className={cn(
-                            "flex h-full min-w-0 flex-col overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card focus-visible:outline focus-visible:outline-primary",
+                            "flex h-full min-w-0 cursor-grab flex-col overflow-hidden rounded-xl bg-card/70 p-4 text-left shadow-sm shadow-black/[0.02] transition-colors hover:bg-card active:cursor-grabbing focus-visible:outline focus-visible:outline-primary",
+                            dragging?.panelId === panel.id && dragging.hostId === id && "opacity-40",
+                            dropTarget === id && "bg-accent",
                             status(host, state) !== "live" &&
                               "text-muted-foreground",
                           )}
@@ -743,14 +770,18 @@ export function MonitorPanels({
                             return (
                               <tr
                                 key={id}
+                                {...dragProps(id)}
                                 className={cn(
-                                  "[&>td]:bg-card/70 [&>td]:transition-colors hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl",
+                                  "cursor-grab [&>td]:bg-card/70 [&>td]:transition-colors hover:[&>td]:bg-card [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl",
+                                  dragging?.panelId === panel.id && dragging.hostId === id && "opacity-40",
+                                  dropTarget === id && "[&>td]:bg-accent",
                                   status(host, state) !== "live" &&
                                     "text-muted-foreground",
                                 )}
                               >
                                 <td className="px-3 py-3">
                                   <button
+                                    draggable
                                     className="flex items-center gap-2.5 text-left hover:underline"
                                     onClick={() => {
                                       setEditor(null);
