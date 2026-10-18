@@ -336,7 +336,7 @@ export function matchesWordPrefixQuery(
     if (!compactQuery) return false;
     // ASCII command words cannot gain a different pinyin prefix. Avoid the
     // transliteration/cache work for every token in large snippet libraries.
-    if (/^[\x20-\x7E]+$/.test(word)) return false;
+    if (/^[\x20-\x7E]+$/.test(word)) return word.startsWith(compactQuery);
     const { full, initials } = getPinyinVariants(word);
     return (
       (full !== "" && full.startsWith(compactQuery))

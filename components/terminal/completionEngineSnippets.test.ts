@@ -109,3 +109,9 @@ test("argument completion skips ASCII transliteration in a large snippet library
     resetPinyinCacheForTests();
   }
 });
+
+test("ASCII argument completion retains compact query prefixes", async () => {
+  const snippets: Snippet[] = [{ id: "compact", label: "production-foobar", command: "echo ready" }];
+  const result = await getCompletions("git pull foo_bar", { snippets, skipPathCompletion: true });
+  assert.equal(result.find((suggestion) => suggestion.source === "snippet")?.snippet?.id, "compact");
+});
