@@ -897,3 +897,56 @@ test("getSessionPwd skips exec after the CloudLinker banner stamps the runtime c
   assert.match(result.error, /extra exec channels/);
   assert.equal(execCalls, 0);
 });
+
+test("Dropbear peers get a compact cwd probe that fits the exec command limit (#3731)", async () => {
+  let command = "";
+  const session = {
+    shellPid: "4242",
+    remoteSshVersion: "SSH-2.0-dropbear_2024.85",
+    connRef: { count: 1 },
+    stream: {},
+    conn: {
+      exec(nextCommand, callback) {
+        command = nextCommand;
+        callback(null, makePwdStream("/owrt/root", "4242"));
+      },
+    },
+  };
+  const api = makeApi(session);
+
+  const result = await api.getSessionPwd(null, { sessionId: "session-1" });
+
+  assert.deepEqual(result, { success: true, cwd: "/owrt/root" });
+  // Dropbear kills the whole transport — shell included — for exec commands
+  // over its 9000-byte request limit (#2924, #3731).
+  assert.ok(Buffer.byteLength(command, "utf8") <= 9000);
+  // The /proc readlink path is untouched, and the byte-heavy AL2023 lsof
+  // annotation decode (#3493) is replaced by the compact pre-#3493 fallback.
+  assert.ok(command.includes('readlink "/proc/$1/cwd"'));
+  assert.ok(command.includes("-Fnt 2>/dev/null") === false);
+  assert.ok(command.includes("-Fn 2>/dev/null"));
+  assert.doesNotMatch(command, /_rc_test_cwd/);
+});
+
+test("OpenSSH peers keep the annotation-aware lsof cwd fallback (#3493)", async () => {
+  let command = "";
+  const session = {
+    shellPid: "4242",
+    remoteSshVersion: "OpenSSH_9.6",
+    connRef: { count: 1 },
+    stream: {},
+    conn: {
+      exec(nextCommand, callback) {
+        command = nextCommand;
+        callback(null, makePwdStream("/srv/app", "4242"));
+      },
+    },
+  };
+  const api = makeApi(session);
+
+  const result = await api.getSessionPwd(null, { sessionId: "session-1" });
+
+  assert.deepEqual(result, { success: true, cwd: "/srv/app" });
+  assert.ok(command.includes("_rc_test_cwd"), "keep the #3493 annotation decode");
+  assert.ok(command.includes("-Fnt 2>/dev/null"));
+});
