@@ -4077,3 +4077,41 @@ test("same-byte and ignored terminal events publish repaired background hierarch
     assert.equal(store.getTask("orphan")?.parentTaskId, "folder");
   }
 });
+
+test("repaired terminal hierarchy survives restart without another lifecycle event", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  for (const status of ["completed", "failed", "cancelled"] as const) {
+    let persisted = "";
+    let writes = 0;
+    const store = createSftpTransferCenterStore({ read: () => null, write: (value) => { persisted = value; writes += 1; } });
+    store.publishOwner("panel", [{ ...makeTask("folder"), isDirectory: true }]);
+    store.publishOwner("background-agent", [{ ...makeTask("orphan", status), background: true }]);
+    t.mock.timers.tick(300);
+    assert.equal(JSON.parse(persisted).tasks.find((task: TransferTask) => task.id === "orphan")?.parentTaskId, undefined);
+    let lifecycleNotifications = 0;
+    store.subscribe(() => { lifecycleNotifications += 1; });
+    const beforeRepairWrites = writes;
+    store.ingestBackgroundEvent({ type: "progress", transferId: "orphan", parentTaskId: "folder", transferred: 2 });
+    t.mock.timers.tick(300);
+    assert.equal(writes, beforeRepairWrites + 1, "structural repair is saved even when the terminal event is ignored");
+    const savedChild = JSON.parse(persisted).tasks.find((task: TransferTask) => task.id === "orphan");
+    assert.equal(savedChild?.parentTaskId, "folder", status);
+    assert.equal(savedChild?.background, false, status);
+    assert.equal(savedChild?.ownerId, "panel", status);
+    const restored = createSftpTransferCenterStore({ read: () => persisted, write: () => {} });
+    const child = restored.getTask("orphan");
+    if (status === "completed") {
+      assert.equal(child, undefined, "existing restore compaction retains completed children in their folder checkpoint");
+      assert.equal(restored.getTask("folder")?.directoryResumeCheckpoint?.completedEntries, 1);
+    } else {
+      assert.equal(child?.parentTaskId, "folder", status);
+      assert.equal(child?.background, false, status);
+      assert.equal(child?.ownerId, "panel", status);
+    }
+    assert.equal(lifecycleNotifications, 0, "repair retains lightweight owner notifications");
+    const settledWrites = writes;
+    store.ingestBackgroundEvent({ type: "progress", transferId: "orphan", parentTaskId: "folder", transferred: 3 });
+    t.mock.timers.tick(300);
+    assert.equal(writes, settledWrites, "unchanged late progress does not schedule recurring writes");
+  }
+});

@@ -2217,6 +2217,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         } : task);
         existing = tasks[existingIndex];
         captureObservedTask(existing);
+        // Structural recovery must survive restart even if an unchanged or
+        // already-terminal event returns before the normal persistence path.
+        persist();
       }
       // Hierarchy repair has already changed the live row. Even an otherwise
       // ignored event must publish that change; ordinary progress still emits

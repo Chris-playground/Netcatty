@@ -81,3 +81,16 @@ action after the same-byte event or its next byte tick. The repaired folder
 immediately exposes its child, and the next byte tick keeps that grouping
 without rebuilding it. A fresh 5,000-file run mounted 12 rows, reached the final
 file and retained all 5,000 records: expansion 14.12 ms, progress 1.28-18.58 ms.
+
+
+The repaired hierarchy also uses the existing coalesced persistence scheduler
+at the structural mutation, so an ignored terminal event cannot leave the old
+orphan on disk indefinitely. A restart regression first failed with zero writes
+for the repair; completed, failed and cancelled cases now each save the change
+once, restore under the folder (completed children through the existing compact
+checkpoint), and schedule no further writes on unchanged late progress. Owner
+lifecycle notifications stay at zero. An isolated actual Electron renderer
+compared 744f0f8e against the repair and confirmed all three old orphan restores
+and all three repaired restores. This run used synthetic in-memory persistence;
+manual window input was unavailable because macOS was locked. Earlier native
+folder scrolling and appearance evidence remains separate.
