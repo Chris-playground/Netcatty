@@ -75,6 +75,46 @@ test("expanded folder history bounds mounted files, isolates progress, and reach
   assert.ok(orderReads < 20, `one byte update re-sorted the directory (${orderReads} reads)`);
   assert.match(childList()?.textContent ?? "", /500 B/);
 
+  const pauseAll = () => [...env.document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === "Pause all")!;
+  assert.equal(pauseAll().disabled, false);
+  await runWithAct(async () => {
+    store.ingestBackgroundEvent({ type: "progress", transferId: "child-0", transferred: 600, resumable: false, pauseUnavailableReason: "fixture cannot pause" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(store.getTask("folder")?.resumable, false, "a child's backend capability also limits its folder");
+  assert.equal(pauseAll().disabled, true, "batch controls must use the current backend capability");
+  await runWithAct(async () => {
+    store.patchTask("folder", { resumable: true });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(pauseAll().disabled, false, "metadata-only patches must refresh eligibility too");
+  await runWithAct(async () => {
+    store.ingestBackgroundEvent({ type: "progress", transferId: "child-0", transferred: 650, resumable: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(pauseAll().disabled, true, "a parent-only capability change is reflected even when the child already reported false");
+  await runWithAct(async () => {
+    store.patchTask("folder", { resumable: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(pauseAll().disabled, true);
+  orderReads = 0;
+  await runWithAct(async () => {
+    store.ingestBackgroundEvent({ type: "progress", transferId: "child-0", transferred: 700, resumable: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.ok(orderReads < 20, "repeated capability metadata on byte ticks does not re-sort the directory");
+  await runWithAct(() => store.publishOwner("failed-control", [{
+    ...base, id: "failed-control", status: "failed", isDirectory: false, endTime: Date.now(), resumable: true, checkpointBytes: 0,
+  }]));
+  const resumeAll = () => [...env.document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === "Resume all")!;
+  assert.equal(resumeAll().disabled, true);
+  await runWithAct(async () => {
+    store.patchTask("failed-control", { checkpointBytes: 20 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(resumeAll().disabled, false, "a newly available failed-task checkpoint enables the existing resume action");
+
   const list = childList()!;
   list.scrollTop = 24 * childCount - 192;
   await dispatchDomEvent(list, new env.window.Event("scroll"));

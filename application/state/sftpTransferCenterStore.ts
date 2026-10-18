@@ -215,6 +215,21 @@ function buildBadgeSnapshot(tasks: readonly TransferTask[]): { count: number; ha
   };
 }
 
+/** Fields used by grouping, ordering and batch-action eligibility. */
+function hasTransferListMetadataChange(before: TransferTask | undefined, after: TransferTask | undefined): boolean {
+  if (!before || !after) return before !== after;
+  return before.status !== after.status
+    || before.parentTaskId !== after.parentTaskId
+    || before.background !== after.background
+    || before.startTime !== after.startTime
+    || before.priority !== after.priority
+    || before.ownerId !== after.ownerId
+    || before.resumable !== after.resumable
+    || before.reconnectRequired !== after.reconnectRequired
+    || Boolean(before.conflict) !== Boolean(after.conflict)
+    || (before.status === "failed" && ((before.checkpointBytes ?? 0) > 0) !== ((after.checkpointBytes ?? 0) > 0));
+}
+
 const TERMINAL_OWNER_STATUSES = new Set<TransferTask["status"]>([
   "completed",
   "cancelled",
@@ -1464,8 +1479,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       };
       tasks = next;
       captureObservedTask(next[index]);
-      emitProgress(false, existing.status !== next[index].status
-        || existing.reconnectRequired !== next[index].reconnectRequired);
+      emitProgress(false, hasTransferListMetadataChange(existing, next[index]));
       return "ready";
     },
     observeTaskSettlement(expected, ignoredCompletion, onIdentityConflict) {
@@ -1784,7 +1798,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         if (fingerprintChanged) emit(true);
         else if (directoryCheckpointChanged) emit(true);
         else if (lifecycleChanged) emit();
-        else emitProgress(false);
+        else emitProgress(false, hasTransferListMetadataChange(task, nextTask));
       }
     },
     upsertTasks(incoming) {
@@ -2185,6 +2199,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       let existingIndex = tasks.findIndex((task) => task.id === event.transferId);
       let existing = tasks[existingIndex];
       const beforeEvent = existing;
+      let parentControlsChanged = false;
       const eventParent = event.parentTaskId
         ? tasks.find((task) => task.id === event.parentTaskId)
         : undefined;
@@ -2464,6 +2479,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           };
         });
         if (event.resumable === false && existing.parentTaskId) {
+          const parent = tasks.find((task) => task.id === existing.parentTaskId);
+          parentControlsChanged = parent !== undefined && parent.resumable !== false;
           tasks = tasks.map((task) => task.id === existing.parentTaskId ? {
             ...task,
             resumable: false,
@@ -2521,11 +2538,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       // Progress-only ticks skip prune + coalesce listener paints; lifecycle
       // events still take the full emit path so UI never lags on pause/cancel.
       const currentTask = tasks[existingIndex];
-      const hierarchyOrLifecycleChanged = !beforeEvent
-        || currentTask?.status !== beforeEvent.status
-        || currentTask?.parentTaskId !== beforeEvent.parentTaskId
-        || currentTask?.background !== beforeEvent.background
-        || currentTask?.reconnectRequired !== beforeEvent.reconnectRequired;
+      const hierarchyOrLifecycleChanged = parentControlsChanged
+        || hasTransferListMetadataChange(beforeEvent, currentTask);
       if (event.type === "progress" && !persistImmediately) {
         emitProgress(false, hierarchyOrLifecycleChanged);
       } else {

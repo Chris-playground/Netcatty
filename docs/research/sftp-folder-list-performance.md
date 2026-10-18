@@ -45,3 +45,22 @@ possible large-transfer failures; they do not establish that this exact expanded
 folder-list workload caused the reporter's freeze. This repair is independently
 reproduced UI work and must not close that issue. Open #3694 and #3696 modify
 file metadata / transfer connection acquisition, not this list behavior.
+
+## Control availability follow-up
+
+Independent review found that the initial stable snapshot did not refresh when
+progress reported a transfer could no longer pause, including a child's change
+propagated to its folder. Metadata-only patches and a newly available failed
+transfer checkpoint could similarly leave batch buttons stale. The list now
+refreshes its lightweight snapshot only when grouping/order/control eligibility
+fields change; repeated identical capability metadata on byte ticks keeps the
+hierarchy stable.
+
+The actual-component regression first failed with Pause all incorrectly enabled
+after the backend reported the folder could not pause. It now covers that child /
+parent update, direct metadata changes, repeated unchanged metadata without a
+full sort, and Resume all becoming available when a failed task gains a checkpoint.
+An Electron comparison against initial repair 1b96e27b0 confirmed stale batch
+buttons before and correct disabled/enabled states afterward. The final 1,000 /
+5,000 file runs still mounted 12 rows and reached the final file: expand-to-frame
+12.6 / 12.86 ms, child progress 1.32–15.42 / 1.06–17.90 ms.
