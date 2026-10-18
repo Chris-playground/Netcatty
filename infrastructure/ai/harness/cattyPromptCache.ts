@@ -7,13 +7,14 @@ const CACHE_CONTROL = { type: 'ephemeral' } as const;
 export function createCattyPromptCache(
   systemPrompt: string,
   provider: string,
-  config?: Pick<ProviderConfig, 'baseURL'>,
+  endpoint?: Pick<ProviderConfig, 'baseURL'>,
 ) {
   let officialEndpoint = false;
-  if (config) {
+  if (endpoint) {
     try {
-      // The SDK defaults to Anthropic's official endpoint when no URL is set.
-      officialEndpoint = new URL(config.baseURL || 'https://api.anthropic.com').origin === 'https://api.anthropic.com';
+      // This must be the resolved SDK address, including vendor fallbacks.
+      // Only an unresolved URL after that step uses the SDK's native default.
+      officialEndpoint = new URL(endpoint.baseURL || 'https://api.anthropic.com').origin === 'https://api.anthropic.com';
     } catch { /* An unknown endpoint must not receive vendor extensions. */ }
   }
   const enabled = /^anthropic(?:\.|$)/.test(provider) && officialEndpoint;

@@ -8,9 +8,9 @@ import {
 } from '../../cattyRequestTooLargeRetry';
 import { mapCattyStreamChunkToAgentEvents } from '../agentEventAdapter';
 import type { AgentEvent } from '../types';
-import type { ProviderAdvancedParams } from '../../types';
+import { resolveProviderStyle, type ProviderAdvancedParams } from '../../types';
 import type { CattyReasoningProviderOptions } from '../../cattyReasoning';
-import { createModelFromConfig } from '../../sdk/providers';
+import { createModelFromConfig, resolveProviderEndpoint } from '../../sdk/providers';
 import type { CattyToolsBundle } from '../capabilityTools';
 import { buildCattyToolApproval } from '../cattyToolApproval';
 import type { CattyRuntimeContext } from '../cattyRuntimeContext';
@@ -52,7 +52,7 @@ export interface CattyStreamUiSink {
 export interface ProcessCattyStreamInput {
   streamSessionId: string;
   model: CattyModel;
-  providerConfig?: Pick<ProviderConfig, 'baseURL'>;
+  providerConfig?: ProviderConfig;
   systemPrompt: string;
   toolsBundle: CattyToolsBundle;
   sdkMessages: ModelMessage[];
@@ -132,7 +132,10 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
 
   let runtimeContext = initialRuntimeContext;
   const { tools, toolsContext } = toolsBundle;
-  const promptCache = createCattyPromptCache(systemPrompt, model.provider, input.providerConfig);
+  const endpoint = input.providerConfig
+    ? resolveProviderEndpoint(input.providerConfig, resolveProviderStyle(input.providerConfig), undefined)
+    : undefined;
+  const promptCache = createCattyPromptCache(systemPrompt, model.provider, endpoint);
 
   const result = streamText({
     model,

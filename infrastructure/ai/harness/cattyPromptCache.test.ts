@@ -34,6 +34,7 @@ function fixture(t: test.TestContext, replies: Reply[], style: 'openai' | 'anthr
   globalThis.cancelAnimationFrame = id => clearTimeout(id);
 
   const requests: WireRequest[] = [];
+  const urls: string[] = [];
   const events: AgentEvent[] = [];
   const messages: ChatMessage[] = [];
   const data = new Map<string, (value: string) => void>();
@@ -57,7 +58,8 @@ function fixture(t: test.TestContext, replies: Reply[], style: 'openai' | 'anthr
     },
     onAiStreamError: () => () => undefined,
     aiChatCancel: async () => true,
-    aiChatStream: async (id: string, _url: string, _headers: Record<string, string>, body: string) => {
+    aiChatStream: async (id: string, url: string, _headers: Record<string, string>, body: string) => {
+      urls.push(url);
       requests.push(JSON.parse(body) as WireRequest);
       const reply = replies[requests.length - 1];
       assert.ok(reply, 'unexpected model request');
@@ -108,7 +110,7 @@ function fixture(t: test.TestContext, replies: Reply[], style: 'openai' | 'anthr
   };
   let turnNumber = 0;
   return {
-    requests, events, messages, provider,
+    requests, urls, events, messages, provider,
     async turn(maxIterations = 1) {
       turnNumber += 1;
       const history = structuredClone(messages);
@@ -235,3 +237,15 @@ test('Catty does not send vendor cache extensions to an Anthropic-compatible gat
   assert.doesNotMatch(JSON.stringify(f.requests), /cache_control/);
   assert.equal(f.messages.at(-1)?.content, 'OK');
 });
+
+for (const providerId of ['openrouter', 'ollama'] as const) {
+  test(`Catty respects the ${providerId} endpoint fallback with Anthropic format`, async t => {
+    const f = fixture(t, [{ text: 'OK' }], 'anthropic');
+    f.provider.providerId = providerId;
+    f.provider.baseURL = '';
+    await f.turn();
+    assert.match(f.urls[0], providerId === 'openrouter' ? /^https:\/\/openrouter\.ai\// : /^http:\/\/localhost:11434\//);
+    assert.doesNotMatch(JSON.stringify(f.requests), /cache_control/);
+    assert.equal(f.messages.at(-1)?.content, 'OK');
+  });
+}
