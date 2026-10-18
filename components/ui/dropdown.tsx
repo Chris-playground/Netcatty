@@ -309,6 +309,11 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       role={keyboardNavigation ? 'menu' : undefined}
+      onClickCapture={keyboardNavigation ? (event) => {
+        if (event.target instanceof Element && event.target.closest('button:not(:disabled)')) {
+          triggerRef.current?.focus();
+        }
+      } : undefined}
       onKeyDown={keyboardNavigation ? (event) => {
         const items = Array.from(
           event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
