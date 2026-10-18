@@ -11,7 +11,10 @@ and session order remain unchanged. A query change cancels the previous scan;
 streaming updates keep match decisions for unchanged sessions and recheck the
 replacement objects, so ongoing output cannot repeatedly restart the search.
 The drawer shows a searching status and clears obsolete-query results until the
-current query finishes. Clearing the query restores the unfiltered history
+current query finishes. While the session list changes, only still-present,
+unchanged matched objects stay visible, in the current list order; removed or
+replaced objects cannot remain selectable until the next slice. Clearing the
+query restores the unfiltered history
 immediately and releases the search's previous results.
 
 ## Verification
@@ -45,3 +48,16 @@ node --test --import tsx \
   components/AIChatSessionHistoryDrawer.responsiveness.test.tsx \
   application/state/sessionHistorySearch.test.ts
 ```
+
+## Pending-result freshness
+
+A follow-up review found that the first repair could temporarily show results
+from the previous session snapshot. A second Electron comparison used the
+initial repair (`a8b291b7c`) and the reconciled version. Removing or replacing the
+matching session left it selectable in the initial repair's first commit; the
+reconciled version immediately removed it. Reversing the current list initially
+kept session 0 first; it now immediately shows session 499 first. Unchanged
+confirmed matches remain visible while changed objects are checked, so a stream
+does not blank every result. This check compares object references and ordering
+without rereading retained message text. Input remained about 4 ms for the same
+500-conversation fixture.

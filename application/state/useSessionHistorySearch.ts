@@ -75,10 +75,19 @@ export function useSessionHistorySearch<T extends SessionHistorySearchTarget>(
     search.clearSessionHistorySearchCache();
   }, [search]);
 
-  if (!query.trim()) return { filteredSessions: sessions, isSearching: false };
+  const filteredSessions = useMemo(() => {
+    if (!query.trim()) return sessions;
+    if (result?.query !== query || result.untitledLabel !== untitledLabel) return [];
+    if (result.sessions === sessions) return result.filteredSessions;
+    // Keep only confirmed, unchanged objects in the current order while the
+    // scheduled scan checks new/replaced sessions. Do not read message bodies
+    // here, or make the whole list disappear on each streaming update.
+    const confirmed = new Set(result.filteredSessions);
+    return sessions.filter((session) => confirmed.has(session));
+  }, [sessions, query, untitledLabel, result]);
   const sameQuery = result?.query === query && result.untitledLabel === untitledLabel;
   return {
-    filteredSessions: sameQuery ? result.filteredSessions : [],
-    isSearching: !sameQuery || result.sessions !== sessions,
+    filteredSessions,
+    isSearching: Boolean(query.trim()) && (!sameQuery || result.sessions !== sessions),
   };
 }
