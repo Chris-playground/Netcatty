@@ -130,5 +130,27 @@ test("expanded folder history bounds mounted files, isolates progress, and reach
   await click('button[aria-label="Show files"]');
   assert.ok(childRows().length > 0 && childRows().length < 40);
   assert.equal(store.getSnapshot().tasks.filter((task) => task.parentTaskId === "folder").length, childCount - 1, "virtualization never drops queued files");
+  await runWithAct(() => {
+    store.publishOwner("repair-folder", [{ ...base, id: "repair-folder", fileName: "repaired folder", status: "transferring", isDirectory: true }]);
+    store.publishOwner("repair-background", [{ ...base, id: "repair-child", fileName: "repaired-child.bin", status: "transferring", isDirectory: false, background: true, transferredBytes: 10 }]);
+  });
+  const repairedFolderRow = () => [...env.document.querySelectorAll<HTMLElement>('[data-section=global-sftp-transfer-row]')].find((row) => row.textContent?.includes("repaired folder"))!;
+  assert.equal(repairedFolderRow().querySelector('button[aria-label="Show files"]'), null);
+  await runWithAct(async () => {
+    store.ingestBackgroundEvent({ type: "progress", transferId: "repair-child", parentTaskId: "repair-folder", transferred: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const repairedExpand = repairedFolderRow().querySelector('button[aria-label="Show files"]');
+  assert.ok(repairedExpand, "same-byte hierarchy repair immediately exposes the folder's child");
+  await dispatchDomEvent(repairedExpand, new env.window.MouseEvent("click", { bubbles: true }));
+  await flushEffects();
+  assert.match(repairedFolderRow().textContent ?? "", /repaired-child.bin/);
+  const repairedHierarchy = store.getLifecycleSnapshot();
+  await runWithAct(async () => {
+    store.ingestBackgroundEvent({ type: "progress", transferId: "repair-child", parentTaskId: "repair-folder", transferred: 11 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(store.getLifecycleSnapshot(), repairedHierarchy);
+  assert.match(repairedFolderRow().textContent ?? "", /repaired-child.bin/);
   await click("[data-section=global-sftp-transfer-toggle]");
 });

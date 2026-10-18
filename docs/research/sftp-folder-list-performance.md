@@ -64,3 +64,20 @@ An Electron comparison against initial repair 1b96e27b0 confirmed stale batch
 buttons before and correct disabled/enabled states afterward. The final 1,000 /
 5,000 file runs still mounted 12 rows and reached the final file: expand-to-frame
 12.6 / 12.86 ms, child progress 1.32–15.42 / 1.06–17.90 ms.
+
+
+## Hierarchy repair follow-up
+
+A same-byte background event can repair a formerly top-level child before the
+progress de-duplication guard returns. The repaired hierarchy must be published
+even when the remaining event is ignored, including late events for terminal
+rows. Those early exits now publish only when repair actually replaced the row;
+normal progress still builds at most one hierarchy snapshot and ordinary byte
+ticks keep its reference stable.
+
+Both the store and actual-center regressions failed before this repair. The
+Electron comparison against e894c9cb confirmed the old folder had no Show files
+action after the same-byte event or its next byte tick. The repaired folder
+immediately exposes its child, and the next byte tick keeps that grouping
+without rebuilding it. A fresh 5,000-file run mounted 12 rows, reached the final
+file and retained all 5,000 records: expansion 14.12 ms, progress 1.28-18.58 ms.

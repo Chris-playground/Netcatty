@@ -2218,6 +2218,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         existing = tasks[existingIndex];
         captureObservedTask(existing);
       }
+      // Hierarchy repair has already changed the live row. Even an otherwise
+      // ignored event must publish that change; ordinary progress still emits
+      // only once at the end, without a second directory-sized snapshot build.
+      const publishRepairedHierarchy = () => {
+        if (existing !== beforeEvent) emitProgress(false, true);
+      };
       // A delayed child progress event can arrive after the renderer compacted
       // that completed child into its parent checkpoint. Never resurrect it as
       // a live row, especially after the parent itself has finished.
@@ -2243,9 +2249,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // Allow a late explicit cancel to stick; ignore everything else.
         if (event.type === "completed" || event.type === "failed") {
           // Keep existing terminal state (prefer cancelled over late completed).
+          publishRepairedHierarchy();
           return;
         }
         if (event.type === "queued" || event.type === "started" || event.type === "progress" || event.type === "pausing" || event.type === "resumed" || event.type === "paused") {
+          publishRepairedHierarchy();
           return;
         }
       }
@@ -2290,6 +2298,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           && sameOptional(event.resumable, existing.resumable)
           && sameOptional(event.pauseUnavailableReason, existing.pauseUnavailableReason)
         ) {
+          publishRepairedHierarchy();
           return;
         }
       }

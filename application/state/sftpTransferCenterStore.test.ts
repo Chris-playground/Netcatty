@@ -4051,3 +4051,29 @@ test("admission updates hierarchy state without forcing full owner lifecycle wor
   assert.equal(store.getLifecycleSnapshot().tasks[0].status, "transferring");
   assert.equal(lifecycleNotifications, 0, "dispatch admission keeps its existing lightweight fanout");
 });
+
+
+test("same-byte and ignored terminal events publish repaired background hierarchy immediately", () => {
+  for (const { status, type } of [
+    { status: "transferring", type: "progress" },
+    { status: "completed", type: "progress" },
+    { status: "completed", type: "completed" },
+    { status: "failed", type: "failed" },
+  ] as const) {
+    const store = createSftpTransferCenterStore();
+    store.publishOwner("panel", [{ ...makeTask("folder"), isDirectory: true }]);
+    store.publishOwner("background-agent", [{ ...makeTask("orphan", status), background: true }]);
+    const beforeRepair = store.getLifecycleSnapshot();
+    let lifecycleNotifications = 0;
+    store.subscribe(() => { lifecycleNotifications += 1; });
+    store.ingestBackgroundEvent({ type, transferId: "orphan", parentTaskId: "folder", transferred: 2 });
+    const repaired = store.getLifecycleSnapshot();
+    assert.notEqual(repaired, beforeRepair, status);
+    assert.equal(repaired.tasks.find((task) => task.id === "orphan")?.parentTaskId, "folder", status);
+    assert.equal(repaired.tasks.find((task) => task.id === "orphan")?.background, false, status);
+    assert.equal(lifecycleNotifications, 0, "hierarchy repair keeps lightweight owner fanout");
+    store.ingestBackgroundEvent({ type: "progress", transferId: "orphan", parentTaskId: "folder", transferred: 3 });
+    assert.equal(store.getLifecycleSnapshot(), repaired, "subsequent byte ticks preserve the repaired hierarchy without rebuilding it");
+    assert.equal(store.getTask("orphan")?.parentTaskId, "folder");
+  }
+});
