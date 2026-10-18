@@ -15,6 +15,7 @@ import type { CattyToolsBundle } from '../capabilityTools';
 import { buildCattyToolApproval } from '../cattyToolApproval';
 import type { CattyRuntimeContext } from '../cattyRuntimeContext';
 import { buildCattyStreamTimeouts } from '../streamTimeouts';
+import { createCattyPromptCache } from '../cattyPromptCache';
 import {
   extractProviderContinuationFromRawChunk,
   mergeProviderContinuation,
@@ -76,6 +77,7 @@ export interface ProcessCattyStreamInput {
 export interface ProcessCattyStreamResult {
   usage?: {
     promptTokens?: number;
+    cachedPromptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
   };
@@ -129,11 +131,12 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
 
   let runtimeContext = initialRuntimeContext;
   const { tools, toolsContext } = toolsBundle;
+  const promptCache = createCattyPromptCache(systemPrompt, model.provider);
 
   const result = streamText({
     model,
-    messages: sdkMessages,
-    instructions: systemPrompt,
+    messages: promptCache.prepareMessages(sdkMessages),
+    instructions: promptCache.instructions,
     tools,
     toolsContext,
     runtimeContext,
@@ -186,6 +189,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
         modelId: step.model.modelId,
         finishReason: step.finishReason,
         promptTokens: usage.inputTokens ?? 0,
+        cachedPromptTokens: usage.inputTokenDetails?.cacheReadTokens,
         completionTokens: usage.outputTokens ?? 0,
         totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
       } as AgentEvent);
@@ -201,15 +205,17 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
           timestamp: Date.now(),
           turnId,
           promptTokens: usage.inputTokens ?? 0,
+          cachedPromptTokens: usage.inputTokenDetails?.cacheReadTokens,
           completionTokens: usage.outputTokens ?? 0,
+          reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
           totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
           estimated: false,
         } as AgentEvent);
       }
     },
-    ...(prepareStep ? {
+    ...(prepareStep || promptCache.enabled ? {
       prepareStep: async ({ stepNumber, messages, runtimeContext: stepRuntimeContext }) => {
-        const prepared = await prepareStep({
+        const prepared = await prepareStep?.({
           stepNumber,
           messages,
           runtimeContext: stepRuntimeContext as CattyRuntimeContext,
@@ -217,7 +223,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
         if (prepared?.runtimeContext) {
           runtimeContext = prepared.runtimeContext;
         }
-        return prepared ?? { messages };
+        return { ...prepared, messages: promptCache.prepareMessages(prepared?.messages ?? messages) };
       },
     } : {}),
     ...(advancedParams?.maxTokens != null && { maxOutputTokens: advancedParams.maxTokens }),
@@ -552,6 +558,21 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   const usage = await result.usage;
   const finalStep = await result.finalStep;
   const performance = finalStep?.performance;
+  // onEnd can run before this consumer flushes its final text and creates the
+  // post-tool assistant message. Attach turn totals only after that flush.
+  if (usage) {
+    ui.updateMessageById(streamSessionId, activeMsgId, message => ({
+      ...message,
+      usage: {
+        inputTokens: usage.inputTokens ?? 0,
+        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens,
+        outputTokens: usage.outputTokens ?? 0,
+        reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+        totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+        estimated: false,
+      },
+    }));
+  }
 
   if (performance) {
     onAgentEvent?.({
@@ -571,6 +592,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   return {
     usage: usage ? {
       promptTokens: usage.inputTokens,
+      cachedPromptTokens: usage.inputTokenDetails?.cacheReadTokens,
       completionTokens: usage.outputTokens,
       totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
     } : undefined,
