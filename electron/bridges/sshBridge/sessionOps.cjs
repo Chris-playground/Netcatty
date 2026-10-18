@@ -11,22 +11,6 @@ function extraExecUnsupportedError(session) {
     error: "Remote SSH server does not support extra exec channels",
   };
 }
-
-// Dropbear (OpenWrt's default SSH server) rejects command requests larger than
-// 9000 bytes by closing the entire SSH transport — including the already-open
-// interactive shell — and sends no exit status, so the session only shows
-// "[session closed by remote (no exit status)]" (#2924 stats lesson; #3731
-// OpenWrt report against v1.1.84).
-const DROPBEAR_MAX_COMMAND_BYTES = 9000;
-
-function peerSshSoftware(remoteSshVersion) {
-  return String(remoteSshVersion || "").trim().replace(/^SSH-(?:2\.0|1\.99)-/i, "");
-}
-
-/** Whether this peer kills the transport for oversized exec command requests. */
-function peerRejectsOversizedExecCommand(remoteSshVersion) {
-  return /^dropbear/i.test(peerSshSoftware(remoteSshVersion));
-}
 function decodeLsofFileName(value) {
   if (typeof value !== 'string') return null;
   // lsof's caret form is ambiguous: a BEL byte and the literal characters
@@ -577,70 +561,7 @@ function createSessionOpsApi(ctx) {
         // POSIX sh's $PPID is sshd. That pid is exported as NC_SSHD_PPID
         // because the watchdog wrapper would otherwise become $PPID of the
         // inner posixScript (and macOS/BSD have no /proc fallback).
-        // The cwd probe's lsof fallback ships in two sizes. The annotation-aware
-        // variant below decodes lsof's escaped names and verifies the decoded
-        // path still exists remotely (#3493), but it pushes the probe request
-        // past Dropbear's command limit — and Dropbear answers an oversized
-        // request by killing the whole transport, shell included (#3731).
-        // Dropbear peers therefore get back the compact pre-#3493 fallback;
-        // their /proc readlink path is identical and lsof is rarely installed
-        // on such embedded hosts. Everyone else keeps the annotation-aware
-        // fallback unaffected. The switch is size-aware so a future probe
-        // that fits Dropbear's limit keeps full annotation fidelity there.
-        const lsofCwdFallbackAnnotationAware = `
-        # lsof can label an unreadable root shell's cwd as a directory while
-        # appending "(readlink: Permission denied)" to its name on AL2023
-        # (#3493). Check annotation-shaped names before using them: real
-        # directories can also end in text such as " (owner: alice)".
-        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
-          /^f/ { is_dir=0 }
-          /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
-          /^n/ && is_dir {
-            name=substr($0, 2)
-            if (name ~ / \\([A-Za-z][A-Za-z0-9]*: .*\\)$/) print "?" name
-            else print name
-            exit
-          }
-        ')
-        case "$_rc_cwd" in
-          \\?*)
-            _rc_cwd=\${_rc_cwd#?}
-            # lsof escapes non-ASCII bytes under LC_ALL=C. Decode only for
-            # the existence check; keep the original for the client decoder.
-            _rc_test_cwd=$(printf '%s' "$_rc_cwd" | LC_ALL=C awk '
-              function hex(c) { return index("0123456789abcdef", tolower(c)) - 1 }
-              {
-                for (i=1; i<=length($0); i++) {
-                  c=substr($0,i,1)
-                  if (c!="\\\\") { printf "%s", c; continue }
-                  e=substr($0,++i,1)
-                  if (e=="x") {
-                    hi=hex(substr($0,++i,1)); lo=hex(substr($0,++i,1))
-                    if (hi<0 || lo<0) exit 1
-                    printf "%c", hi*16+lo
-                  } else if (e=="\\\\") printf "\\\\"
-                  else if (e=="n") printf "\\n"
-                  else if (e=="r") printf "\\r"
-                  else if (e=="t") printf "\\t"
-                  else if (e=="b") printf "%c", 8
-                  else if (e=="f") printf "%c", 12
-                  else if (e=="v") printf "%c", 11
-                  else if (e ~ /^[0-7]$/) {
-                    n=e+0
-                    for (j=0; j<2 && substr($0,i+1,1) ~ /^[0-7]$/; j++) {
-                      n=n*8+substr($0,++i,1)
-                    }
-                    printf "%c", n
-                  } else exit 1
-                }
-              }
-            ') || return 1
-            [ -d "$_rc_test_cwd" ] || return 1
-            ;;
-        esac`;
-        const lsofCwdFallbackCompact = `
-        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)`;
-        const buildPwdShellScript = (lsofCwdFallback) => `SELF=$$
+        const posixScript = `SELF=$$
     TARGET_LOGIN=${targetLoginPid}
     ALLOW_HOME_FALLBACK=${allowHomeFallback ? "1" : "0"}
     ALLOW_LOGIN_FALLBACK=${allowLoginShellFallback ? "1" : "0"}
@@ -734,7 +655,56 @@ function createSessionOpsApi(ctx) {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-${lsofCwdFallback}
+        # lsof can label an unreadable root shell's cwd as a directory while
+        # appending "(readlink: Permission denied)" to its name on AL2023
+        # (#3493). Check annotation-shaped names before using them: real
+        # directories can also end in text such as " (owner: alice)".
+        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
+          /^f/ { is_dir=0 }
+          /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
+          /^n/ && is_dir {
+            name=substr($0, 2)
+            if (name ~ / \\([A-Za-z][A-Za-z0-9]*: .*\\)$/) print "?" name
+            else print name
+            exit
+          }
+        ')
+        case "$_rc_cwd" in
+          \\?*)
+            _rc_cwd=\${_rc_cwd#?}
+            # lsof escapes non-ASCII bytes under LC_ALL=C. Decode only for
+            # the existence check; keep the original for the client decoder.
+            _rc_test_cwd=$(printf '%s' "$_rc_cwd" | LC_ALL=C awk '
+              function hex(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+              {
+                for (i=1; i<=length($0); i++) {
+                  c=substr($0,i,1)
+                  if (c!="\\\\") { printf "%s", c; continue }
+                  e=substr($0,++i,1)
+                  if (e=="x") {
+                    hi=hex(substr($0,++i,1)); lo=hex(substr($0,++i,1))
+                    if (hi<0 || lo<0) exit 1
+                    printf "%c", hi*16+lo
+                  } else if (e=="\\\\") printf "\\\\"
+                  else if (e=="n") printf "\\n"
+                  else if (e=="r") printf "\\r"
+                  else if (e=="t") printf "\\t"
+                  else if (e=="b") printf "%c", 8
+                  else if (e=="f") printf "%c", 12
+                  else if (e=="v") printf "%c", 11
+                  else if (e ~ /^[0-7]$/) {
+                    n=e+0
+                    for (j=0; j<2 && substr($0,i+1,1) ~ /^[0-7]$/; j++) {
+                      n=n*8+substr($0,++i,1)
+                    }
+                    printf "%c", n
+                  } else exit 1
+                }
+              }
+            ') || return 1
+            [ -d "$_rc_test_cwd" ] || return 1
+            ;;
+        esac
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
       return 1
@@ -775,30 +745,19 @@ ${lsofCwdFallback}
     home=$(id -P 2>/dev/null | awk -F: 'NR == 1 { print $9; exit }')
     emit_home "$home"
     emit_home "$HOME"
-    exit 1`;
-
+    exit 1`.replace(/^[ \t]*#[^\n]*\n/gm, "");
+        // Omit explanatory comments before quoting this static probe. Dropbear
+        // closes the entire transport for exec requests over 9000 bytes (#3731).
+        // Preserve the directory checks above to avoid regressing #3493.
         // Capture sshd's pid in the exec'd POSIX sh (`$PPID` is sshd because
         // `exec` replaced the login shell). Do not `exec` the inner posixScript:
         // that would skip the watchdog cleanup after it.
-        const assemblePwdShellCommand = (probeScript) => `exec sh -c ${quoteShellArg(
+        const cmd = `exec sh -c ${quoteShellArg(
           `export NC_SSHD_PPID=$PPID; ${withRemoteWatchdog(
-            `sh -c ${quoteShellArg(probeScript)}`,
+            `sh -c ${quoteShellArg(posixScript)}`,
             timeoutMs,
           )}`
         )}`;
-        let posixScript = buildPwdShellScript(lsofCwdFallbackAnnotationAware);
-        let cmd = assemblePwdShellCommand(posixScript);
-        if (
-          Buffer.byteLength(cmd, 'utf8') > DROPBEAR_MAX_COMMAND_BYTES
-          && peerRejectsOversizedExecCommand(session.remoteSshVersion || session.conn?._remoteVer)
-        ) {
-          posixScript = buildPwdShellScript(lsofCwdFallbackCompact);
-          cmd = assemblePwdShellCommand(posixScript);
-          log('getSessionPwd switched to compact cwd probe', {
-            sessionId,
-            commandBytes: Buffer.byteLength(cmd, 'utf8'),
-          });
-        }
 
         void executeBoundedSshCommand(session.conn, cmd, {
           // Do not shorten channel opening: a timeout there invalidates the
