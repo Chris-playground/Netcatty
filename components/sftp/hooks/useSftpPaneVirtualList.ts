@@ -24,7 +24,8 @@ export const useSftpPaneVirtualList = ({
   layoutKey,
 }: UseSftpPaneVirtualListParams): UseSftpPaneVirtualListResult => {
   const fileListRef = useRef<HTMLDivElement>(null);
-  const [rowHeight, setRowHeight] = useState(0);
+  // Bound the first commit too; the mounted rows refine this estimate below.
+  const [rowHeight, setRowHeight] = useState(44);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const scrollFrameRef = useRef<number | null>(null);
@@ -82,7 +83,8 @@ export const useSftpPaneVirtualList = ({
 
   const { shouldVirtualize, totalHeight, visibleRows } = useMemo(() => {
     const overscan = 6;
-    const canVirtualize = enabled && isActive && viewportHeight > 0 && rowHeight > 0;
+    // Hidden/unmeasured panes still need a window, rather than all file rows.
+    const canVirtualize = enabled && rowHeight > 0;
     const shouldVirtualizeLocal = canVirtualize && sortedDisplayFiles.length > 50;
     const totalHeightLocal = shouldVirtualizeLocal
       ? sortedDisplayFiles.length * rowHeight
@@ -115,7 +117,7 @@ export const useSftpPaneVirtualList = ({
       totalHeight: totalHeightLocal,
       visibleRows: visibleRowsLocal,
     };
-  }, [enabled, isActive, rowHeight, scrollTop, sortedDisplayFiles, viewportHeight]);
+  }, [enabled, rowHeight, scrollTop, sortedDisplayFiles, viewportHeight]);
 
   return {
     fileListRef,

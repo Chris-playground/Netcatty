@@ -15,7 +15,8 @@ export function useSftpPaneTreeRows(props: SftpPaneTreeRowsProps) {
   const { totalHeight, visibleRange } = useMemo(() => {
     const totalCount = nodeDescriptors.length;
     const total = totalCount * TREE_ROW_HEIGHT;
-    const shouldVirtualize = viewportHeight > 0 && totalCount > 50;
+    // A zero viewport also occurs on first mount and while parked/hidden.
+    const shouldVirtualize = totalCount > 50;
 
     if (!shouldVirtualize) {
       return { totalHeight: 0, visibleRange: { start: 0, end: totalCount - 1, virtualized: false } };
