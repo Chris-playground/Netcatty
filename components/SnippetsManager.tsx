@@ -1672,16 +1672,18 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                   variant="secondary"
                   className={cn(vaultHeaderSecondaryButtonClass, 'shrink-0')}
                   aria-expanded={showNewMenu}
+                  aria-haspopup="menu"
                 >
                   <Plus size={14} />
                   {t('snippets.action.new')}
                   <ChevronDown size={14} className={cn('transition-transform', showNewMenu && 'rotate-180')} />
                 </Button>
               </DropdownTrigger>
-              <DropdownContent className="w-max flex flex-col" align="start" sideOffset={8}>
+              <DropdownContent className="w-max flex flex-col" align="start" sideOffset={8} keyboardNavigation>
                 <Button
                   variant="ghost"
-                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap"
+                  role="menuitem"
+                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap focus-visible:bg-accent"
                   onClick={() => {
                     setShowNewMenu(false);
                     handleEdit();
@@ -1692,7 +1694,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 </Button>
                 <Button
                   variant="ghost"
-                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap"
+                  role="menuitem"
+                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap focus-visible:bg-accent"
                   onClick={() => {
                     setShowNewMenu(false);
                     handleEdit(undefined, true);
@@ -1703,7 +1706,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 </Button>
                 <Button
                   variant="ghost"
-                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap"
+                  role="menuitem"
+                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap focus-visible:bg-accent"
                   onClick={() => {
                     setShowNewMenu(false);
                     setNewPackageName('');
