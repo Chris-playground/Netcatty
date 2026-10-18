@@ -58,7 +58,16 @@ test('file windows stay bounded on the first commit, hidden tabs and measured sc
   await act(async () => { renderer.update(React.createElement(Fixture, { active: true })); });
   assert.ok(result.visibleRows.length < 100, 'a zero-size viewport must not mount every file');
   assert.equal(result.visibleRows.at(-1)?.entry, files.at(-1), 'restoring retains the last-file window');
-  node.clientHeight = 600; measuredHeight = 24;
+  const fewerFiles = files.slice(0, 100);
+  node.clientHeight = 600;
+  node.scrollTop = fewerFiles.length * result.rowHeight - node.clientHeight;
+  await act(async () => { renderer.update(React.createElement(Fixture, { active: false, entries: fewerFiles })); });
+  assert.ok(result.visibleRows.length > 0, 'an inactive listing shrink must not leave an empty window');
+  await act(async () => { renderer.update(React.createElement(Fixture, { active: true, entries: fewerFiles })); });
+  assert.equal(result.visibleRows.at(-1)?.entry, fewerFiles.at(-1));
+  assert.ok(result.visibleRows[0].top <= node.scrollTop, 'restoring reads the browser-clamped scroll position');
+  assert.ok(result.visibleRows.at(-1)!.top + result.rowHeight >= node.scrollTop + node.clientHeight);
+  measuredHeight = 24;
   await act(async () => { renderer.update(React.createElement(Fixture, { active: true, density: 'compact' })); resize(); });
   await flushFrames();
   assert.equal(result.rowHeight, 24, 'density is still measured from real rows');
@@ -75,8 +84,8 @@ test('tree windows stay bounded before measurement and when the viewport becomes
   const dom = installDomEnvironment();
   let result!: ReturnType<typeof useSftpPaneTreeRows>;
   const descriptors = files.map(entry => ({ type: 'node', entry, entryPath: `/fixture/${entry.name}`, depth: 0 }));
-  function Fixture({ height, top = 0 }: { height: number; top?: number }) {
-    result = useSftpPaneTreeRows({ nodeDescriptors: descriptors, viewportHeight: height, scrollTop: top, selectedPaths: new Set(), tRef: { current: (key: string) => key } });
+  function Fixture({ height, top = 0, count = files.length }: { height: number; top?: number; count?: number }) {
+    result = useSftpPaneTreeRows({ nodeDescriptors: descriptors.slice(0, count), viewportHeight: height, scrollTop: top, selectedPaths: new Set(), tRef: { current: (key: string) => key } });
     return null;
   }
   let renderer!: ReactTestRenderer;
@@ -88,4 +97,10 @@ test('tree windows stay bounded before measurement and when the viewport becomes
   await act(async () => { renderer.update(React.createElement(Fixture, { height: 0, top: 4999 * 28 })); });
   assert.ok(result.treeRows.length < 100, 'zero height must not mount every tree row');
   assert.equal(result.visibleRange.end, 4999);
+  await act(async () => { renderer.update(React.createElement(Fixture, { height: 0, top: 4999 * 28, count: 100 })); });
+  assert.ok(result.treeRows.length > 0, 'a hidden tree refresh must retain rows after the listing shrinks');
+  assert.equal(result.visibleRange.end, 99);
+  await act(async () => { renderer.update(React.createElement(Fixture, { height: 600, top: 4999 * 28, count: 100 })); });
+  assert.ok(result.treeRows.length > 0);
+  assert.equal(result.visibleRange.end, 99);
 });

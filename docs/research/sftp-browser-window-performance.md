@@ -64,6 +64,28 @@ and window pixels are kept in Netcatty's dedicated temporary directory. This is
 programmatic native-window input; it does not use the user's SSH or unlock the
 macOS session, and is not a claim of manual CUA acceptance while macOS was locked.
 
+## Review follow-up: shorter background listings
+
+Review found that a retained scroll offset could outlive a shorter listing.
+The browser clamps its real scroll position, but inactive-list scroll events
+are ignored; the calculated start could exceed the final file and render an
+empty slice. The same range issue affects tree descriptors. Clamp both windows
+to the available content, and synchronize the measured scroll position when
+positive viewport geometry returns. Preserve the last visible offset while
+geometry is zero.
+
+Both hook tests failed at the exact shrink scenario before this follow-up.
+The native control loading all three original product files from `fa5e79c85`
+also failed: list 5,000 -> 100 files and tree 100 -> 60 each recorded zero rows
+during the hidden update and first restore commit. On this macOS run, later
+browser scroll events automatically recovered; a permanent blank pane was not
+observed. The repaired run retains 21 list rows and 6 -> 31 tree rows across
+those commits, without another user scroll. It asserts nonempty bounded rows,
+the last file's visibility and each rendered row's position against the actual
+browser-clamped scroll offset. The previous complete native interactions also
+remain passing. To replay this narrower red control, use the same baseline
+environment variables with `NETCATTY_SFTP_WINDOW_BASELINE_REF=fa5e79c85`.
+
 181 related SFTP checks, full lint (zero errors, eight existing warnings) and
 production build pass locally. Full-project typechecking still reports existing
 errors; there are no diagnostics in the changed product/test/fixture files.

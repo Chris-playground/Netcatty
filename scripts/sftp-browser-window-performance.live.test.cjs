@@ -1,6 +1,6 @@
 "use strict";
 /* global process, __dirname, console, setTimeout, clearTimeout */
-// Run with Electron. NETCATTY_SFTP_WINDOW_BASELINE=1 loads the two hooks from Git
+// Run with Electron. NETCATTY_SFTP_WINDOW_BASELINE=1 loads the list/tree virtualization sources from Git
 // with NETCATTY_SFTP_WINDOW_BASELINE_REF=<unfixed commit> for the red control.
 // All fixture inputs stay identical; no implicit HEAD baseline changes after commit.
 if (!process.versions.electron) {
@@ -61,7 +61,7 @@ if (!process.versions.electron) {
     const baseline = process.env.NETCATTY_SFTP_WINDOW_BASELINE === '1';
     const baselineRef = process.env.NETCATTY_SFTP_WINDOW_BASELINE_REF;
     if (baseline) assert.ok(baselineRef, 'baseline control requires NETCATTY_SFTP_WINDOW_BASELINE_REF=<unfixed commit>');
-    const paths = ['components/sftp/hooks/useSftpPaneVirtualList.ts', 'components/sftp/useSftpPaneTreeRows.tsx'];
+    const paths = ['components/sftp/hooks/useSftpPaneVirtualList.ts', 'components/sftp/useSftpPaneTreeRows.tsx', 'components/sftp/SftpPaneTreeView.tsx'];
     const originals = new Map(baseline ? paths.map(file => [path.join(root, file), execFileSync('git', ['show', `${baselineRef}:${file}`], { cwd: root, encoding: 'utf8' })]) : []);
     const tailwind = (await import('@tailwindcss/vite')).default;
     vite = await createServer({ configFile: false, root, cacheDir: path.join(profile, 'vite-cache'), resolve: { alias: { '@': root } }, optimizeDeps: { entries: ['scripts/fixtures/sftp-browser-window-performance.tsx'] }, logLevel: 'error', clearScreen: false, server: { host: '127.0.0.1', port: 5379, strictPort: true, hmr: false }, plugins: [tailwind(), { name: 'sftp-window-audit', enforce: 'pre',
@@ -126,6 +126,42 @@ if (!process.versions.electron) {
       if (scenario.small) assert.ok(sample.commits.every(commit => commit.rows === 22), 'small directory retains all rows');
       else assert.ok(await run('document.querySelector("#pane").style.display==="none"'), 'initially hidden pane survives restore and rehide');
     }
+    // Parked panes may receive a smaller refresh while their scroll handlers
+    // cannot publish the browser-clamped position. Keep every commit nonempty.
+    result.shrinkWhileHidden = [];
+    for (const scenario of [
+      { view: 'list', query: '?shrink=1', before: 'file-004999.txt', after: 'file-000099.txt', height: 44 },
+      { view: 'tree', query: '?count=100&tree=1&shrink=1', before: 'file-000099.txt', after: 'file-000059.txt', height: 28 },
+    ]) {
+      await window.loadURL(`${origin}/__sftp_window_fixture${scenario.query}`);
+      await until('!!window.sftpWindowAudit', 'shrink scenario mounts');
+      await wait(100);
+      await scrollToEnd('#pane .overflow-y-auto');
+      await until(`!!document.querySelector('[data-entry-name="${scenario.before}"]')`, 'shrink scenario starts at the final page');
+      await click('#visibility'); await wait(100);
+      await click('#shrink'); await wait(100);
+      await click('#visibility'); await wait(100);
+      const shrink = await run(`(() => {
+        const container=document.querySelector('#pane .overflow-y-auto');
+        const viewport=container.getBoundingClientRect();
+        const rows=[...container.querySelectorAll('[data-sftp-row],[data-section="terminal-sftp-tree-row"]')].map(element=>({name:element.dataset.entryName,top:element.getBoundingClientRect().top,bottom:element.getBoundingClientRect().bottom,height:element.getBoundingClientRect().height}));
+        return {scrollTop:container.scrollTop,scrollHeight:container.scrollHeight,clientHeight:container.clientHeight,viewport:viewport.toJSON(),rows,audit:sftpWindowAudit};
+      })()`);
+      result.shrinkWhileHidden.push({ view: scenario.view, ...shrink });
+      console.log('SFTP_WINDOW_SHRINK_RESULT', JSON.stringify({ view: scenario.view, ...shrink }));
+      fs.writeFileSync(path.join(artifacts, `shrink-${scenario.view}.json`), JSON.stringify(shrink, null, 2));
+      fs.writeFileSync(path.join(artifacts, `shrink-${scenario.view}.png`), (await window.webContents.capturePage()).toPNG());
+      assert.ok(shrink.rows.length > 0 && shrink.rows.length <= 100, 'restored smaller listing has a bounded nonempty row window without another scroll');
+      const last = shrink.rows.find(row => row.name === scenario.after);
+      assert.ok(last && last.top >= shrink.viewport.top - 1 && last.bottom <= shrink.viewport.bottom + 1, 'the browser-clamped final page shows its last file');
+      const visible = shrink.rows.filter(row => row.bottom > shrink.viewport.top && row.top < shrink.viewport.bottom);
+      assert.ok(visible.length > 0, 'restored rows intersect the actual viewport');
+      for (const row of shrink.rows) {
+        const index = row.name === '..' ? 0 : row.name === 'folder' ? 1 : Number(row.name.slice(5, 11)) + 2;
+        assert.ok(Math.abs(row.top - (shrink.viewport.top + index * scenario.height - shrink.scrollTop)) <= 1, 'row positions match the real clamped scroll offset');
+      }
+    }
+    assert.ok(result.shrinkWhileHidden.every(sample => sample.audit.commits.filter(commit => commit.phase.endsWith(':shrink-hidden') || commit.phase.endsWith(':restore')).every(commit => commit.rows > 0 && commit.rows <= 100)), 'hidden refresh and first restore commit keep bounded nonempty list/tree row windows');
     console.log('SFTP_WINDOW_PERFORMANCE_RESULT', JSON.stringify(result));
     fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify(result, null, 2));
     fs.writeFileSync(path.join(artifacts, 'window.png'), screenshot.toPNG());
