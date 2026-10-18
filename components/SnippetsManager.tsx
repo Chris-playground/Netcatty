@@ -493,6 +493,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   );
   const shellHistory = shellHistoryProp ?? (shellHistoryFromStore as ShellHistoryEntry[]);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
+  const [showNewMenu, setShowNewMenu] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<Partial<Snippet>>({
     label: '',
     command: '',
@@ -1664,23 +1665,56 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             />
             <div className={snippetsHeaderActionsWrapClass}>
               <div className={cn(snippetsHeaderActionsClass, hasSnippetsSidePanel && 'pr-1')}>
-            <Button onClick={() => handleEdit()} size="sm" className="h-10 px-3 shrink-0">
-              <Plus size={14} className="mr-2" /> {t('snippets.action.newSnippet')}
-            </Button>
-            <Button onClick={() => handleEdit(undefined, true)} size="sm" variant="secondary" className={cn(vaultHeaderSecondaryButtonClass, 'shrink-0')}>
-              <Play size={14} className="mr-2" /> {t('snippets.action.newScript')}
-            </Button>
-            <Button
-              onClick={() => {
-                setNewPackageName('');
-                setIsPackageDialogOpen(true);
-              }}
-              size="sm"
-              variant="secondary"
-              className={cn(vaultHeaderSecondaryButtonClass, 'shrink-0')}
-            >
-              <FolderPlus size={14} className="mr-1" /> {t('snippets.action.newPackage')}
-            </Button>
+            <Dropdown open={showNewMenu} onOpenChange={setShowNewMenu}>
+              <DropdownTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={cn(vaultHeaderSecondaryButtonClass, 'shrink-0')}
+                  aria-expanded={showNewMenu}
+                >
+                  <Plus size={14} />
+                  {t('snippets.action.new')}
+                  <ChevronDown size={14} className={cn('transition-transform', showNewMenu && 'rotate-180')} />
+                </Button>
+              </DropdownTrigger>
+              <DropdownContent className="w-max flex flex-col" align="start" sideOffset={8}>
+                <Button
+                  variant="ghost"
+                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    handleEdit();
+                  }}
+                >
+                  <Zap size={16} className="text-sky-500" />
+                  {t('snippets.action.newSnippet')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    handleEdit(undefined, true);
+                  }}
+                >
+                  <Play size={16} className="text-violet-500" />
+                  {t('snippets.action.newScript')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="justify-start gap-3 h-10 px-3 whitespace-nowrap"
+                  onClick={() => {
+                    setShowNewMenu(false);
+                    setNewPackageName('');
+                    setIsPackageDialogOpen(true);
+                  }}
+                >
+                  <FolderPlus size={16} className="text-primary" />
+                  {t('snippets.action.newPackage')}
+                </Button>
+              </DropdownContent>
+            </Dropdown>
             <Button
               variant="secondary"
               size="sm"
