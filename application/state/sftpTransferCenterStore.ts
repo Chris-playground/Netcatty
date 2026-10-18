@@ -109,6 +109,8 @@ export interface SftpTransferCenterStore {
    */
   subscribeProgress(listener: Listener): () => void;
   getSnapshot(): SftpTransferCenterSnapshot;
+  /** Stable task hierarchy between lifecycle changes; live rows read getTask. */
+  getLifecycleSnapshot(): SftpTransferCenterSnapshot;
   /** Stable identity when badge counts are unchanged (avoids TopTabs thrash). */
   getBadgeSnapshot(): { count: number; hasAttention: boolean };
   /** Single task row — same object identity until that row is patched. */
@@ -420,6 +422,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     event: BackgroundTransferEvent;
   }>>();
   let snapshot = tasks.length > 0 ? buildSnapshot(tasks) : EMPTY_SNAPSHOT;
+  let lifecycleSnapshot = snapshot;
   let badgeSnapshot = buildBadgeSnapshot(tasks);
   let snapshotDirty = false;
   const listeners = new Set<Listener>();
@@ -695,6 +698,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     }
     snapshotDirty = false;
     snapshot = buildSnapshot(tasks);
+    lifecycleSnapshot = snapshot;
     refreshBadgeSnapshot();
     persist(shouldPersistImmediately);
     notifyDedicatedResumeWaiters();
@@ -707,19 +711,24 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   };
 
   /** Progress-only: mutate tasks, defer snapshot rebuild, wake progress UI only. */
-  const emitProgress = (persistImmediately = false) => {
+  const emitProgress = (persistImmediately = false, lifecycleChanged = false) => {
     if (deferRestoreReplayEmits) {
       snapshotDirty = true;
       persistenceDirty = persistenceDirty || persistImmediately;
       return;
     }
     snapshotDirty = true;
+    // Admission/late progress may change a row's lifecycle without the costly
+    // prune/persist path. Keep the list hierarchy current, coalescing its UI
+    // notification with progress instead of waking owner lifecycle listeners.
+    if (lifecycleChanged) lifecycleSnapshot = buildSnapshot(tasks);
     // Never JSON.stringify/localStorage on the pure-progress path. Sync storage
     // on large directory histories freezes CSS spinners every few seconds.
     // Pause / complete / fingerprint / lifecycle still force persist below.
     if (persistImmediately) {
       snapshotDirty = false;
       snapshot = buildSnapshot(tasks);
+      lifecycleSnapshot = snapshot;
       refreshBadgeSnapshot();
       persist(true);
       notifyDedicatedResumeWaiters();
@@ -1401,6 +1410,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       return () => progressListeners.delete(listener);
     },
     getSnapshot: () => ensureSnapshot(),
+    getLifecycleSnapshot: () => lifecycleSnapshot,
     getBadgeSnapshot: () => badgeSnapshot,
     admitTaskRun(incoming, pausedAtResume, completedAtRestart) {
       const rootId = incoming.parentTaskId ?? incoming.id;
@@ -1454,7 +1464,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       };
       tasks = next;
       captureObservedTask(next[index]);
-      emitProgress(false);
+      emitProgress(false, existing.status !== next[index].status
+        || existing.reconnectRequired !== next[index].reconnectRequired);
       return "ready";
     },
     observeTaskSettlement(expected, ignoredCompletion, onIdentityConflict) {
@@ -2173,6 +2184,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       }
       let existingIndex = tasks.findIndex((task) => task.id === event.transferId);
       let existing = tasks[existingIndex];
+      const beforeEvent = existing;
       const eventParent = event.parentTaskId
         ? tasks.find((task) => task.id === event.parentTaskId)
         : undefined;
@@ -2508,8 +2520,14 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if (existingIndex >= 0) captureObservedTask(tasks[existingIndex]);
       // Progress-only ticks skip prune + coalesce listener paints; lifecycle
       // events still take the full emit path so UI never lags on pause/cancel.
+      const currentTask = tasks[existingIndex];
+      const hierarchyOrLifecycleChanged = !beforeEvent
+        || currentTask?.status !== beforeEvent.status
+        || currentTask?.parentTaskId !== beforeEvent.parentTaskId
+        || currentTask?.background !== beforeEvent.background
+        || currentTask?.reconnectRequired !== beforeEvent.reconnectRequired;
       if (event.type === "progress" && !persistImmediately) {
-        emitProgress(false);
+        emitProgress(false, hierarchyOrLifecycleChanged);
       } else {
         emit(persistImmediately);
       }

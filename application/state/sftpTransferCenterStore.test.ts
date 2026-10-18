@@ -4007,3 +4007,47 @@ test("partial cancel failure resets recovered folder children so the re-walk can
     assert.equal(afterFullCancel.find((row) => row.id === id)?.status, "cancelled");
   }
 });
+
+test("lifecycle hierarchy snapshot stays stable on bytes and changes on actual state transitions", () => {
+  const store = createSftpTransferCenterStore();
+  store.publishOwner("panel", [makeTask("hierarchy-live")]);
+  const hierarchy = store.getLifecycleSnapshot();
+  store.patchTask("hierarchy-live", { transferredBytes: 5, speed: 3 });
+  assert.equal(store.getLifecycleSnapshot(), hierarchy);
+  assert.equal(store.getTask("hierarchy-live")?.transferredBytes, 5);
+  store.getSnapshot(); // Other progress consumers must not invalidate the hierarchy.
+  assert.equal(store.getLifecycleSnapshot(), hierarchy);
+  store.patchTask("hierarchy-live", { status: "failed", error: "fixture failure" });
+  assert.notEqual(store.getLifecycleSnapshot(), hierarchy);
+  assert.equal(store.getLifecycleSnapshot().tasks[0].status, "failed");
+});
+
+test("progress that admits or changes a task lifecycle also refreshes the hierarchy", () => {
+  const store = createSftpTransferCenterStore();
+  const initial = store.getLifecycleSnapshot();
+  store.ingestBackgroundEvent({ type: "progress", transferId: "late-start", transferred: 1 });
+  const admitted = store.getLifecycleSnapshot();
+  assert.notEqual(admitted, initial);
+  assert.equal(admitted.tasks[0].id, "late-start");
+  store.publishOwner("panel", [makeTask("queued-progress", "queued")]);
+  const queued = store.getLifecycleSnapshot();
+  store.ingestBackgroundEvent({ type: "progress", transferId: "queued-progress", transferred: 3 });
+  assert.notEqual(store.getLifecycleSnapshot(), queued);
+  assert.equal(store.getLifecycleSnapshot().tasks.find((task) => task.id === "queued-progress")?.status, "transferring");
+  const live = store.getLifecycleSnapshot();
+  store.ingestBackgroundEvent({ type: "progress", transferId: "queued-progress", transferred: 4 });
+  assert.equal(store.getLifecycleSnapshot(), live);
+});
+
+test("admission updates hierarchy state without forcing full owner lifecycle work", () => {
+  const store = createSftpTransferCenterStore();
+  const task = makeTask("admitted-hierarchy", "queued");
+  store.publishOwner("panel", [task]);
+  const queued = store.getLifecycleSnapshot();
+  let lifecycleNotifications = 0;
+  store.subscribe(() => { lifecycleNotifications += 1; });
+  assert.equal(store.admitTaskRun(task), "ready");
+  assert.notEqual(store.getLifecycleSnapshot(), queued);
+  assert.equal(store.getLifecycleSnapshot().tasks[0].status, "transferring");
+  assert.equal(lifecycleNotifications, 0, "dispatch admission keeps its existing lightweight fanout");
+});
