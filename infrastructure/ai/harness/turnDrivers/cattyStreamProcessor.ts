@@ -40,7 +40,7 @@ import {
   type ToolOutputDeniedChunk,
   type ToolResultChunk,
 } from '../../aiChatStreamingSupport';
-import type { ChatMessage } from '../../types';
+import type { ChatMessage, ProviderConfig } from '../../types';
 
 export type CattyModel = ReturnType<typeof createModelFromConfig>;
 
@@ -52,6 +52,7 @@ export interface CattyStreamUiSink {
 export interface ProcessCattyStreamInput {
   streamSessionId: string;
   model: CattyModel;
+  providerConfig?: Pick<ProviderConfig, 'baseURL'>;
   systemPrompt: string;
   toolsBundle: CattyToolsBundle;
   sdkMessages: ModelMessage[];
@@ -131,7 +132,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
 
   let runtimeContext = initialRuntimeContext;
   const { tools, toolsContext } = toolsBundle;
-  const promptCache = createCattyPromptCache(systemPrompt, model.provider);
+  const promptCache = createCattyPromptCache(systemPrompt, model.provider, input.providerConfig);
 
   const result = streamText({
     model,

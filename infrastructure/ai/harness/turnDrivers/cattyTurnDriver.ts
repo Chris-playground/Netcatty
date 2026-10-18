@@ -448,6 +448,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       await processCattyStream({
         streamSessionId: sessionId,
         model,
+        providerConfig: context.activeProvider,
         systemPrompt,
         toolsBundle,
         sdkMessages: streamMessages,

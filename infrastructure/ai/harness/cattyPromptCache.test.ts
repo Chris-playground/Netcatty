@@ -104,11 +104,11 @@ function fixture(t: test.TestContext, replies: Reply[], style: 'openai' | 'anthr
   const provider: ProviderConfig = {
     id: 'fixture', providerId: 'custom', name: 'Fixture', enabled: true, style,
     defaultModel: style === 'anthropic' ? 'claude-sonnet-4-5' : 'test-model',
-    baseURL: 'https://provider.example.test/v1', apiKey: 'not-a-real-key',
+    baseURL: style === 'anthropic' ? 'https://api.anthropic.com' : 'https://provider.example.test/v1', apiKey: 'not-a-real-key',
   };
   let turnNumber = 0;
   return {
-    requests, events, messages,
+    requests, events, messages, provider,
     async turn(maxIterations = 1) {
       turnNumber += 1;
       const history = structuredClone(messages);
@@ -225,4 +225,13 @@ test('Catty marks a stable Claude system block and the conversation tail for cac
   assert.ok(event?.type === 'usage');
   assert.equal(event.cachedPromptTokens, 900);
   assert.equal(f.messages.at(-1)?.usage?.cachedInputTokens, 900);
+});
+
+test('Catty does not send vendor cache extensions to an Anthropic-compatible gateway', async t => {
+  const f = fixture(t, [{ text: 'OK' }], 'anthropic');
+  f.provider.baseURL = 'https://gateway.example.test/anthropic';
+  await f.turn();
+  assert.equal(f.requests.length, 1);
+  assert.doesNotMatch(JSON.stringify(f.requests), /cache_control/);
+  assert.equal(f.messages.at(-1)?.content, 'OK');
 });

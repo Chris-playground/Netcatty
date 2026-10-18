@@ -13,7 +13,7 @@ test('leaves implicit-cache protocols unchanged', () => {
 });
 
 test('Claude markers stay bounded across tool steps without changing signed reasoning', () => {
-  const cache = createCattyPromptCache('static\n\n## Current Scope\nvolatile', 'anthropic.messages');
+  const cache = createCattyPromptCache('static\n\n## Current Scope\nvolatile', 'anthropic.messages', { baseURL: 'https://api.anthropic.com' });
   const reasoning = { type: 'reasoning' as const, text: 'thinking',
     providerOptions: { anthropic: { signature: 'signed-value' } } };
   let messages: ModelMessage[] = [{ role: 'user', content: 'hello' }];
@@ -29,4 +29,14 @@ test('Claude markers stay bounded across tool steps without changing signed reas
   }
   assert.ok(Array.isArray(cache.instructions));
   assert.deepEqual(cache.instructions[0].providerOptions?.anthropic?.cacheControl, { type: 'ephemeral' });
+});
+
+test('only the official HTTPS Anthropic endpoint enables vendor cache markers', () => {
+  for (const baseURL of ['https://proxy.example.test/v1', 'http://api.anthropic.com', 'https://api.anthropic.com.example.test', 'invalid']) {
+    const cache = createCattyPromptCache('instructions', 'anthropic.messages', { baseURL });
+    assert.equal(cache.enabled, false);
+  }
+  assert.equal(createCattyPromptCache('instructions', 'anthropic.messages').enabled, false);
+  assert.equal(createCattyPromptCache('instructions', 'anthropic.messages', {}).enabled, true);
+  assert.equal(createCattyPromptCache('instructions', 'anthropic.messages', { baseURL: 'https://api.anthropic.com/v1' }).enabled, true);
 });

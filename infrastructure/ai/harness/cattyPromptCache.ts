@@ -1,10 +1,22 @@
 import type { ModelMessage, SystemModelMessage } from 'ai';
+import type { ProviderConfig } from '../types';
 
 const CACHE_CONTROL = { type: 'ephemeral' } as const;
 
 /** Native Anthropic needs explicit breakpoints; implicit-cache protocols stay untouched. */
-export function createCattyPromptCache(systemPrompt: string, provider: string) {
-  const enabled = /^anthropic(?:\.|$)/.test(provider);
+export function createCattyPromptCache(
+  systemPrompt: string,
+  provider: string,
+  config?: Pick<ProviderConfig, 'baseURL'>,
+) {
+  let officialEndpoint = false;
+  if (config) {
+    try {
+      // The SDK defaults to Anthropic's official endpoint when no URL is set.
+      officialEndpoint = new URL(config.baseURL || 'https://api.anthropic.com').origin === 'https://api.anthropic.com';
+    } catch { /* An unknown endpoint must not receive vendor extensions. */ }
+  }
+  const enabled = /^anthropic(?:\.|$)/.test(provider) && officialEndpoint;
   const boundary = systemPrompt.indexOf('\n\n## Current Scope');
   const instructions: string | SystemModelMessage[] = enabled
     ? [{

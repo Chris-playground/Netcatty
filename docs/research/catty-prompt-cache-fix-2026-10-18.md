@@ -14,7 +14,7 @@
 4. Large-output handle notices were replaced at the front on every step. Results already containing a handle need no duplicate notice. Announce missing handles once at the tail and preserve prior notices; continue to reserve their budget if older results are pruned.
 5. DeepSeek's documented `prompt_cache_hit_tokens` was lost when the OpenAI-compatible SDK parsed responses. Normalize it to the standard cached-token field before parsing, preserving an existing standard value, including zero. Cover streaming and non-streaming responses.
 6. Catty omitted cache counts from its usage events and saved assistant messages. Preserve provider counts and attach aggregate usage after the final assistant message has been created.
-7. Native Anthropic requests lacked cache breakpoints. Cache the static system block and a bounded conversation tail; leave implicit-cache OpenAI/Google requests untouched and preserve signed reasoning content.
+7. Native Anthropic requests lacked cache breakpoints. Cache the static system block and a bounded conversation tail; leave implicit-cache OpenAI/Google requests untouched and preserve signed reasoning content. Enable these vendor fields only for the official HTTPS Anthropic endpoint (including the SDK's default endpoint), not third-party Messages-compatible gateways. A review follow-up adds endpoint gating and a full-driver gateway regression; it does not change the measured DeepSeek path.
 
 ## Comparison with mature agents and official guidance
 
@@ -48,7 +48,7 @@ Limits: live provider evidence covers the configured DeepSeek model. Native Anth
 
 ## Automated verification
 
-- Full AI/history/UI-related suite: 596 tests passed.
+- Full AI/history/UI-related suite after the endpoint review follow-up: 598 tests passed.
 - New regression coverage includes six consecutive plain-chat turns, six command turns, six large-file turns, six large-terminal-output turns, long-output handles, streaming/non-streaming DeepSeek usage, aggregate multi-step usage and native Anthropic boundaries.
 - Production build passed.
 - Full lint passed with eight existing warnings; final changed-file lint passed without warnings.
