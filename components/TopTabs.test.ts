@@ -294,6 +294,22 @@ test("session close button double click stays on the close button", () => {
   assert.match(topTabItemsSource, /onDoubleClick=\{stopCloseButtonDoubleClickPropagation\}/);
 });
 
+test("main window controls keep mouse presses from taking focus", () => {
+  const windowControlsSource = topTabItemsSource.slice(
+    topTabItemsSource.indexOf("export const WindowControls"),
+    topTabItemsSource.indexOf("WindowControls.displayName"),
+  );
+
+  assert.match(
+    windowControlsSource,
+    /const preventWindowControlFocus: React\.MouseEventHandler<HTMLButtonElement> = \(event\) => \{\s*event\.preventDefault\(\);\s*\};/,
+  );
+  assert.equal(windowControlsSource.match(/onMouseDown=\{preventWindowControlFocus\}/g)?.length, 3);
+  assert.match(windowControlsSource, /onClick=\{handleMinimize\}/);
+  assert.match(windowControlsSource, /onClick=\{handleMaximize\}/);
+  assert.match(windowControlsSource, /onClick=\{handleClose\}/);
+});
+
 test("session top tab label only shows the host label for ssh sessions", () => {
   assert.equal(
     formatSessionTopTabLabel({
