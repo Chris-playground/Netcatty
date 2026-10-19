@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { remoteSoftwareRequiresSingleChannel } from "../../domain/singleChannelSshBanner.shared.mjs";
+import { sftpRequiresDedicatedLogin } from "../../domain/sftpDedicatedLogin";
 
 const sidePanelSource = readFileSync(new URL("../SftpSidePanel.tsx", import.meta.url), "utf8");
 const slotSource = readFileSync(
@@ -49,12 +51,46 @@ test("locate-path uses focused session fallback when SFTP cannot reuse the termi
 test("single-channel SFTP opens a dedicated connection instead of the terminal channel", () => {
   assert.match(
     sidePanelSource,
-    /const dedicatedSftpLogin = sftpBannerDecision\?\.sessionId === activeSessionId\s*&& sftpBannerDecision\.singleChannel;/,
+    /const dedicatedSftpLogin = sftpRequiresDedicatedLogin\(\{\s*host: activeHost,\s*remoteSshVersion: sftpBannerDecision\?\.sessionId === activeSessionId\s*\? sftpBannerDecision\.remoteSshVersion\s*: undefined,\s*\}\);/,
   );
   assert.doesNotMatch(sidePanelSource, /activeHost\.singleChannelSsh/);
+  assert.doesNotMatch(sidePanelSource, /sftpBannerDecision\.singleChannel/);
   assert.match(sidePanelSource, /reuseTransport: false/);
   assert.match(
     sidePanelSource,
     /const reuseTerminalTransport = !dedicatedSftpLogin &&/,
   );
+  assert.match(
+    sidePanelSource,
+    /sourceSessionId: reuseTerminalTransport/,
+  );
+});
+
+test("network-device mode and network-vendor banners force dedicated SFTP", () => {
+  assert.equal(
+    sftpRequiresDedicatedLogin({ host: { deviceType: "network" }, remoteSshVersion: "OpenSSH_9.6" }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedLogin({ host: { deviceType: "network" } }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedLogin({ host: { deviceType: "general" }, remoteSshVersion: "-" }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedLogin({ host: { deviceType: "general" }, remoteSshVersion: "SSH-2.0--" }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedLogin({ host: { deviceType: "general" }, remoteSshVersion: "SSH-2.0-RGOS_SSH" }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedLogin({ host: { deviceType: "general" }, remoteSshVersion: "OpenSSH_9.6" }),
+    false,
+  );
+  assert.equal(remoteSoftwareRequiresSingleChannel("-"), false);
+  assert.equal(remoteSoftwareRequiresSingleChannel("SSH-2.0--"), false);
 });
