@@ -11,7 +11,7 @@ const { pipeline } = require("node:stream/promises");
 const { TextDecoder } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { executeBoundedSshCommand } = require("./boundedSshExec.cjs");
-const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
+const { sftpRequiresDedicatedConnection } = require("../../domain/sftpDedicatedConnection.mjs");
 const { openBoundedSftpChannel } = require("./boundedSftpOpen.cjs");
 const { invalidateSshTransport } = require("./sshTransportInvalidation.cjs");
 require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
@@ -1954,10 +1954,14 @@ async function openSftpForSession(_event, payload) {
     source = { sessionId, ...ensureRemoteSftpSupport(sessionId) };
   }
   const { session, sshClient } = source;
-  if (
-    session.singleChannelSsh
-    || remoteSoftwareRequiresSingleChannel(session.remoteSshVersion || sshClient?._remoteVer)
-  ) {
+  const deviceType = session.deviceType === "network" || payload?.deviceType === "network"
+    ? "network"
+    : (session.deviceType || payload?.deviceType);
+  if (sftpRequiresDedicatedConnection({
+    singleChannelSsh: !!session.singleChannelSsh,
+    remoteSshVersion: session.remoteSshVersion || sshClient?._remoteVer,
+    deviceType,
+  })) {
     const err = new Error(
       "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
     );

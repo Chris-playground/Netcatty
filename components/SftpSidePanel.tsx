@@ -22,7 +22,7 @@ import React, {
 } from "react";
 import { SftpSidePanelDeferredMount } from "./SftpSidePanelDeferredMount";
 import { TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS } from "./terminalLayer/terminalSidePanelChrome";
-import { formatHostPort } from "../domain/host";
+import { classifyDistroId, formatHostPort, sftpRequiresDedicatedConnection } from "../domain/host";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
 import {
@@ -76,8 +76,6 @@ import {
   resolveLocateSftpPathInTerminalAction,
   resolveLocateSftpPathSessionId,
 } from "../domain/sftpLocatePathInTerminal";
-import { classifyDistroId } from "../domain/host";
-import { remoteSoftwareRequiresSingleChannel } from "../domain/singleChannelSshBanner.shared.mjs";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import { isTerminalReadyForCommandInjection } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
@@ -588,9 +586,19 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       setSftpBannerDecision(null);
       return;
     }
+    const deviceType = activeHost?.deviceType;
+    // Network Device Mode is known before the banner. Do not wait to borrow
+    // the terminal transport; that extra channel drops Huawei/Ruijie sessions.
+    if (sftpRequiresDedicatedConnection({ deviceType })) {
+      setSftpBannerDecision({ sessionId: activeSessionId, singleChannel: true });
+      return;
+    }
     const readRemoteInfo = terminalBackend.getSessionRemoteInfo;
     if (!readRemoteInfo) {
-      setSftpBannerDecision({ sessionId: activeSessionId, singleChannel: false });
+      setSftpBannerDecision({
+        sessionId: activeSessionId,
+        singleChannel: sftpRequiresDedicatedConnection({ deviceType }),
+      });
       return;
     }
     let cancelled = false;
@@ -598,17 +606,23 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       if (cancelled) return;
       setSftpBannerDecision({
         sessionId: activeSessionId,
-        singleChannel: remoteSoftwareRequiresSingleChannel(info?.remoteSshVersion),
+        singleChannel: sftpRequiresDedicatedConnection({
+          remoteSshVersion: info?.remoteSshVersion,
+          deviceType,
+        }),
       });
     }).catch(() => {
       if (!cancelled) {
-        setSftpBannerDecision({ sessionId: activeSessionId, singleChannel: false });
+        setSftpBannerDecision({
+          sessionId: activeSessionId,
+          singleChannel: sftpRequiresDedicatedConnection({ deviceType }),
+        });
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId, activeSessionStatusForBanner, terminalBackend]);
+  }, [activeHost?.deviceType, activeSessionId, activeSessionStatusForBanner, terminalBackend]);
 
   useEffect(() => {
     pruneSftpSidePanelState(

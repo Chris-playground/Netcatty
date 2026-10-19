@@ -19,6 +19,7 @@ import {
   hostRestrictsExtraSshChannels,
   shouldProbeSessionCwd,
   shouldSuggestNetworkDeviceMode,
+  sftpRequiresDedicatedConnection,
   upsertHostById,
 } from "./host.ts";
 
@@ -660,6 +661,58 @@ test("hostRestrictsExtraSshChannels follows network-device mode only", () => {
   assert.equal(hostRestrictsExtraSshChannels({ deviceType: "general" }), false);
   assert.equal(hostRestrictsExtraSshChannels({ singleChannelSsh: true } as never), false);
   assert.equal(hostRestrictsExtraSshChannels(undefined), false);
+});
+
+test("sftpRequiresDedicatedConnection uses a fresh login for Huawei and Ruijie banners", () => {
+  assert.equal(sftpRequiresDedicatedConnection({ remoteSshVersion: "-" }), true);
+  assert.equal(sftpRequiresDedicatedConnection({ remoteSshVersion: "SSH-2.0--" }), true);
+  assert.equal(sftpRequiresDedicatedConnection({ remoteSshVersion: "RGOS_SSH" }), true);
+  assert.equal(sftpRequiresDedicatedConnection({ remoteSshVersion: "SSH-2.0-RGOS_SSH" }), true);
+});
+
+test("sftpRequiresDedicatedConnection still shares a normal OpenSSH terminal", () => {
+  assert.equal(sftpRequiresDedicatedConnection({ remoteSshVersion: "OpenSSH_9.6" }), false);
+  assert.equal(
+    sftpRequiresDedicatedConnection({ remoteSshVersion: "SSH-2.0-OpenSSH_9.6p1" }),
+    false,
+  );
+  assert.equal(sftpRequiresDedicatedConnection({ remoteSshVersion: "JumpServer" }), false);
+  assert.equal(sftpRequiresDedicatedConnection({}), false);
+});
+
+test("sftpRequiresDedicatedConnection uses a fresh login for network-device mode", () => {
+  assert.equal(
+    sftpRequiresDedicatedConnection({
+      remoteSshVersion: "OpenSSH_9.6",
+      deviceType: "network",
+    }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedConnection({ deviceType: "network" }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedConnection({
+      remoteSshVersion: "OpenSSH_9.6",
+      deviceType: "general",
+    }),
+    false,
+  );
+});
+
+test("sftpRequiresDedicatedConnection keeps one-channel bastion banners on a fresh login", () => {
+  assert.equal(
+    sftpRequiresDedicatedConnection({ remoteSshVersion: "CLOUDBILITY-4.14" }),
+    true,
+  );
+  assert.equal(
+    sftpRequiresDedicatedConnection({
+      remoteSshVersion: "OpenSSH_9.6",
+      singleChannelSsh: true,
+    }),
+    true,
+  );
 });
 
 test("shouldProbeSessionCwd skips the probe when extra SSH channels are restricted", () => {

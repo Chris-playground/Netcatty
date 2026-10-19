@@ -324,6 +324,125 @@ test("openSftpForSession refuses a one-channel bastion banner without the host f
   }
 });
 
+test("openSftpForSession refuses a network-vendor banner before opening a channel", async () => {
+  for (const remoteSshVersion of ["-", "SSH-2.0--", "RGOS_SSH", "SSH-2.0-RGOS_SSH"]) {
+    const bridge = loadSftpBridgeWithProxySocket(null);
+    const sftpClients = new Map();
+    let sftpCalls = 0;
+    const conn = {
+      _remoteVer: remoteSshVersion,
+      sftp(cb) {
+        sftpCalls += 1;
+        cb(null, { end() {} });
+      },
+      end() {},
+    };
+    const session = {
+      conn,
+      stream: {},
+      remoteSshVersion,
+    };
+    const sessions = new Map([["session-vendor", session]]);
+    bridge.init({ sftpClients, sessions, electronModule: {} });
+
+    await assert.rejects(
+      bridge.openSftpForSession(null, { sessionId: "session-vendor" }),
+      (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+      remoteSshVersion,
+    );
+  }
+});
+
+test("openSftpForSession refuses network-device mode even when the banner is OpenSSH", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const conn = {
+    _remoteVer: "OpenSSH_9.6",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, { end() {} });
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    stream: {},
+    remoteSshVersion: "OpenSSH_9.6",
+    deviceType: "network",
+  };
+  const sessions = new Map([["session-network", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  await assert.rejects(
+    bridge.openSftpForSession(null, { sessionId: "session-network" }),
+    (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+  );
+});
+
+test("openSftpForSession refuses payload deviceType network before opening a channel", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const conn = {
+    _remoteVer: "OpenSSH_9.6",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, { end() {} });
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    stream: {},
+    remoteSshVersion: "OpenSSH_9.6",
+  };
+  const sessions = new Map([["session-payload-network", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  await assert.rejects(
+    bridge.openSftpForSession(null, {
+      sessionId: "session-payload-network",
+      deviceType: "network",
+    }),
+    (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+  );
+});
+
+test("openSftpForSession still shares the terminal transport for OpenSSH", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const fakeSftp = {
+    readdir() {},
+    stat() {},
+    mkdir() {},
+    unlink() {},
+    end() {},
+  };
+  const conn = {
+    _remoteVer: "SSH-2.0-OpenSSH_9.6p1",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, fakeSftp);
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    stream: {},
+    remoteSshVersion: "SSH-2.0-OpenSSH_9.6p1",
+    deviceType: "general",
+  };
+  const sessions = new Map([["session-openssh", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  const opened = await bridge.openSftpForSession(null, { sessionId: "session-openssh" });
+  assert.equal(opened.ok, true);
+  assert.equal(sftpCalls, 1);
+  await bridge.closeSftp(null, { sftpId: opened.sftpId });
+});
+
 test("openSftpForSession still shares the terminal transport for JumpServer", async () => {
   const bridge = loadSftpBridgeWithProxySocket(null);
   const sftpClients = new Map();

@@ -1,6 +1,7 @@
 import { detectVendorFromSshVersion } from './sshServerVendor.mjs';
 export { detectVendorFromSshVersion } from './sshServerVendor.mjs';
 import { remoteSoftwareRequiresSingleChannel } from './singleChannelSshBanner.shared.mjs';
+export { sftpRequiresDedicatedConnection } from './sftpDedicatedConnection.mjs';
 import { Host, Snippet, TerminalSettings } from './models';
 import type { HostOperatingSystem, HostOsSelection } from './models/connection';
 import { sanitizeHostIconFields } from './hostIcon';

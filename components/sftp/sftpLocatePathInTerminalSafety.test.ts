@@ -57,4 +57,9 @@ test("single-channel SFTP opens a dedicated connection instead of the terminal c
     sidePanelSource,
     /const reuseTerminalTransport = !dedicatedSftpLogin &&/,
   );
+  assert.match(sidePanelSource, /sftpRequiresDedicatedConnection\(\{\s*deviceType\s*\}\)/);
+  assert.match(
+    sidePanelSource,
+    /singleChannel: sftpRequiresDedicatedConnection\(\{\s*remoteSshVersion: info\?\.remoteSshVersion,\s*deviceType,\s*\}\)/,
+  );
 });

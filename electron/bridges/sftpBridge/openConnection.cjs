@@ -11,6 +11,7 @@ const {
 const { openBoundedSftpChannel } = require("../boundedSftpOpen.cjs");
 const { openBoundedForwardOutCallback } = require("../boundedSshChannelOpen.cjs");
 const { remoteSoftwareRequiresSingleChannel } = require("../../../domain/singleChannelSshBanner.shared.cjs");
+const { sftpRequiresDedicatedConnection } = require("../../../domain/sftpDedicatedConnection.mjs");
 
 /** Bound shell/scp probes so a hung remote exec cannot leave the panel connecting forever. */
 const SCP_PROBE_TIMEOUT_MS = 15_000;
@@ -779,11 +780,14 @@ function createOpenConnectionApi(ctx) {
       let pendingDialCoordination = options._pendingDialCoordination || null;
 
       const openOnSharedTransport = async (transport, detail = "reusing shared SSH transport") => {
-        if (
-          options.singleChannelSsh
-          || transport.endpoint?.singleChannelSsh
-          || remoteSoftwareRequiresSingleChannel(transport?.conn?._remoteVer)
-        ) {
+        const sharedDeviceType = options.deviceType === "network" || transport.endpoint?.deviceType === "network"
+          ? "network"
+          : (options.deviceType || transport.endpoint?.deviceType);
+        if (sftpRequiresDedicatedConnection({
+          singleChannelSsh: !!(options.singleChannelSsh || transport.endpoint?.singleChannelSsh),
+          remoteSshVersion: transport?.conn?._remoteVer,
+          deviceType: sharedDeviceType,
+        })) {
           const err = new Error(
             "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
           );
