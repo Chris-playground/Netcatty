@@ -304,7 +304,11 @@ test("main window controls keep mouse presses from taking focus", () => {
     windowControlsSource,
     /const preventWindowControlFocus: React\.MouseEventHandler<HTMLButtonElement> = \(event\) => \{\s*event\.preventDefault\(\);\s*\};/,
   );
-  assert.equal(windowControlsSource.match(/onMouseDown=\{preventWindowControlFocus\}/g)?.length, 3);
+  assert.equal(windowControlsSource.match(/onMouseDown=\{preventWindowControlFocus\}/g)?.length, 2);
+  const closeButton = windowControlsSource.match(
+    /<button type="button" className=\{closeControlClassName\}[^>]*>/,
+  )?.[0] ?? "";
+  assert.equal(closeButton.includes("onMouseDown"), false);
   assert.match(windowControlsSource, /onClick=\{handleMinimize\}/);
   assert.match(windowControlsSource, /onClick=\{handleMaximize\}/);
   assert.match(windowControlsSource, /onClick=\{handleClose\}/);
