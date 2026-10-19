@@ -94,3 +94,28 @@ test("network-device mode and network-vendor banners force dedicated SFTP", () =
   assert.equal(remoteSoftwareRequiresSingleChannel("-"), false);
   assert.equal(remoteSoftwareRequiresSingleChannel("SSH-2.0--"), false);
 });
+
+test("vendor banners block follow-terminal-cwd the same way bastions do", () => {
+  assert.match(
+    sidePanelSource,
+    /bannerRequiresSingleChannel=\{sftpRequiresDedicatedLogin\(\{\s*host: activeHost,\s*remoteSshVersion: sftpBannerDecision\?\.sessionId === activeSessionId\s*\? sftpBannerDecision\.remoteSshVersion\s*: undefined,\s*\}\)\}/,
+  );
+  assert.doesNotMatch(sidePanelSource, /remoteSoftwareRequiresSingleChannel/);
+  for (const remoteSshVersion of ["-", "SSH-2.0--", "BHostSSH_7.0"]) {
+    assert.equal(
+      sftpRequiresDedicatedLogin({
+        host: { deviceType: "general" },
+        remoteSshVersion,
+      }),
+      true,
+      remoteSshVersion,
+    );
+  }
+  assert.equal(
+    sftpRequiresDedicatedLogin({
+      host: { deviceType: "network" },
+      remoteSshVersion: "OpenSSH_9.6",
+    }),
+    true,
+  );
+});

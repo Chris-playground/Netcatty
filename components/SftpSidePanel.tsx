@@ -78,7 +78,6 @@ import {
 } from "../domain/sftpLocatePathInTerminal";
 import { sftpRequiresDedicatedLogin } from "../domain/sftpDedicatedLogin";
 import { classifyDistroId } from "../domain/host";
-import { remoteSoftwareRequiresSingleChannel } from "../domain/singleChannelSshBanner.shared.mjs";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import { isTerminalReadyForCommandInjection } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
@@ -1389,10 +1388,12 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         sftpDefaultViewMode={sftpDefaultViewMode}
         activeHost={activeHost}
         activeSessionId={activeSessionId}
-        bannerRequiresSingleChannel={
-          sftpBannerDecision?.sessionId === activeSessionId
-          && remoteSoftwareRequiresSingleChannel(sftpBannerDecision.remoteSshVersion)
-        }
+        bannerRequiresSingleChannel={sftpRequiresDedicatedLogin({
+          host: activeHost,
+          remoteSshVersion: sftpBannerDecision?.sessionId === activeSessionId
+            ? sftpBannerDecision.remoteSshVersion
+            : undefined,
+        })}
         focusedSessionId={focusedSessionId}
         showWorkspaceHostHeader={showWorkspaceHostHeader}
         renderOverlays={renderOverlays}
