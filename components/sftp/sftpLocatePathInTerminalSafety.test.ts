@@ -119,3 +119,31 @@ test("vendor banners block follow-terminal-cwd the same way bastions do", () => 
     true,
   );
 });
+
+test("opening SFTP skips the terminal pwd exec for network-vendor banners", () => {
+  const terminalSource = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const layerSource = readFileSync(new URL("../TerminalLayer.tsx", import.meta.url), "utf8");
+
+  const assertBannerPwdGuard = (source: string, fnName: string) => {
+    const start = source.indexOf(`const ${fnName} = useCallback`);
+    assert.ok(start >= 0, fnName);
+    const body = source.slice(start, start + 1600);
+    assert.match(body, /let skipBackendPwd = hostRestrictsExtraSshChannels\(host\);/);
+    assert.match(body, /getSessionRemoteInfo\?\./);
+    assert.match(body, /skipBackendPwd = !shouldProbeSessionCwd\(\{/);
+    assert.match(body, /classifyDistroId\(host\.distro\) === 'network-device'/);
+    assert.match(body, /remoteSshVersion: info\?\.remoteSshVersion/);
+    assert.match(body, /getSessionPwd: skipBackendPwd/);
+  };
+
+  assertBannerPwdGuard(terminalSource, "resolveSftpInitialPath");
+  assertBannerPwdGuard(layerSource, "getTerminalCwd");
+  assert.match(
+    terminalSource,
+    /import \{ classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd \} from "\.\.\/domain\/host";/,
+  );
+  assert.match(
+    layerSource,
+    /import \{ classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd \} from '\.\.\/domain\/host';/,
+  );
+});
