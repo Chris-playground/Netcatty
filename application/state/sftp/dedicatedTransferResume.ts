@@ -30,6 +30,7 @@ import {
   isMissingDirectoryReplacePathError,
   promoteDirectoryReplaceStage as promoteDirectoryReplacePaths,
 } from "./directoryReplacePromotion";
+import { unwrapSftpIpcError } from "./errors";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 
 export interface DedicatedResumeDeps {
@@ -742,7 +743,7 @@ async function resumeSingleFileWithDedicatedSession(
     const err = error as Error & { dedicatedAttention?: boolean; resetCheckpoint?: boolean };
     return {
       success: false,
-      error: err instanceof Error ? err.message : String(error),
+      error: unwrapSftpIpcError(error),
       needsAttention: !!err.dedicatedAttention,
       resetCheckpoint: !!err.resetCheckpoint,
     };

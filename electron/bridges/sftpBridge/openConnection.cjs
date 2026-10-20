@@ -808,14 +808,17 @@ function createOpenConnectionApi(ctx) {
 
     function authenticatedChannelMatches(client, endpoint, request) {
       const exact = buildEndpointKey(endpoint);
-      if (exact && client.__netcattyEndpointKey === exact) return true;
-      // The known-host digest can change when a still-valid key is saved, or
-      // when an unrelated record is added. That may reuse the live channel.
-      // A replaced or removed key is not trusted against the caller's records,
-      // so the fresh dial runs host-key verification instead.
-      if (typeof buildChannelAdoptionKey !== "function") return false;
-      const adoption = buildChannelAdoptionKey(endpoint);
-      if (!adoption || client.__netcattyChannelAdoptionKey !== adoption) return false;
+      const exactMatch = !!(exact && client.__netcattyEndpointKey === exact);
+      if (!exactMatch) {
+        // The known-host digest can change when a still-valid key is saved, or
+        // when an unrelated record is added. That may reuse the live channel.
+        if (typeof buildChannelAdoptionKey !== "function") return false;
+        const adoption = buildChannelAdoptionKey(endpoint);
+        if (!adoption || client.__netcattyChannelAdoptionKey !== adoption) return false;
+      }
+      // Exact endpoint keys are not enough. A session trusted from an empty
+      // list and a later open that is also empty (the key was removed) share
+      // a digest, and must still be checked against the caller's records.
       return acceptedHostKeysStillTrusted(client, request);
     }
 

@@ -1047,6 +1047,91 @@ test("channel adoption reuses a still-trusted host key and rejects a replaced or
   await waitFor(() => !sftpClients.has(browse.sftpId), { timeoutMs: 2000 });
 });
 
+test("an exact endpoint match still rejects a host key removed after it was trusted (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    for (const [id, pending] of hostKeyVerifier.getRequests()) {
+      hostKeyVerifier.handleResponse(
+        { sender: { id: pending.webContentsId } },
+        { requestId: id, accept: false },
+      );
+    }
+    pool.discardAllTransports("test-end");
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    {
+      ...BASE_OPTIONS(server.port),
+      sessionId: "sftp-browse-trust-then-remove",
+      verifyHostKeys: true,
+      knownHosts: [],
+    },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(
+    () => browseSender.sent.some((entry) => entry.channel === "netcatty:host-key:verify"),
+    { timeoutMs: 4000, message: "the first open must prompt for the host key" },
+  );
+  const prompt = browseSender.sent.find((entry) => entry.channel === "netcatty:host-key:verify");
+  hostKeyVerifier.handleResponse(
+    { sender: browseSender },
+    { requestId: prompt.payload.requestId, accept: true },
+  );
+  await waitFor(
+    () => answerOtpPrompts(browseSender),
+    { message: "accepting the host key must continue to OTP" },
+  );
+  const browse = await browseOpen;
+  const browseClient = sftpClients.get(browse.sftpId);
+  assert.ok(browseClient.__netcattyAcceptedHostKeys?.length >= 1);
+
+  const removed = {
+    ...BASE_OPTIONS(server.port),
+    verifyHostKeys: true,
+    knownHosts: [],
+    hostKeyUnattended: true,
+  };
+  const removedEndpoint = pool.buildConnectionReuseEndpoint(removed, { sftpSudo: false });
+  assert.equal(
+    browseClient.__netcattyEndpointKey,
+    pool.buildEndpointKey(removedEndpoint),
+    "trust-then-delete leaves both sides on the empty known-hosts digest",
+  );
+  const ownerCount = sftpClients.size;
+  const removedSender = createSender();
+  const removedOpen = sftpBridge.openSftp({ sender: removedSender }, removed);
+  pendingOpens.push(removedOpen);
+  removedOpen.catch(() => {});
+  await assert.rejects(removedOpen, /Host key verification required/);
+  assert.equal(sftpClients.size, ownerCount, "a removed host key must not borrow the old channel");
+  assert.equal(
+    [...sftpClients.values()].some((client) => client.__netcattySharedChannelAlias),
+    false,
+  );
+  assert.equal(
+    removedSender.sent.some((entry) => entry.channel === "netcatty:host-key:verify"),
+    false,
+  );
+});
+
 test("a closed single-channel SFTP stream is not borrowed (#3310)", { timeout: 20000 }, async (t) => {
   const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
@@ -1205,6 +1290,60 @@ test("killing the borrowed SFTP channel mid-upload fails the transfer (#3310)", 
     transfer.sftpId,
   );
   pendingOpens.push(transferPromise.catch(() => {}));
+  server.killSftpChannels();
+  await assertBorrowedUploadFails(transferPromise, transferEvents, isSettled);
+});
+
+test("a channel close with no WRITE reply still fails the borrowed upload (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-channel-close-silent" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(() => answerOtpPrompts(browseSender));
+  const browse = await browseOpen;
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, { ...options });
+  const { transferPromise, transferEvents, isSettled } = await uploadUntilHeldWrite(
+    t,
+    server,
+    "otp-channel-close-silent",
+    transfer.sftpId,
+  );
+  pendingOpens.push(transferPromise.catch(() => {}));
+  // The server close reaches the owner stream, but ssh2 does not always invoke
+  // the outstanding WRITE. Drop those callbacks so only close/end can settle it.
+  const alias = sftpClients.get(transfer.sftpId);
+  const streams = [
+    alias?.sftp,
+    sftpClients.get(alias?.__netcattySharedChannelOwnerId || browse.sftpId)?.sftp,
+  ];
+  for (const stream of streams) {
+    if (stream && stream._requests) stream._requests = {};
+  }
   server.killSftpChannels();
   await assertBorrowedUploadFails(transferPromise, transferEvents, isSettled);
 });

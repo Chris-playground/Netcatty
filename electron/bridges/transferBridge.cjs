@@ -3058,10 +3058,8 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
         transfer.abort = previousAbort;
       }
       try { sftp.removeListener?.("error", onOpenChannelError); } catch { /* ignore */ }
-      if (!isWriteOpen) {
-        sftp.removeListener?.("end", onOpenChannelClosed);
-        sftp.removeListener?.("close", onOpenChannelClosed);
-      }
+      sftp.removeListener?.("end", onOpenChannelClosed);
+      sftp.removeListener?.("close", onOpenChannelClosed);
       fn(value);
     };
 
@@ -3119,7 +3117,9 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
     };
 
     const onOpenChannelClosed = () => {
-      onOpenChannelError(new Error("SFTP channel closed before the source file was opened"));
+      onOpenChannelError(isWriteOpen
+        ? sftpChannelClosedError()
+        : new Error("SFTP channel closed before the source file was opened"));
     };
 
     if (transfer.cancelled) {
@@ -3131,15 +3131,15 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
 
     transfer.abort = abortDuringOpen;
     sftp.on?.("error", onOpenChannelError);
-    if (!isWriteOpen) {
-      sftp.on?.("end", onOpenChannelClosed);
-      sftp.on?.("close", onOpenChannelClosed);
+    // Write OPEN used to skip close/end. Killing the server channel then left
+    // the OPEN callback unanswered, so the upload stayed active with no error.
+    sftp.on?.("end", onOpenChannelClosed);
+    sftp.on?.("close", onOpenChannelClosed);
+    if (!isWriteOpen && sftp.readable === false) {
       // A failed isolated download may fall back after the browse channel's
       // end event already fired. ssh2 never answers a new OPEN on that channel.
-      if (sftp.readable === false) {
-        onOpenChannelClosed();
-        return;
-      }
+      onOpenChannelClosed();
+      return;
     }
 
     try {
@@ -3730,64 +3730,102 @@ function normalizeSftpChannelLoss(sftp, error) {
   return error;
 }
 
+function sftpChannelDeathTargets(sftp) {
+  const targets = [];
+  const add = (value) => {
+    if (!value || typeof value.on !== "function" || targets.includes(value)) return;
+    targets.push(value);
+  };
+  // ssh2-sftp-client `.on` listens on the SSH connection. Channel close/end
+  // is emitted on the inner stream the borrowed owner actually writes.
+  if (sftp?.sftp && sftp.sftp !== sftp) add(sftp.sftp);
+  add(sftp);
+  return targets;
+}
+
+function rejectPendingSftpRequests(sftp, error) {
+  const requests = sftp?._requests;
+  if (!requests || typeof requests !== "object") return;
+  const pending = requests;
+  sftp._requests = {};
+  for (const key of Object.keys(pending)) {
+    const callback = pending[key]?.cb;
+    if (typeof callback !== "function") continue;
+    try { callback(error); } catch { /* ignore */ }
+  }
+}
+
 function watchSftpChannelDeath(sftp, onDeath) {
-  if (!sftp || typeof sftp.on !== "function") return () => {};
-  let entry = sftpChannelDeathWaiters.get(sftp);
+  const channels = sftpChannelDeathTargets(sftp);
+  const primary = channels[0];
+  if (!primary) return () => {};
+  let entry = sftpChannelDeathWaiters.get(primary);
   if (!entry) {
     const waiters = new Set();
-    const fail = (error) => {
+    const fail = (error, { flushRequests = false } = {}) => {
       const wrapped = normalizeSftpChannelLoss(
-        sftp,
+        primary,
         error instanceof Error
           ? error
           : new Error(String(error?.message || error || "SFTP channel error")),
       );
+      // CHANNEL_CLOSE emits close/end and leaves READ/WRITE without a reply.
+      // A normal SFTP status error must not cancel the other in-flight requests.
+      if (flushRequests) {
+        for (const channel of channels) rejectPendingSftpRequests(channel, wrapped);
+      }
       for (const waiter of [...waiters]) waiter(wrapped);
     };
-    const client = sftp._client;
+    const client = primary._client || sftp?._client;
     entry = {
       waiters,
+      channels,
       client,
       onError: (error) => fail(error || new Error("SFTP channel error")),
-      onClose: () => fail(sftpChannelClosedError()),
+      onClose: () => fail(sftpChannelClosedError(), { flushRequests: true }),
       onClientError: (error) => {
         if (isSftpChannelLossError(error)) fail(error || sftpChannelClosedError());
       },
     };
-    sftp.on("error", entry.onError);
-    sftp.on("close", entry.onClose);
-    sftp.on("end", entry.onClose);
-    if (client && typeof client.on === "function") {
+    for (const channel of channels) {
+      channel.on("error", entry.onError);
+      channel.on("close", entry.onClose);
+      channel.on("end", entry.onClose);
+    }
+    if (client && typeof client.on === "function" && !channels.includes(client)) {
       client.on("close", entry.onClose);
       client.on("end", entry.onClose);
       client.on("error", entry.onClientError);
     }
-    sftpChannelDeathWaiters.set(sftp, entry);
+    sftpChannelDeathWaiters.set(primary, entry);
   }
   entry.waiters.add(onDeath);
   // end/close is not replayed. OPEN can finish, the channel can die, and only
   // then does WRITE/READ subscribe — readable is already false and the callback
   // never comes. Fail this waiter after returning so the caller can unwatch.
-  if (sftp.readable === false || sftp.destroyed === true) {
+  const alreadyDead = channels.some((channel) => channel.readable === false || channel.destroyed === true);
+  if (alreadyDead) {
     queueMicrotask(() => {
       if (!entry.waiters.has(onDeath)) return;
       onDeath(sftpChannelClosedError());
     });
   }
   return () => {
-    const current = sftpChannelDeathWaiters.get(sftp);
+    const current = sftpChannelDeathWaiters.get(primary);
     if (!current) return;
     current.waiters.delete(onDeath);
     if (current.waiters.size > 0) return;
-    try { sftp.removeListener("error", current.onError); } catch { /* ignore */ }
-    try { sftp.removeListener("close", current.onClose); } catch { /* ignore */ }
-    try { sftp.removeListener("end", current.onClose); } catch { /* ignore */ }
+    for (const channel of current.channels) {
+      try { channel.removeListener("error", current.onError); } catch { /* ignore */ }
+      try { channel.removeListener("close", current.onClose); } catch { /* ignore */ }
+      try { channel.removeListener("end", current.onClose); } catch { /* ignore */ }
+    }
     if (current.client && typeof current.client.removeListener === "function") {
       try { current.client.removeListener("close", current.onClose); } catch { /* ignore */ }
       try { current.client.removeListener("end", current.onClose); } catch { /* ignore */ }
       try { current.client.removeListener("error", current.onClientError); } catch { /* ignore */ }
     }
-    if (sftpChannelDeathWaiters.get(sftp) === current) sftpChannelDeathWaiters.delete(sftp);
+    if (sftpChannelDeathWaiters.get(primary) === current) sftpChannelDeathWaiters.delete(primary);
   };
 }
 
