@@ -195,7 +195,6 @@ export const DockerManagerTab = memo(function DockerManagerTab({
       sessionId,
       op: 'namespaces',
       context: contextName,
-      shell: parentSession.shellType,
     }).then((result) => {
       if (cancelled) return;
       if (!result.success || !result.namespaces) {
@@ -223,7 +222,7 @@ export const DockerManagerTab = memo(function DockerManagerTab({
     return () => {
       cancelled = true;
     };
-  }, [backend, contextName, contexts, parentSession.shellType, sessionId, source, scopeNonce, stableT]);
+  }, [backend, contextName, contexts, sessionId, source, scopeNonce, stableT]);
 
   const tabs: { id: DockerSubTab; icon: typeof Box; label: string }[] = [
     { id: 'containers', icon: Box, label: t('systemManager.docker.subTabs.containers') },

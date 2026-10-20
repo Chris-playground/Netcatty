@@ -346,3 +346,30 @@ test("getStats reads Podman's JSON array and Docker's JSON lines", async () => {
   assert.equal(dockerResult.stats[0].cpuPercent, 0.25);
   assert.equal(dockerResult.stats[0].memUsage, "1MiB / 2GiB");
 });
+
+test("getStats sums Podman per-interface Network counters", async () => {
+  const podman = createDockerOpsApi({
+    execOnSession: async () => ({
+      success: true,
+      stdout: JSON.stringify([{
+        ContainerID: "abc123def456",
+        Name: "web",
+        CPU: 1.5,
+        MemUsage: 2097152,
+        MemLimit: 1073741824,
+        MemPerc: 0.2,
+        Network: {
+          eth0: { RxBytes: 1000, TxBytes: 2000 },
+          eth1: { RxBytes: 500, TxBytes: 250 },
+        },
+        PIDs: 4,
+      }]),
+      stderr: "",
+      code: 0,
+    }),
+  });
+  const result = await podman.getStats(null, { sessionId: "s1", runtime: "podman" });
+  assert.equal(result.success, true);
+  assert.equal(result.stats[0].netIO, "1.5KB / 2.2KB");
+  assert.equal(result.stats[0].memUsage, "2MB / 1GB");
+});

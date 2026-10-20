@@ -197,7 +197,7 @@ function createSystemManagerBridge(deps) {
 
   const tmuxOps = createTmuxOpsApi({ execOnSession });
   const dockerOps = createDockerOpsApi({ execOnSession, getSession });
-  const kubectlOps = createKubectlOpsApi({ execOnSession });
+  const kubectlOps = createKubectlOpsApi({ execOnSession, isLocalSession, process });
   const gpuOps = createGpuOpsApi({
     execOnSession,
     execOnLocalMachine,

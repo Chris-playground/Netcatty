@@ -84,15 +84,39 @@ function parsePercent(value) {
   return parseFloat(String(value || "0").replace("%", "")) || 0;
 }
 
+function sumNetworkBytes(network) {
+  if (!network || typeof network !== "object" || Array.isArray(network)) return null;
+  let rx = 0;
+  let tx = 0;
+  let saw = false;
+  for (const stats of Object.values(network)) {
+    if (!stats || typeof stats !== "object") continue;
+    const rxBytes = stats.RxBytes ?? stats.rx_bytes;
+    const txBytes = stats.TxBytes ?? stats.tx_bytes;
+    if (typeof rxBytes === "number" && Number.isFinite(rxBytes)) {
+      rx += rxBytes;
+      saw = true;
+    }
+    if (typeof txBytes === "number" && Number.isFinite(txBytes)) {
+      tx += txBytes;
+      saw = true;
+    }
+  }
+  return saw ? { rx, tx } : null;
+}
+
 function parseDockerStats(stdout) {
   return parseJsonRecords(stdout).map((row) => {
     const memUsage = typeof row.MemUsage === "number" && typeof row.MemLimit === "number"
       ? `${formatImageSize(row.MemUsage)} / ${formatImageSize(row.MemLimit)}`
       : String(row.MemUsage || row.mem_usage || "");
-    const netIO = row.NetIO || row.net_io
-      || (typeof row.NetInput === "number" && typeof row.NetOutput === "number"
-        ? `${formatImageSize(row.NetInput)} / ${formatImageSize(row.NetOutput)}`
-        : "");
+    const networkTotals = sumNetworkBytes(row.Network || row.network);
+    const netIO = row.NetIO || row.net_io || row.netio
+      || (networkTotals
+        ? `${formatImageSize(networkTotals.rx)} / ${formatImageSize(networkTotals.tx)}`
+        : (typeof row.NetInput === "number" && typeof row.NetOutput === "number"
+          ? `${formatImageSize(row.NetInput)} / ${formatImageSize(row.NetOutput)}`
+          : ""));
     const blockIO = row.BlockIO || row.block_io
       || (typeof row.BlockInput === "number" && typeof row.BlockOutput === "number"
         ? `${formatImageSize(row.BlockInput)} / ${formatImageSize(row.BlockOutput)}`

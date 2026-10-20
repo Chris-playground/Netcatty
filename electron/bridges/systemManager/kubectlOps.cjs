@@ -18,7 +18,18 @@ function commandError(result, fallback) {
   return (result?.stderr || result?.error || "").trim() || fallback;
 }
 
-function createKubectlOpsApi({ execOnSession }) {
+function backgroundShell(sessionId, isLocalSession, nodeProcess) {
+  if (
+    typeof isLocalSession === "function"
+    && isLocalSession(sessionId)
+    && nodeProcess.platform === "win32"
+  ) {
+    return "powershell";
+  }
+  return "posix";
+}
+
+function createKubectlOpsApi({ execOnSession, isLocalSession, process: nodeProcess = process }) {
   async function run(event, payload) {
     const sessionId = payload?.sessionId;
     const op = payload?.op;
@@ -37,8 +48,10 @@ function createKubectlOpsApi({ execOnSession }) {
       }
     }
 
+    const shell = backgroundShell(sessionId, isLocalSession, nodeProcess);
+
     if (op === "namespaces") {
-      const command = buildKubectlNamespacesCommand(payload.context, payload.shell);
+      const command = buildKubectlNamespacesCommand(payload.context, shell);
       if (!command) return { success: false, error: "Invalid context" };
       const result = await execOnSession(event, sessionId, command, 12000);
       if (!isSuccessfulCommandResult(result)) {
@@ -52,7 +65,7 @@ function createKubectlOpsApi({ execOnSession }) {
     }
 
     if (op === "pods") {
-      const command = buildKubectlPodsCommand(payload.context, payload.namespace, payload.shell);
+      const command = buildKubectlPodsCommand(payload.context, payload.namespace, shell);
       if (!command) return { success: false, error: "Invalid context or namespace" };
       const result = await execOnSession(event, sessionId, command, 15000);
       if (!isSuccessfulCommandResult(result)) {
@@ -66,7 +79,7 @@ function createKubectlOpsApi({ execOnSession }) {
     }
 
     if (op === "delete") {
-      const command = buildKubectlDeletePodCommand(payload.context, payload.namespace, payload.pod, payload.shell);
+      const command = buildKubectlDeletePodCommand(payload.context, payload.namespace, payload.pod, shell);
       if (!command) return { success: false, error: "Invalid pod" };
       const result = await execOnSession(event, sessionId, command, 20000);
       if (!isSuccessfulCommandResult(result)) {
