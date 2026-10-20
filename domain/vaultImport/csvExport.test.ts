@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { applyGroupDefaults } from "../groupConfig.ts";
 import { importVaultHostsFromText } from "../vaultImport.ts";
 import { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./csvExport.ts";
 import type { Host } from "../models.ts";
@@ -390,6 +391,67 @@ test("CSV preserves inherited proxies and gives host settings priority", () => {
   });
   assert.deepEqual(importVaultHostsFromText("csv", csv).hosts.map((host) => host.proxyConfig), [groupProxy, profileProxy, inline, profileProxy]);
   assert.deepEqual(hosts, original);
+});
+
+test("CSV round-trips explicit direct proxy mode and still treats an empty Proxy as inherit", () => {
+  const staleProxy = { type: "http" as const, host: "stale.example.com", port: 8080 };
+  const groupProxy = { type: "socks5" as const, host: "group.example.com", port: 1080 };
+  const hosts: Host[] = [
+    {
+      ...hostDefaults,
+      id: "direct",
+      label: "Direct",
+      hostname: "direct.example.com",
+      directProxy: true,
+      proxyConfig: staleProxy,
+    },
+    {
+      ...hostDefaults,
+      id: "grouped-direct",
+      label: "Grouped direct",
+      hostname: "grouped.example.com",
+      group: "Corp",
+      directProxy: true,
+    },
+    { ...hostDefaults, id: "inherit", label: "Inherit", hostname: "inherit.example.com" },
+  ];
+  const { csv } = exportHostsToCsvWithStats(hosts, {
+    groupConfigs: [{ path: "Corp", proxyConfig: groupProxy }],
+  });
+  const lines = csv.replace(/^\uFEFF/, "").trimEnd().split("\r\n");
+  const proxyIndex = lines[0].split(",").indexOf("Proxy");
+  const proxyCell = (line: string) => line.split(",")[proxyIndex];
+  assert.equal(proxyCell(lines[1]), "direct");
+  assert.equal(proxyCell(lines[2]), "direct");
+  assert.equal(proxyCell(lines[3]), "");
+  assert.equal(csv.includes("stale.example.com"), false);
+  assert.equal(csv.includes("group.example.com"), false);
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.deepEqual(imported.issues, []);
+  assert.equal(imported.hosts[0]?.directProxy, true);
+  assert.equal(imported.hosts[0]?.proxyConfig, undefined);
+  assert.equal(imported.hosts[1]?.directProxy, true);
+  assert.equal(imported.hosts[1]?.proxyConfig, undefined);
+  assert.equal(imported.hosts[2]?.directProxy, undefined);
+  assert.equal(imported.hosts[2]?.proxyConfig, undefined);
+
+  const options = {
+    globalProxyProfileId: "global-proxy",
+    validProxyProfileIds: new Set(["global-proxy"]),
+  };
+  const directEffective = applyGroupDefaults(imported.hosts[0], {}, options);
+  assert.equal(directEffective.directProxy, true);
+  assert.equal(directEffective.proxyProfileId, undefined);
+  const inheritEffective = applyGroupDefaults(imported.hosts[2], {}, options);
+  assert.equal(inheritEffective.directProxy, undefined);
+  assert.equal(inheritEffective.proxyProfileId, "global-proxy");
+
+  const literal = importVaultHostsFromText("csv", "Hostname,Proxy\nmanual.example.com,direct\nempty.example.com,");
+  assert.deepEqual(literal.issues, []);
+  assert.equal(literal.hosts[0]?.directProxy, true);
+  assert.equal(literal.hosts[0]?.proxyConfig, undefined);
+  assert.equal(literal.hosts[1]?.directProxy, undefined);
 });
 
 test("CSV preserves IPv6 proxies and multiline commands with CSV punctuation", () => {

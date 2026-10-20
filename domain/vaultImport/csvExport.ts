@@ -3,7 +3,7 @@ import { applyGroupDefaults, resolveGroupDefaults } from '../groupConfig';
 import { isPluginHostProtocol } from '../pluginConnection';
 import { hasUnreadableProxyCredential, materializeHostProxyProfile, resolveProxyConfigAuth } from '../proxyProfiles';
 import { CsvLocalShellSpec, encodeCsvKeyPath, encodeCsvLocalShell, encodeCsvPassphrase, encodeCsvProxy } from './csvCredentialFields';
-import { formatCsvProxy } from './csvProxy';
+import { CSV_DIRECT_PROXY_VALUE, formatCsvProxy } from './csvProxy';
 
 const UTF8_BOM = "\uFEFF";
 
@@ -135,13 +135,20 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
     const effectiveHost = host.group
       ? applyGroupDefaults(host, resolveGroupDefaults(host.group, options.groupConfigs ?? [], inheritanceOptions), inheritanceOptions)
       : host;
-    const proxyConfig = materializeHostProxyProfile(effectiveHost, proxyProfiles).proxyConfig;
-    if (hasUnreadableProxyCredential(proxyConfig, options.identities)) {
-      unreadableProxyCredentialCount += 1;
+    // `direct` is the reversible CSV form of directProxy. An empty Proxy cell
+    // still means inherit, including a configured global default.
+    let proxyValue = "";
+    if (effectiveHost.directProxy === true) {
+      proxyValue = CSV_DIRECT_PROXY_VALUE;
+    } else {
+      const proxyConfig = materializeHostProxyProfile(effectiveHost, proxyProfiles).proxyConfig;
+      if (hasUnreadableProxyCredential(proxyConfig, options.identities)) {
+        unreadableProxyCredentialCount += 1;
+      }
+      if (proxyConfig) {
+        proxyValue = formatCsvProxy(resolveProxyConfigAuth(proxyConfig, options.identities));
+      }
     }
-    const proxyValue = proxyConfig
-      ? formatCsvProxy(resolveProxyConfigAuth(proxyConfig, options.identities))
-      : "";
     const localShellSpec = getLocalShellSpec(host);
 
     rows.push([
