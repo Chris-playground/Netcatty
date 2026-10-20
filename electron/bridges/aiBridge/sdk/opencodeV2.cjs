@@ -21,6 +21,7 @@ const OPENCODE_V2_VERSION_PROBE_MS = 8000;
 const OPENCODE_V2_CATALOG_SETTLE_POLL_MS = 100;
 const OPENCODE_V2_CATALOG_SETTLE_QUIET_MS = 400;
 const OPENCODE_V2_CATALOG_SETTLE_MAX_MS = 8000;
+const OPENCODE_V2_USERNAME = "opencode";
 const OPENCODE_V2_TRANSPORT_MESSAGE = /^(?:terminated|fetch failed|other side closed)$/i;
 const OPENCODE_V1_NOT_FOUND = "OpenCode CLI not found or not runnable. Install OpenCode and ensure `opencode` is on PATH, or set a custom path in Settings.";
 

@@ -305,6 +305,13 @@ test("OpenCode 2 client sends Basic auth and hides unauthorized bodies", async (
     assert.equal(JSON.stringify(error).includes("<html>"), false);
     return true;
   });
+
+  const implicit = createOpenCodeV2Client({
+    baseUrl: "http://127.0.0.1:4096",
+    password,
+    fetchImpl: async () => jsonResponse({ data: {} }),
+  });
+  assert.equal(implicit.authorization, buildOpenCodeBasicAuthorization("opencode", password));
 });
 
 test("OpenCode 2 client hides undici transport failures", async () => {
