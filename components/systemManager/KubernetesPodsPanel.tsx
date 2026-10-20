@@ -80,9 +80,11 @@ const KubernetesPodRow = memo(function KubernetesPodRow({
       trailing={(
         <div className="flex shrink-0 items-center gap-1">
           <SystemPanelStatusBadge tone={podTone(pod.status)}>{pod.status}</SystemPanelStatusBadge>
-          <SystemPanelRoundButton title={t('systemManager.docker.shell')} onClick={() => onShell(pod)}>
-            <Terminal size={12} />
-          </SystemPanelRoundButton>
+          {pod.shellContainers.length > 0 && (
+            <SystemPanelRoundButton title={t('systemManager.docker.shell')} onClick={() => onShell(pod)}>
+              <Terminal size={12} />
+            </SystemPanelRoundButton>
+          )}
           <SystemPanelRoundButton title={t('systemManager.docker.logs')} onClick={() => onLogs(pod)}>
             <FileText size={12} />
           </SystemPanelRoundButton>
@@ -191,7 +193,8 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
       );
       return;
     }
-    const containers = pod.containers;
+    const containers = action === 'shell' ? pod.shellContainers : pod.containers;
+    if (action === 'shell' && containers.length === 0) return;
     if (!container && containers.length > 1) {
       setContainerPrompt({ pod, action });
       return;
@@ -317,7 +320,10 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
             <DialogTitle>{t('systemManager.k8s.chooseContainer')}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-1">
-            {containerPrompt?.pod.containers.map((name) => (
+            {(containerPrompt?.action === 'shell'
+              ? containerPrompt.pod.shellContainers
+              : containerPrompt?.pod.containers
+            )?.map((name) => (
               <button
                 key={name}
                 type="button"

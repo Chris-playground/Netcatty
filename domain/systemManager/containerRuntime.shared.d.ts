@@ -21,6 +21,7 @@ export interface KubectlPodInfo {
   restarts: number;
   age: string;
   containers: string[];
+  shellContainers: string[];
 }
 
 export function normalizeContainerRuntime(runtime: unknown): ContainerRuntimeId;

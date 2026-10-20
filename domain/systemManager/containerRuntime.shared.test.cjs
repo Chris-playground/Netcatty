@@ -217,6 +217,7 @@ test("parseKubectlPodList reports status, restarts, age, and containers", () => 
       restarts: 5,
       age: "1m",
       containers: ["app", "sidecar", "init"],
+      shellContainers: ["sidecar"],
     },
     {
       name: "batch",
@@ -225,6 +226,7 @@ test("parseKubectlPodList reports status, restarts, age, and containers", () => 
       restarts: 0,
       age: "2d",
       containers: ["worker"],
+      shellContainers: [],
     },
   ]);
   assert.equal(formatPodAge("2026-10-20T00:09:10Z", now), "50s");

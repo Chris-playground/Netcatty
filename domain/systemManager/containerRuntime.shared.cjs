@@ -365,6 +365,24 @@ function podContainerNames(pod) {
   return names;
 }
 
+function podShellContainerNames(pod) {
+  const running = new Set();
+  const statuses = [
+    ...(Array.isArray(pod?.status?.containerStatuses) ? pod.status.containerStatuses : []),
+    ...(Array.isArray(pod?.status?.initContainerStatuses) ? pod.status.initContainerStatuses : []),
+  ];
+  for (const status of statuses) {
+    if (status?.state?.running && typeof status.name === "string" && status.name) {
+      running.add(status.name);
+    }
+  }
+  const ordered = podContainerNames(pod).filter((name) => running.has(name));
+  for (const name of running) {
+    if (!ordered.includes(name)) ordered.push(name);
+  }
+  return ordered;
+}
+
 function podRestartCount(pod) {
   const statuses = [
     ...(Array.isArray(pod?.status?.containerStatuses) ? pod.status.containerStatuses : []),
@@ -392,6 +410,7 @@ function parseKubectlPodList(jsonText, now = Date.now()) {
       restarts: podRestartCount(pod),
       age: formatPodAge(pod?.metadata?.creationTimestamp, now),
       containers: podContainerNames(pod),
+      shellContainers: podShellContainerNames(pod),
     });
   }
   return pods;
