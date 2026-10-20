@@ -178,9 +178,9 @@ function isSafeShellArg(value, shell) {
   if (!text || text.length > 512) return false;
   if (hasControlChar(text)) return false;
   // Interactive cmd.exe expands %VAR% inside double quotes, and %% is not a
-  // reliable escape there. Reject the argument instead of targeting a
-  // substituted context.
-  if (shell === "cmd" && text.includes("%")) return false;
+  // reliable escape there. With /V:ON it also expands !VAR! inside quotes.
+  // Reject those arguments instead of targeting a substituted context.
+  if (shell === "cmd" && (text.includes("%") || text.includes("!"))) return false;
   return true;
 }
 

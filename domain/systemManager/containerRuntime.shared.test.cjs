@@ -321,6 +321,10 @@ test("kubectl popup commands skip the POSIX wrapper on Windows shells", () => {
     buildKubectlDescribeCommand("prod-%USERNAME%", "default", "api", "cmd"),
     'echo "Invalid context"',
   );
+  assert.equal(
+    buildKubectlDescribeCommand("prod!USER!", "default", "api", "cmd"),
+    'echo "Invalid context"',
+  );
   assert.match(
     buildKubectlDescribeCommand("prod-%USERNAME%", "default", "api", "powershell"),
     /--context 'prod-%USERNAME%'/,
