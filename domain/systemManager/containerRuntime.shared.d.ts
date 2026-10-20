@@ -54,9 +54,9 @@ export function sanitizeContainerId(id: string): string;
 export function buildContainerExecShellCommand(runtime: unknown, containerId: string, shell?: string): string;
 export function buildContainerLogsCommand(runtime: unknown, containerId: string, shell?: string): string;
 export function buildKubectlContextsCommand(): string;
-export function buildKubectlNamespacesCommand(context: string): string | null;
-export function buildKubectlPodsCommand(context: string, namespace: string): string | null;
-export function buildKubectlDeletePodCommand(context: string, namespace: string, pod: string): string | null;
+export function buildKubectlNamespacesCommand(context: string, shell?: string): string | null;
+export function buildKubectlPodsCommand(context: string, namespace: string, shell?: string): string | null;
+export function buildKubectlDeletePodCommand(context: string, namespace: string, pod: string, shell?: string): string | null;
 export type PopupShell = "posix" | "powershell" | "cmd";
 export function isKubectlForbiddenError(message: string | null | undefined): boolean;
 export function buildKubectlExecShellCommand(

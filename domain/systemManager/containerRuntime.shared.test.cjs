@@ -247,6 +247,18 @@ test("kubectl commands quote remote arguments and reject control characters", ()
   );
   assert.equal(buildKubectlDeletePodCommand("ctx", "default", "bad\nname"), null);
   assert.equal(buildKubectlPodsCommand("ok", "bad\nns"), null);
+  assert.equal(
+    buildKubectlNamespacesCommand("o'brien", "powershell"),
+    "kubectl --context 'o''brien' get namespaces -o json",
+  );
+  assert.equal(
+    buildKubectlPodsCommand("o'brien", "default", "powershell"),
+    "kubectl --context 'o''brien' -n 'default' get pods -o json",
+  );
+  assert.match(
+    buildKubectlDeletePodCommand("o'brien", "default", "web", "cmd"),
+    /--context "o'brien"/,
+  );
 
   const quoted = buildKubectlDeletePodCommand("o'brien", "default", "web");
   assert.match(quoted, /--context 'o'"'"'brien'/);

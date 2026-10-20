@@ -212,21 +212,23 @@ function buildKubectlContextsCommand() {
   return "kubectl config view -o json";
 }
 
-function buildKubectlNamespacesCommand(context) {
+function buildKubectlNamespacesCommand(context, shell) {
+  const popupShell = normalizePopupShell(shell);
   if (!isSafeShellArg(context)) return null;
-  return `kubectl --context ${shQuote(context)} get namespaces -o json`;
+  return `kubectl --context ${quoteShellArg(popupShell, context)} get namespaces -o json`;
 }
 
-function buildKubectlPodsCommand(context, namespace) {
-  const prefix = kubectlPrefix(context, namespace);
+function buildKubectlPodsCommand(context, namespace, shell) {
+  const prefix = kubectlPrefix(context, namespace, shell);
   if (!prefix) return null;
   return `${prefix} get pods -o json`;
 }
 
-function buildKubectlDeletePodCommand(context, namespace, pod) {
-  const prefix = kubectlPrefix(context, namespace);
+function buildKubectlDeletePodCommand(context, namespace, pod, shell) {
+  const popupShell = normalizePopupShell(shell);
+  const prefix = kubectlPrefix(context, namespace, popupShell);
   if (!prefix || !isSafeShellArg(pod)) return null;
-  return `${prefix} delete pod ${shQuote(pod)} --wait=false`;
+  return `${prefix} delete pod ${quoteShellArg(popupShell, pod)} --wait=false`;
 }
 
 function containerShellArg(shell) {

@@ -191,7 +191,12 @@ export const DockerManagerTab = memo(function DockerManagerTab({
   useEffect(() => {
     if (source !== 'kubernetes' || !contextName) return undefined;
     let cancelled = false;
-    void backend.kubectl({ sessionId, op: 'namespaces', context: contextName }).then((result) => {
+    void backend.kubectl({
+      sessionId,
+      op: 'namespaces',
+      context: contextName,
+      shell: parentSession.shellType,
+    }).then((result) => {
       if (cancelled) return;
       if (!result.success || !result.namespaces) {
         const message = result.error || stableT('systemManager.errors.loadKubernetes');
@@ -218,7 +223,7 @@ export const DockerManagerTab = memo(function DockerManagerTab({
     return () => {
       cancelled = true;
     };
-  }, [backend, contextName, contexts, sessionId, source, scopeNonce, stableT]);
+  }, [backend, contextName, contexts, parentSession.shellType, sessionId, source, scopeNonce, stableT]);
 
   const tabs: { id: DockerSubTab; icon: typeof Box; label: string }[] = [
     { id: 'containers', icon: Box, label: t('systemManager.docker.subTabs.containers') },

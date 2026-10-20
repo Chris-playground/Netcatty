@@ -38,7 +38,7 @@ function createKubectlOpsApi({ execOnSession }) {
     }
 
     if (op === "namespaces") {
-      const command = buildKubectlNamespacesCommand(payload.context);
+      const command = buildKubectlNamespacesCommand(payload.context, payload.shell);
       if (!command) return { success: false, error: "Invalid context" };
       const result = await execOnSession(event, sessionId, command, 12000);
       if (!isSuccessfulCommandResult(result)) {
@@ -52,7 +52,7 @@ function createKubectlOpsApi({ execOnSession }) {
     }
 
     if (op === "pods") {
-      const command = buildKubectlPodsCommand(payload.context, payload.namespace);
+      const command = buildKubectlPodsCommand(payload.context, payload.namespace, payload.shell);
       if (!command) return { success: false, error: "Invalid context or namespace" };
       const result = await execOnSession(event, sessionId, command, 15000);
       if (!isSuccessfulCommandResult(result)) {
@@ -66,7 +66,7 @@ function createKubectlOpsApi({ execOnSession }) {
     }
 
     if (op === "delete") {
-      const command = buildKubectlDeletePodCommand(payload.context, payload.namespace, payload.pod);
+      const command = buildKubectlDeletePodCommand(payload.context, payload.namespace, payload.pod, payload.shell);
       if (!command) return { success: false, error: "Invalid pod" };
       const result = await execOnSession(event, sessionId, command, 20000);
       if (!isSuccessfulCommandResult(result)) {

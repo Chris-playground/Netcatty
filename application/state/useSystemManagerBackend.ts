@@ -215,6 +215,7 @@ export function useSystemManagerBackend() {
     context?: string;
     namespace?: string;
     pod?: string;
+    shell?: string;
   }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.kubectl) {

@@ -142,12 +142,13 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
       op: 'pods',
       context: contextName,
       namespace: namespaceName,
+      shell: parentSession.shellType,
     });
     if (!result.success || !result.pods) {
       throw new Error(result.error || stableT('systemManager.errors.loadPods'));
     }
     return result.pods;
-  }, [backend, contextName, namespaceName, sessionId, stableT]);
+  }, [backend, contextName, namespaceName, parentSession.shellType, sessionId, stableT]);
 
   const listIntervalMs = Math.max(3, listRefreshIntervalSec) * 1000;
   const { data: pods, error, loading, refresh } = usePolling<KubectlPodInfo[]>(
@@ -220,6 +221,7 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
         context: contextName,
         namespace: namespaceName,
         pod: name,
+        shell: parentSession.shellType,
       });
       if (!result.success) {
         showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
@@ -230,7 +232,7 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
     } finally {
       setPendingDelete(null);
     }
-  }, [backend, contextName, namespaceName, refresh, selectedName, sessionId, t]);
+  }, [backend, contextName, namespaceName, parentSession.shellType, refresh, selectedName, sessionId, t]);
 
   const visibleError = scopeError || error;
 

@@ -161,6 +161,7 @@ declare global {
       context?: string;
       namespace?: string;
       pod?: string;
+      shell?: string;
     }): Promise<{
       success: boolean;
       error?: string;
