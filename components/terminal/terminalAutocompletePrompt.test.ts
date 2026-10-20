@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 
 import {
   computeAutocompleteAcceptWrite,
+  computeSnippetAcceptClearSequence,
   isSameAutocompleteQuery,
+  limitSuggestionsForPrompt,
   resolveAutocompleteQueryInput,
   shouldBlockAutocompleteForSensitivePrompt,
 } from "./autocomplete/terminalAutocompletePrompt.ts";
+import type { CompletionSuggestion } from "./autocomplete/completionEngine.ts";
 import type { PromptDetectionResult } from "./autocomplete/promptDetector.ts";
 
 function atPrompt(userInput: string, promptText = "$ "): PromptDetectionResult {
@@ -224,6 +227,71 @@ test("computeAutocompleteAcceptWrite refuses line replacement when disabled", ()
     }),
     null,
   );
+});
+
+test("snippet accept deletes only the mid-line word (#3622)", () => {
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "git pull use",
+      os: "linux",
+      promptText: "user@host:~$ ",
+    }),
+    "\b\b\b",
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "git pull use",
+      os: "windows",
+      promptText: "C:\\Users\\me>",
+    }),
+    "\b\b\b",
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "use",
+      os: "linux",
+      promptText: "user@host:~$ ",
+    }),
+    "\x15",
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "deploy",
+      os: "windows",
+      promptText: "C:\\Users\\me>",
+    }),
+    "\b".repeat("deploy".length),
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "use",
+      os: "linux",
+      promptText: "Email: ",
+    }),
+    "\b\b\b",
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "hello use",
+      os: "linux",
+      promptText: "Email: ",
+    }),
+    "\b\b\b",
+  );
+});
+
+test("program input prompts keep snippet suggestions only (#3622)", () => {
+  const suggestions = [
+    { text: "useradd", displayText: "useradd", source: "history", score: 10 },
+    { text: "邮箱", displayText: "邮箱", source: "snippet", score: 20 },
+  ] as CompletionSuggestion[];
+
+  assert.deepEqual(
+    limitSuggestionsForPrompt("Email: ", suggestions).map((suggestion) => suggestion.source),
+    ["snippet"],
+  );
+  assert.equal(limitSuggestionsForPrompt("user@host:~$ ", suggestions).length, 2);
+  assert.equal(limitSuggestionsForPrompt("Password: ", suggestions).length, 2);
 });
 
 test("computeAutocompleteAcceptWrite clears with backspaces on a mislabeled Windows shell (#3184)", () => {

@@ -1,10 +1,12 @@
 import { isSensitiveTerminalChallenge } from "../../../domain/terminalPromptSecurity";
 import {
   isNonPromptLine,
+  isProgramInputPromptText,
   reconcilePromptWithExternalCommand,
   type PromptDetectionResult,
 } from "./promptDetector";
-import { computeLivePreviewWrite } from "./livePreviewSequence";
+import { parseCommandLine, type CompletionSuggestion } from "./completionEngine";
+import { computeLivePreviewWrite, isWindowsShellLineInput } from "./livePreviewSequence";
 
 const THEMED_PROMPT_MARKERS = /[❯❮→➜➤⟩»›]/;
 
@@ -169,6 +171,7 @@ export function getCommandToRecordOnEnter(
   typedBufferReliable: boolean,
 ): string | null {
   if (!livePrompt.isAtPrompt) return null;
+  if (isProgramInputPromptText(livePrompt.promptText)) return null;
   const alignedCommand = alignedTyped?.trim();
   if (alignedCommand) return alignedCommand;
 
@@ -207,5 +210,38 @@ export function getCommandToRecordOnEnter(
   if (typedBufferReliable && hasThemedPromptDecorationInInput(livePrompt)) return null;
 
   return liveCommand;
+}
+
+/**
+ * Keystrokes that remove the text a snippet acceptance replaces.
+ * Line-start keeps the shell kill-line (Ctrl+U, or backspaces on Windows).
+ * Mid-line and program read-prompts delete only the word being typed.
+ */
+export function computeSnippetAcceptClearSequence(options: {
+  line: string | null;
+  os: string;
+  promptText: string;
+}): string {
+  const line = options.line ?? "";
+  if (line.length === 0) return "";
+
+  const { currentWord, wordIndex } = parseCommandLine(line);
+  const replaceWord = currentWord.length > 0
+    && line.endsWith(currentWord)
+    && (wordIndex > 0 || isProgramInputPromptText(options.promptText));
+  if (replaceWord) return "\b".repeat(currentWord.length);
+
+  return isWindowsShellLineInput(options.os, options.promptText)
+    ? "\b".repeat(line.length)
+    : "\x15";
+}
+
+/** Program read-prompts offer snippets only; shell lines keep every source. */
+export function limitSuggestionsForPrompt(
+  promptText: string,
+  suggestions: CompletionSuggestion[],
+): CompletionSuggestion[] {
+  if (!isProgramInputPromptText(promptText)) return suggestions;
+  return suggestions.filter((suggestion) => suggestion.source === "snippet");
 }
 
