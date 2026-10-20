@@ -551,9 +551,15 @@ function createOpenCodeV2Client({ baseUrl, username = OPENCODE_V2_USERNAME, pass
         signal,
       });
     },
-    async *events(signal) {
+    async openEventStream(signal) {
       const headers = { Authorization: authorization, Accept: "text/event-stream" };
-      const response = await fetchFn(buildOpenCodeV2Url(baseUrl, "/api/event"), { method: "GET", headers, signal });
+      let response;
+      try {
+        response = await fetchFn(buildOpenCodeV2Url(baseUrl, "/api/event"), { method: "GET", headers, signal });
+      } catch (error) {
+        if (signal?.aborted || error?.name === "AbortError") throw error;
+        throw toUserFacingOpenCodeV2Error(error);
+      }
       if (response.status === 401) {
         try { await response.body?.cancel(); } catch {}
         const error = openCodeV2UserError("ai.opencode.v2.unauthorized");
@@ -569,7 +575,9 @@ function createOpenCodeV2Client({ baseUrl, username = OPENCODE_V2_USERNAME, pass
         try { await response.body?.cancel(); } catch {}
         throw openCodeV2UserError("ai.opencode.v2.unavailable");
       }
-      yield* iterateSse(response, signal);
+      return (async function* subscribed() {
+        yield* iterateSse(response, signal);
+      })();
     },
   };
 }
@@ -921,9 +929,12 @@ async function runOpenCodeV2Turn({
     if (files.length) promptBody.files = files;
 
     let streamError = null;
+    // The live /api/event stream does not replay. Wait until the server has
+    // accepted the subscriber, then start reading, and only then post the prompt.
+    const subscription = await client.openEventStream(streamAbort.signal);
     const eventLoop = (async () => {
       try {
-        for await (const event of client.events(streamAbort.signal)) {
+        for await (const event of subscription) {
           if (signal?.aborted) break;
           const result = translateOpenCodeV2Event(event, emitter, state);
           if (result.content) hasContent = true;

@@ -432,6 +432,66 @@ test("runOpenCodeV2Turn continues when the instruction entry is rejected", async
   assert.equal(JSON.parse(instruction.body).value, "netcatty context");
 });
 
+test("runOpenCodeV2Turn posts the prompt only after the event stream is open", async () => {
+  let releaseEvent;
+  const eventGate = new Promise((resolve) => { releaseEvent = resolve; });
+  const order = [];
+  const encoder = new TextEncoder();
+  const fetchImpl = async (url) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/session") return jsonResponse({ data: { id: "ses_1" } });
+    if (path === "/api/event") {
+      order.push("event-start");
+      await eventGate;
+      order.push("event-open");
+      const sse = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: "session.text.delta",
+            data: { sessionID: "ses_1", delta: "Hi" },
+          })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: "session.execution.succeeded",
+            data: { sessionID: "ses_1" },
+          })}\n\n`));
+          controller.close();
+        },
+      });
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (path.endsWith("/prompt")) {
+      order.push("prompt");
+      return jsonResponse({ data: { id: "msg_1" } });
+    }
+    return new Response(null, { status: 204 });
+  };
+  const events = [];
+  const running = runOpenCodeV2Turn({
+    prompt: "hello",
+    emitter: {
+      sessionId: () => {},
+      text: (text) => events.push(text),
+      emitDone: () => events.push("done"),
+      emitError: (message) => events.push(["error", message]),
+    },
+    openCodeV2Factory: async () => ({
+      client: createOpenCodeV2Client({
+        baseUrl: "http://127.0.0.1:4096",
+        username: "opencode",
+        password: "s3cret",
+        fetchImpl,
+      }),
+      server: { close() {} },
+    }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["event-start"]);
+  releaseEvent();
+  await running;
+  assert.deepEqual(order, ["event-start", "event-open", "prompt"]);
+  assert.deepEqual(events, ["Hi", "done"]);
+});
+
 test("runOpenCodeV2Turn reports a rejected prompt without waiting on the event stream", { timeout: 2000 }, async () => {
   let releaseEvent;
   const eventOpen = new Promise((resolve) => { releaseEvent = resolve; });
