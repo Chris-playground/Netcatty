@@ -254,9 +254,10 @@ function buildOpenCodeV2ConfigContent(v1Config = {}) {
     };
   }
   if (Object.keys(servers).length) content.mcp = { servers };
-  if (typeof v1Config.model === "string") {
-    const parsed = parseOpenCodeModel(v1Config.model);
-    if (parsed) content.model = { providerID: parsed.providerID, model: parsed.modelID };
+  if (typeof v1Config.model === "string" && parseOpenCodeModel(v1Config.model)) {
+    // Root config accepts this qualified string. The expanded object is a
+    // different shape and is not required for a selected provider/model.
+    content.model = v1Config.model;
   }
   return content;
 }

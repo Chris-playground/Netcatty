@@ -203,7 +203,7 @@ test("2.x config keeps permissions and local MCP without the 1.x startup keys", 
     environment: { A: "b" },
     disabled: false,
   });
-  assert.deepEqual(content.model, { providerID: "openai", model: "gpt-5" });
+  assert.equal(content.model, "openai/gpt-5");
 });
 
 test("mapOpenCodeV2Catalog uses provider and model ids from the 2.x payloads", () => {
@@ -436,6 +436,8 @@ test("runOpenCodeV2Turn authenticates, keeps the user prompt unchanged, and stre
     ["text", "Hello"],
     ["done"],
   ]);
+  const created = requests.find((request) => new URL(request.url).pathname === "/api/session");
+  assert.deepEqual(JSON.parse(created.body).model, { id: "gpt-5", providerID: "openai" });
   const prompt = requests.find((request) => request.url.endsWith("/prompt"));
   assert.equal(JSON.parse(prompt.body).text, "hello");
   assert.equal(JSON.parse(prompt.body).text.includes("netcatty context"), false);
