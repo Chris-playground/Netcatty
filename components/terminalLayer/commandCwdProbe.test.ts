@@ -97,6 +97,28 @@ test("local command submission uses the shared cwd probe gate", () => {
   assert.match(body, /session\.protocol === "local"\) return true/);
 });
 
+test("local prompt return re-runs the cwd probe after the command finishes", () => {
+  const effects = readFileSync(new URL("../terminal/useTerminalEffects.ts", import.meta.url), "utf8");
+  const completed = effects.slice(
+    effects.indexOf("const pluginAwareOnCommandCompleted"),
+    effects.indexOf("const isRendererActive ="),
+  );
+  assert.match(completed, /if \(isLocalConnection\)/);
+  assert.match(completed, /onCommandSettledRef\.current\?\.\("", host\.id, host\.label, sessionId\)/);
+
+  const terminal = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const wakeCompleted = terminal.slice(
+    terminal.indexOf("const pluginAwareOnCommandCompleted = useCallback"),
+    terminal.indexOf("const pluginAwareOnTerminalCwdChange"),
+  );
+  assert.match(wakeCompleted, /host\.protocol === "local"/);
+  assert.match(wakeCompleted, /onCommandSubmitted\?\.\("", host\.id, host\.label, sessionId\)/);
+  assert.match(
+    terminal,
+    /onCommandSubmitted: cwdAwareOnCommandSubmitted, onCommandSettled: onCommandSubmitted/,
+  );
+});
+
 test("does not probe command cwd on single-channel SSH hosts", () => {
   assert.equal(
     shouldProbeCommandCwd({

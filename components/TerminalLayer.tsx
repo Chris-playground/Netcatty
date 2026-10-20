@@ -1347,9 +1347,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    // Local POSIX shells do not emit OSC 7. They still share this probe so
-    // session restore can `cd` back after restart (#1952). SSH keeps the
-    // extra-exec eligibility check inside canScheduleCommandCwdProbe.
+    // Local POSIX shells do not emit OSC 7. They share this probe so session
+    // restore can `cd` back after restart (#1952). Prompt return calls this
+    // again with an empty command once the shell is idle, so a slow command
+    // such as `sleep 1; cd /tmp` is not recorded at the 150ms snapshot.
+    // SSH keeps the extra-exec eligibility check inside canScheduleCommandCwdProbe.
     if (!session || !canScheduleCommandCwdProbe(session)) return;
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
     const visibleSftpHost = tabId && sidePanelLayoutHasTool(sidePanelLayoutsRef.current.get(tabId), 'sftp')

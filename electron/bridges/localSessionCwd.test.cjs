@@ -76,7 +76,9 @@ test("readLocalSessionCwd does not guess a home directory", async () => {
 });
 
 test("a real local bash cd is visible from the spawned pid", { skip: process.platform !== "linux" }, async () => {
+  const expected = fs.realpathSync("/tmp");
   const child = spawn("/bin/bash", ["-c", "cd /tmp && exec sleep 30"], {
+    cwd: "/",
     stdio: "ignore",
   });
   try {
@@ -84,19 +86,20 @@ test("a real local bash cd is visible from the spawned pid", { skip: process.pla
       child.once("error", reject);
       child.once("spawn", resolve);
     });
+    // spawn fires before bash runs cd. Keep reading until the directory
+    // actually changes; the first successful /proc read is still "/".
     let cwd = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
       const result = await readLocalSessionCwd({
         protocol: "local",
         proc: { pid: child.pid },
       });
-      if (result.success) {
-        cwd = result.cwd;
-        break;
-      }
+      if (result.success) cwd = result.cwd;
+      if (cwd === expected) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.equal(cwd, fs.realpathSync("/tmp"));
+    assert.equal(cwd, expected);
   } finally {
     child.kill("SIGKILL");
   }
