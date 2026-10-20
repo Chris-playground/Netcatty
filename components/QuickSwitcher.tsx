@@ -349,9 +349,14 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
           }
         : null;
 
-    // With no host match the address row is the default Enter target.
-    // When hosts match, they stay first so Enter still connects to the saved host.
-    if (quickConnectItem && results.length === 0) {
+    const hasTabsSection =
+      builtInTabs.length > 0
+      || filteredOrphanSessions.length > 0
+      || filteredWorkspaces.length > 0;
+
+    // The address row is the default Enter target only when nothing else matches.
+    // Matching hosts and open tabs stay ahead of it.
+    if (quickConnectItem && results.length === 0 && !hasTabsSection) {
       pushItem(quickConnectItem);
     }
 
@@ -363,10 +368,6 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       if (quickConnectItem) pushItem(quickConnectItem);
     }
 
-    const hasTabsSection =
-      builtInTabs.length > 0
-      || filteredOrphanSessions.length > 0
-      || filteredWorkspaces.length > 0;
     if (hasTabsSection) {
       pushHeader("header:tabs", t("qs.tabs"));
       builtInTabs.forEach((tabId) => {
@@ -378,6 +379,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       filteredOrphanSessions.forEach((s) =>
         pushItem({ type: "tab", id: s.id, data: s }),
       );
+      if (quickConnectItem && results.length === 0) pushItem(quickConnectItem);
     }
 
     if (filteredShells.length > 0) {

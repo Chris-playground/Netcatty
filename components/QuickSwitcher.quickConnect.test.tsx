@@ -4,7 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../application/i18n/I18nProvider";
-import type { Host } from "../types";
+import type { Host, TerminalSession } from "../types";
 import { QuickSwitcher } from "./QuickSwitcher";
 
 const host = (overrides: Partial<Host> = {}): Host => ({
@@ -61,6 +61,41 @@ test("quick switcher does not steal Enter from a saved host label", () => {
     assert.equal(markup.includes("Quick connect to"), false, label);
     assert.ok(selectedAt >= 0 && hostAt > selectedAt, label);
   }
+});
+
+test("quick switcher keeps a matching open session ahead of an address row", () => {
+  const markup = renderToStaticMarkup(
+    <I18nProvider locale="en">
+      <QuickSwitcher
+        isOpen
+        query="10.4.4.4"
+        results={[]}
+        sessions={[{
+          id: "sess-1",
+          hostId: "host-1",
+          hostLabel: "open-core",
+          username: "admin",
+          hostname: "10.4.4.4",
+          status: "connected",
+        } as TerminalSession]}
+        workspaces={[]}
+        onQueryChange={() => undefined}
+        onSelect={() => undefined}
+        onSelectTab={() => undefined}
+        onClose={() => undefined}
+        onQuickConnect={() => undefined}
+        showSftpTab={false}
+      />
+    </I18nProvider>,
+  );
+  const sessionAt = markup.indexOf("open-core");
+  const quickConnectAt = markup.indexOf("Quick connect to 10.4.4.4");
+  const selectedAt = markup.indexOf("bg-primary/15");
+
+  assert.ok(selectedAt >= 0);
+  assert.ok(sessionAt > selectedAt);
+  assert.ok(quickConnectAt > sessionAt);
+  assert.equal(markup.indexOf("bg-primary/15", selectedAt + 1), -1);
 });
 
 test("quick switcher offers quick connect when nothing else matches", () => {
