@@ -44,13 +44,13 @@ function parseOpenCodeVersionOutput(text) {
     const line = raw.trim();
     if (!line) continue;
     if (/^(?:file|node):\/\//i.test(line) || /^\s*at\s+/i.test(line)) continue;
-    // A crashed CLI often ends with the runtime banner "Node.js v22.x.x".
-    // That is not an OpenCode release.
-    if (/^Node\.js\s+v?\d+/i.test(line)) continue;
     if (/\b(?:Error|TypeError|ReferenceError|SyntaxError|ERR_[A-Z_]+)\b/.test(line)) continue;
     if (/https?:\/\//i.test(line) || /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/.test(line)) continue;
     const match = line.match(/(?:^|[^\d.])v?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][0-9A-Za-z.-]+)?(?=$|[^\d.])/i);
     if (!match) continue;
+    // Node.js and Bun crash banners end with their own runtime version.
+    const runtime = line.slice(0, match.index).trim();
+    if (/(?:^|\b)(?:node\.js|bun)$/i.test(runtime)) continue;
     const major = Number(match[1]);
     if (!Number.isInteger(major) || major > 100) continue;
     return {
@@ -269,6 +269,26 @@ function sanitizeOpenCodeV2Detail(message) {
   return raw;
 }
 
+function isOpenCodeTransportError(error) {
+  const seen = new Set();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (current.name === "AbortError") return false;
+    const code = String(current.code || "");
+    const message = String(current.message || "").trim();
+    if (
+      code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ECONNRESET" || code === "EPIPE" ||
+      code === "UND_ERR_SOCKET" || code === "UND_ERR_CONNECT_TIMEOUT" ||
+      code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT"
+    ) return true;
+    if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up/i.test(message)) return true;
+    if (/^(?:terminated|fetch failed|other side closed)$/i.test(message)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
 function formatOpenCodeV2SessionError(error) {
   const safe = sanitizeOpenCodeV2Detail(error?.message || error?.data?.message || "");
   return safe || "ai.opencode.v2.sessionFailed";
@@ -286,14 +306,8 @@ function toUserFacingOpenCodeV2Error(error) {
     return openCodeV2UserError(safe || "ai.opencode.v2.unavailable");
   }
   if (classifyOpenCodeSpawnError(error).isSpawnEnoent) return openCodeV2UserError(OPENCODE_V1_NOT_FOUND);
-  const code = String(error?.code || "");
   const message = String(error?.message || "");
-  if (
-    code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ECONNRESET" ||
-    /ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up/i.test(message)
-  ) {
-    return openCodeV2UserError("ai.opencode.v2.unavailable");
-  }
+  if (isOpenCodeTransportError(error)) return openCodeV2UserError("ai.opencode.v2.unavailable");
   if (/timeout/i.test(message)) return openCodeV2UserError("ai.opencode.v2.startupTimeout");
   const safe = sanitizeOpenCodeV2Detail(message);
   if (safe) return openCodeV2UserError(safe);
@@ -468,7 +482,13 @@ function createOpenCodeV2Client({ baseUrl, username = OPENCODE_V2_USERNAME, pass
       try { await response.body?.cancel(); } catch {}
       return null;
     }
-    const text = await response.text();
+    let text;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") throw error;
+      throw toUserFacingOpenCodeV2Error(error);
+    }
     if (!response.ok) {
       let detail = "";
       if (text && text.length <= 2048) {

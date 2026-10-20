@@ -33,7 +33,9 @@ test("parseOpenCodeVersionOutput distinguishes OpenCode 1.x from 2.x", () => {
     parseOpenCodeVersionOutput("TypeError: Cannot read properties of undefined (reading 'split')\nNode.js v22.23.1\n"),
     null,
   );
+  assert.equal(parseOpenCodeVersionOutput("panic: failed\nBun v1.3.14 (linux x64)\n"), null);
   assert.deepEqual(parseOpenCodeVersionOutput("v2.1.0\nNode.js v22.23.1\n"), { major: 2, minor: 1, patch: 0 });
+  assert.deepEqual(parseOpenCodeVersionOutput("v2.1.0\nBun v1.3.14\n"), { major: 2, minor: 1, patch: 0 });
   assert.equal(isOpenCodeV2Version(parseOpenCodeVersionOutput("v2.1.0")), true);
   assert.equal(isOpenCodeV2Version(parseOpenCodeVersionOutput("1.19.3")), false);
   assert.equal(isOpenCodeV2Version(null), false);
@@ -72,6 +74,27 @@ test("a crashed --version probe is not classified as OpenCode 2", async () => {
   });
   assert.equal(version, null);
   assert.equal(isOpenCodeV2Version(version), false);
+});
+
+test("a Bun crash banner is not cached as OpenCode 1.x", async () => {
+  resetOpenCodeVersionCache();
+  let calls = 0;
+  const probe = () => detectOpenCodeCliVersion({
+    binPath: "opencode",
+    execFileImpl: (_command, _args, _options, callback) => {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error("opencode --version failed");
+        error.code = 1;
+        callback(error, "", "panic: failed\nBun v1.3.14 (linux x64)\n");
+        return;
+      }
+      callback(null, "v2.1.0\n", "");
+    },
+  });
+  assert.equal(await probe(), null);
+  assert.equal((await probe()).major, 2);
+  assert.equal(calls, 2);
 });
 
 test("OpenCode serve startup matches the 2.x banner and a split password line", () => {
@@ -252,6 +275,40 @@ test("OpenCode 2 client sends Basic auth and hides unauthorized bodies", async (
     assert.equal(error.message, "ai.opencode.v2.unauthorized");
     assert.equal(JSON.stringify(error).includes(password), false);
     assert.equal(JSON.stringify(error).includes("<html>"), false);
+    return true;
+  });
+});
+
+test("OpenCode 2 client hides undici transport failures", async () => {
+  const cause = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+  const fetchFailed = new TypeError("fetch failed");
+  fetchFailed.cause = cause;
+  const failing = createOpenCodeV2Client({
+    baseUrl: "http://127.0.0.1:4096",
+    username: "opencode",
+    password: "s3cret",
+    fetchImpl: async () => { throw fetchFailed; },
+  });
+  await assert.rejects(failing.info(), (error) => {
+    assert.equal(error.message, "ai.opencode.v2.unavailable");
+    assert.equal(String(error).includes("fetch failed"), false);
+    assert.equal(String(error).includes("other side closed"), false);
+    return true;
+  });
+
+  const dropped = createOpenCodeV2Client({
+    baseUrl: "http://127.0.0.1:4096",
+    username: "opencode",
+    password: "s3cret",
+    fetchImpl: async () => ({
+      status: 200,
+      body: { cancel() {} },
+      text: async () => { throw new TypeError("terminated"); },
+    }),
+  });
+  await assert.rejects(dropped.info(), (error) => {
+    assert.equal(error.message, "ai.opencode.v2.unavailable");
+    assert.equal(String(error).includes("terminated"), false);
     return true;
   });
 });
