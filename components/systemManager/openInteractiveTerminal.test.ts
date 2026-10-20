@@ -93,3 +93,37 @@ test('openInteractiveTerminal keeps SSH connection reuse for ordinary connected 
   assert.equal(payload.sourceSession.protocol, 'ssh');
   assert.equal(payload.sourceSession.reuseConnectionFromSessionId, 'session-1');
 });
+
+test('openInteractiveTerminal passes the system panel rectangle so the shell can avoid it', async () => {
+  const previous = globalThis.document;
+  const panel = {
+    getBoundingClientRect: () => ({ x: 1000, y: 40, width: 440, height: 860, left: 1000, top: 40, right: 1440, bottom: 900 }),
+  };
+  globalThis.document = {
+    querySelector(selector: string) {
+      return selector === '[data-section="system-manager-panel"]' ? panel : null;
+    },
+  } as unknown as Document;
+  const payloads: Array<{ avoidClientRect?: { x: number; width: number } }> = [];
+  try {
+    await openInteractiveTerminal(
+      {
+        openTerminalPopup: async (payload: { avoidClientRect?: { x: number; width: number } }) => {
+          payloads.push(payload);
+          return { success: true };
+        },
+      } as never,
+      parentSession(),
+      'pod: multi-box',
+      'kubectl exec -it multi-box -- sh',
+    );
+  } finally {
+    if (previous === undefined) {
+      delete (globalThis as { document?: Document }).document;
+    } else {
+      globalThis.document = previous;
+    }
+  }
+
+  assert.deepEqual(payloads[0]?.avoidClientRect, { x: 1000, y: 40, width: 440, height: 860 });
+});

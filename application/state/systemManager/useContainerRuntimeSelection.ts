@@ -192,13 +192,7 @@ export function useContainerRuntimeSelection({
   }, []);
 
   const runtime: ContainerRuntimeId = source && source !== 'kubernetes' ? source : 'docker';
-  const showRuntimeSwitcher = source !== 'kubernetes' && detected.length > 1;
-  const rememberedEngine = readContainerRuntimePreference(hostKey)?.engine;
-  const backEngine = source === 'kubernetes'
-    ? (rememberedEngine && detected.includes(rememberedEngine)
-      ? rememberedEngine
-      : firstContainerRuntime(detected))
-    : null;
+  const showRuntimeSwitcher = detected.length > 1;
 
   return {
     source,
@@ -214,6 +208,5 @@ export function useContainerRuntimeSelection({
     runtime,
     detected,
     showRuntimeSwitcher,
-    backEngine,
   };
 }

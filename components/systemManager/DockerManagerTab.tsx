@@ -93,7 +93,6 @@ export const DockerManagerTab = memo(function DockerManagerTab({
     runtime,
     detected,
     showRuntimeSwitcher,
-    backEngine,
   } = useContainerRuntimeSelection({
     sessionId,
     hostKey: parentSession.hostId || sessionId,
@@ -125,17 +124,6 @@ export const DockerManagerTab = memo(function DockerManagerTab({
             {label}
           </button>
         ))}
-        {source === 'kubernetes' && backEngine && (
-          <button
-            type="button"
-            data-section="container-runtime-back"
-            className="flex items-center gap-1.5 px-2 py-1 rounded text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => selectSource(backEngine)}
-          >
-            <Box size={12} />
-            {t('systemManager.docker.subTabs.containers')}
-          </button>
-        )}
         <div className="flex-1" />
         {showRuntimeSwitcher && source && detected.includes(source) && (
           <CompactSelect

@@ -227,6 +227,11 @@ export interface TerminalPopupPayload {
   parentSessionId: string;
   sourceSession: import('../../types').TerminalSession;
   startupCommand: string;
+  /**
+   * System-manager panel rectangle in renderer viewport pixels. The popup is
+   * placed in the remaining source-window area so it does not cover this panel.
+   */
+  avoidClientRect?: { x: number; y: number; width: number; height: number };
   localShellType?: import('../../types').TerminalSession['shellType'];
   /**
    * When set, the popup attaches to this already-running backend session
