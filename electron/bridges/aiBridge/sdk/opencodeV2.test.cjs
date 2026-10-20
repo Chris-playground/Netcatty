@@ -1,0 +1,431 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
+const {
+  buildOpenCodeBasicAuthorization,
+  buildOpenCodeV2ConfigContent,
+  createOpenCodeServeStartupParser,
+  createOpenCodeV2Client,
+  detectOpenCodeCliVersion,
+  isOpenCodeV2Version,
+  listOpenCodeV2Models,
+  mapOpenCodeV2Catalog,
+  parseOpenCodeVersionOutput,
+  resetOpenCodeVersionCache,
+  runOpenCodeV2Turn,
+  translateOpenCodeV2Event,
+  waitForOpenCodeChildReady,
+} = require("./opencodeV2.cjs");
+const { listOpenCodeModels, resetOpenCodeListServerPool, runOpenCodeTurn } = require("./opencodeDriver.cjs");
+
+test("parseOpenCodeVersionOutput distinguishes OpenCode 1.x from 2.x", () => {
+  assert.deepEqual(parseOpenCodeVersionOutput("v2.1.0\n"), { major: 2, minor: 1, patch: 0 });
+  assert.deepEqual(parseOpenCodeVersionOutput("2.1.0"), { major: 2, minor: 1, patch: 0 });
+  assert.deepEqual(parseOpenCodeVersionOutput("opencode version 1.19.3"), { major: 1, minor: 19, patch: 3 });
+  assert.equal(parseOpenCodeVersionOutput("v2.0.0-beta.1").major, 2);
+  assert.equal(parseOpenCodeVersionOutput(""), null);
+  assert.equal(parseOpenCodeVersionOutput("not a version"), null);
+  assert.equal(parseOpenCodeVersionOutput("listening on 127.0.0.1:4096"), null);
+  assert.equal(
+    parseOpenCodeVersionOutput("TypeError: Cannot read properties of undefined (reading 'split')\nNode.js v22.23.1\n"),
+    null,
+  );
+  assert.deepEqual(parseOpenCodeVersionOutput("v2.1.0\nNode.js v22.23.1\n"), { major: 2, minor: 1, patch: 0 });
+  assert.equal(isOpenCodeV2Version(parseOpenCodeVersionOutput("v2.1.0")), true);
+  assert.equal(isOpenCodeV2Version(parseOpenCodeVersionOutput("1.19.3")), false);
+  assert.equal(isOpenCodeV2Version(null), false);
+});
+
+test("a crashed --version probe is not classified as OpenCode 2", async () => {
+  resetOpenCodeVersionCache();
+  const crash = "TypeError: Cannot read properties of undefined (reading 'split')\nNode.js v22.23.1\n";
+  const version = await detectOpenCodeCliVersion({
+    binPath: "opencode",
+    execFileImpl: (_command, _args, _options, callback) => {
+      const error = new Error("opencode --version failed");
+      error.code = 1;
+      callback(error, "", crash);
+    },
+  });
+  assert.equal(version, null);
+  assert.equal(isOpenCodeV2Version(version), false);
+});
+
+test("OpenCode serve startup matches the 2.x banner and a split password line", () => {
+  const parser = createOpenCodeServeStartupParser();
+  assert.deepEqual(parser.push("server listen"), { url: null, password: null, ready: false });
+  assert.deepEqual(
+    parser.push("ing on http://127.0.0.1:4455\nser"),
+    { url: "http://127.0.0.1:4455", password: null, ready: true },
+  );
+  assert.deepEqual(
+    parser.push("ver password zNAK.secret\n"),
+    { url: "http://127.0.0.1:4455", password: "zNAK.secret", ready: true },
+  );
+
+  const v1 = createOpenCodeServeStartupParser();
+  assert.deepEqual(
+    v1.push("opencode server listening on http://127.0.0.1:4096\n"),
+    { url: "http://127.0.0.1:4096", password: null, ready: true },
+  );
+});
+
+test("startup waiter captures a late password and never returns server spam", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.pid = 42;
+  let stopped = 0;
+  const ready = waitForOpenCodeChildReady(child, {
+    timeoutMs: 1000,
+    passwordGraceMs: 30,
+    stop: () => { stopped += 1; },
+  });
+  child.stdout.emit("data", Buffer.from("server listening on http://127.0.0.1:4096\n"));
+  child.stderr.emit("data", Buffer.from("server password printed-secret\n"));
+  const result = await ready;
+  assert.equal(result.url, "http://127.0.0.1:4096");
+  assert.equal(result.password, "printed-secret");
+  assert.equal(stopped, 0);
+
+  const timedOut = new EventEmitter();
+  timedOut.stdout = new EventEmitter();
+  timedOut.stderr = new EventEmitter();
+  timedOut.pid = 43;
+  const pending = waitForOpenCodeChildReady(timedOut, {
+    timeoutMs: 20,
+    passwordGraceMs: 500,
+    stop: () => {},
+  });
+  timedOut.stderr.emit("data", Buffer.from("debug server password hunter2\nstill starting\n"));
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.message, "ai.opencode.v2.startupTimeout");
+    assert.equal(JSON.stringify(error).includes("hunter2"), false);
+    return true;
+  });
+});
+
+test("startup waiter reports an exit without the server log", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const pending = waitForOpenCodeChildReady(child, { timeoutMs: 1000, passwordGraceMs: 20, stop: () => {} });
+  child.stderr.emit("data", Buffer.from("server password hunter2\npanic\n"));
+  child.emit("exit", 7);
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.message, "ai.opencode.v2.exited");
+    assert.equal(JSON.stringify(error).includes("hunter2"), false);
+    assert.equal(JSON.stringify(error).includes("panic"), false);
+    return true;
+  });
+});
+
+test("startup waiter resolves with the injected password when 2.x omits the password line", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const ready = waitForOpenCodeChildReady(child, { timeoutMs: 1000, passwordGraceMs: 20, stop: () => {} });
+  child.stdout.emit("data", Buffer.from("server listening on http://127.0.0.1:4096\n"));
+  const result = await ready;
+  assert.equal(result.url, "http://127.0.0.1:4096");
+  assert.equal(result.password, null);
+});
+
+test("2.x config keeps permissions and local MCP without the 1.x startup keys", () => {
+  const content = buildOpenCodeV2ConfigContent({
+    share: "disabled",
+    autoupdate: false,
+    permission: { edit: "deny", bash: "allow", read: { "*": "deny", "/tmp/**": "allow" } },
+    mcp: {
+      netcatty: { type: "local", command: ["node", "cli.js"], environment: { A: "b" }, enabled: true },
+    },
+    model: "openai/gpt-5",
+  });
+  assert.equal(content.share, "disabled");
+  assert.equal(content.update, "disable");
+  assert.equal(content.permission, undefined);
+  assert.equal(content.autoupdate, undefined);
+  assert.deepEqual(content.permissions, [
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "bash", resource: "*", effect: "allow" },
+    { action: "read", resource: "*", effect: "deny" },
+    { action: "read", resource: "/tmp/**", effect: "allow" },
+  ]);
+  assert.deepEqual(content.mcp.servers.netcatty, {
+    type: "local",
+    command: ["node", "cli.js"],
+    environment: { A: "b" },
+    disabled: false,
+  });
+  assert.deepEqual(content.model, { providerID: "openai", model: "gpt-5" });
+});
+
+test("mapOpenCodeV2Catalog uses provider and model ids from the 2.x payloads", () => {
+  const catalog = mapOpenCodeV2Catalog(
+    { data: [
+      { providerID: "openai", modelID: "gpt-5", name: "GPT-5", enabled: true },
+      { providerID: "openai", modelID: "hidden", name: "Hidden", enabled: false },
+    ] },
+    { data: [{ id: "openai", name: "OpenAI" }] },
+    { data: { providerID: "openai", modelID: "gpt-5", name: "GPT-5" } },
+  );
+  assert.deepEqual(catalog, {
+    currentModelId: "openai/gpt-5",
+    models: [{ id: "openai/gpt-5", name: "OpenAI GPT-5" }],
+  });
+});
+
+test("OpenCode 2 client sends Basic auth and hides unauthorized bodies", async () => {
+  const requests = [];
+  const password = "s3cret-value";
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/api/info")) {
+      return new Response(`<html>server password ${password}</html>`, { status: 401, headers: { "content-type": "text/html" } });
+    }
+    if (String(url).includes("/api/model/default")) {
+      return jsonResponse({ data: { providerID: "openai", modelID: "gpt-5", name: "GPT-5" } });
+    }
+    if (String(url).includes("/api/provider")) {
+      return jsonResponse({ data: [{ id: "openai", name: "OpenAI" }] });
+    }
+    return jsonResponse({ data: [{ providerID: "openai", modelID: "gpt-5", name: "GPT-5", enabled: true }] });
+  };
+  const client = createOpenCodeV2Client({
+    baseUrl: "http://127.0.0.1:4096",
+    username: "opencode",
+    password,
+    fetchImpl,
+  });
+  assert.equal(client.authorization, buildOpenCodeBasicAuthorization("opencode", password));
+
+  const catalog = await client.listCatalog(undefined, "/workspace");
+  assert.equal(catalog.currentModelId, "openai/gpt-5");
+  assert.equal(requests.length, 3);
+  for (const request of requests) {
+    assert.equal(request.init.headers.Authorization, client.authorization);
+    assert.equal(request.init.headers.authorization, undefined);
+  }
+  const modelUrl = new URL(requests.find((request) => request.url.includes("/api/model") && !request.url.includes("default")).url);
+  assert.equal(modelUrl.searchParams.get("location[directory]"), "/workspace");
+
+  await assert.rejects(client.info(), (error) => {
+    assert.equal(error.message, "ai.opencode.v2.unauthorized");
+    assert.equal(JSON.stringify(error).includes(password), false);
+    assert.equal(JSON.stringify(error).includes("<html>"), false);
+    return true;
+  });
+});
+
+test("listCatalog omits the location query when no directory is set", async () => {
+  const urls = [];
+  const client = createOpenCodeV2Client({
+    baseUrl: "http://127.0.0.1:4096/",
+    username: "opencode",
+    password: "pw",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      if (String(url).includes("/api/model/default")) return jsonResponse({ data: null });
+      if (String(url).includes("/api/provider")) return jsonResponse({ data: [] });
+      return jsonResponse({ data: [] });
+    },
+  });
+  await client.listCatalog();
+  assert.equal(urls.some((url) => url.includes("location")), false);
+});
+
+test("translateOpenCodeV2Event streams text, tools, and a safe session failure", () => {
+  const events = [];
+  const emitter = {
+    text: (t) => events.push(["text", t]),
+    reasoning: (t) => events.push(["reasoning", t]),
+    reasoningEnd: () => events.push(["reasoningEnd"]),
+    toolCall: (name, input, id) => events.push(["tool", name, input, id]),
+    toolResult: (id, output, name) => events.push(["result", id, output, name]),
+    emitError: (message) => events.push(["error", message]),
+  };
+  const state = { sessionID: "ses_1" };
+  assert.equal(translateOpenCodeV2Event({
+    type: "session.text.delta",
+    data: { sessionID: "ses_1", delta: "Hello" },
+  }, emitter, state).content, true);
+  translateOpenCodeV2Event({
+    type: "session.text.delta",
+    data: { sessionID: "other", delta: "nope" },
+  }, emitter, state);
+  translateOpenCodeV2Event({
+    type: "session.tool.input.started",
+    data: { sessionID: "ses_1", id: "call_1", name: "bash" },
+  }, emitter, state);
+  translateOpenCodeV2Event({
+    type: "session.tool.called",
+    data: { sessionID: "ses_1", id: "call_1", input: { cmd: "ls" } },
+  }, emitter, state);
+  translateOpenCodeV2Event({
+    type: "session.tool.failed",
+    data: { sessionID: "ses_1", id: "call_1", error: { message: "command not found" } },
+  }, emitter, state);
+  const failed = translateOpenCodeV2Event({
+    type: "session.execution.failed",
+    data: { sessionID: "ses_1", error: { message: "server password hunter2\nstack" } },
+  }, emitter, state);
+  assert.equal(failed.error, true);
+  assert.deepEqual(events, [
+    ["text", "Hello"],
+    ["tool", "bash", { cmd: "ls" }, "call_1"],
+    ["result", "call_1", "command not found", "bash"],
+    ["error", "ai.opencode.v2.sessionFailed"],
+  ]);
+  assert.equal(JSON.stringify(events).includes("hunter2"), false);
+});
+
+test("runOpenCodeV2Turn authenticates, keeps the user prompt unchanged, and streams the session", async () => {
+  const requests = [];
+  const encoder = new TextEncoder();
+  const sse = new ReadableStream({
+    start(controller) {
+      const send = (event) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      send({ type: "server.connected", data: {} });
+      send({ type: "session.reasoning.delta", data: { sessionID: "ses_1", delta: "Think" } });
+      send({ type: "session.reasoning.ended", data: { sessionID: "ses_1" } });
+      send({ type: "session.text.delta", data: { sessionID: "ses_1", delta: "Hello" } });
+      send({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } });
+      controller.close();
+    },
+  });
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), method: init.method, headers: init.headers, body: init.body });
+    const path = new URL(url).pathname;
+    if (path === "/api/session" && init.method === "POST") return jsonResponse({ data: { id: "ses_1" } });
+    if (path.includes("/instructions/")) return new Response(null, { status: 204 });
+    if (path === "/api/event") {
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (path.endsWith("/prompt")) return jsonResponse({ data: { id: "msg_1" } });
+    return jsonResponse({ data: {} });
+  };
+  const events = [];
+  let closed = false;
+  const result = await runOpenCodeV2Turn({
+    prompt: "hello",
+    systemPrompt: "netcatty context",
+    cwd: "/workspace",
+    model: "openai/gpt-5",
+    emitter: {
+      sessionId: (id) => events.push(["session", id]),
+      text: (t) => events.push(["text", t]),
+      reasoning: (t) => events.push(["reasoning", t]),
+      reasoningEnd: () => events.push(["reasoningEnd"]),
+      emitDone: () => events.push(["done"]),
+      emitError: (message) => events.push(["error", message]),
+      warning: (id, message) => events.push(["warning", id, message]),
+    },
+    openCodeV2Factory: async () => ({
+      client: createOpenCodeV2Client({
+        baseUrl: "http://127.0.0.1:4096",
+        username: "opencode",
+        password: "s3cret",
+        fetchImpl,
+      }),
+      server: { close: () => { closed = true; } },
+    }),
+  });
+
+  assert.equal(result.sessionId, "ses_1");
+  assert.equal(closed, true);
+  assert.deepEqual(events, [
+    ["session", "ses_1"],
+    ["reasoning", "Think"],
+    ["reasoningEnd"],
+    ["text", "Hello"],
+    ["done"],
+  ]);
+  const prompt = requests.find((request) => request.url.endsWith("/prompt"));
+  assert.equal(JSON.parse(prompt.body).text, "hello");
+  assert.equal(JSON.parse(prompt.body).text.includes("netcatty context"), false);
+  const instruction = requests.find((request) => request.url.includes("/instructions/"));
+  assert.equal(JSON.parse(instruction.body).value, "netcatty context");
+  for (const request of requests) {
+    assert.equal(request.headers.Authorization, buildOpenCodeBasicAuthorization("opencode", "s3cret"));
+  }
+});
+
+test("listOpenCodeModels stays on the 1.x factory for OpenCode 1.x", async () => {
+  resetOpenCodeListServerPool();
+  let v1 = false;
+  const models = await listOpenCodeModels({
+    versionProbe: async () => ({ major: 1, minor: 19, patch: 3 }),
+    openCodeFactory: async () => {
+      v1 = true;
+      return {
+        client: { config: { providers: async () => ({ providers: [], default: {} }) } },
+        server: { close() {} },
+      };
+    },
+    openCodeV2Factory: async () => {
+      throw new Error("v2 catalog should not run");
+    },
+  });
+  assert.equal(v1, true);
+  assert.deepEqual(models.models, []);
+  resetOpenCodeListServerPool();
+});
+
+test("listOpenCodeModels uses the 2.x catalog when the binary is 2.x", async () => {
+  const models = await listOpenCodeModels({
+    versionProbe: async () => parseOpenCodeVersionOutput("v2.1.0"),
+    openCodeV2Factory: async () => ({
+      client: {
+        listCatalog: async () => ({
+          currentModelId: "openai/gpt-5",
+          models: [{ id: "openai/gpt-5", name: "OpenAI GPT-5" }],
+        }),
+      },
+      server: { close() {} },
+    }),
+  });
+  assert.equal(models.currentModelId, "openai/gpt-5");
+});
+
+test("runOpenCodeTurn keeps the injected 1.x factory when a factory is supplied", async () => {
+  const events = [];
+  await runOpenCodeTurn({
+    prompt: "hi",
+    versionProbe: async () => ({ major: 2, minor: 1, patch: 0 }),
+    emitter: {
+      sessionId: () => {},
+      text: (t) => events.push(t),
+      emitDone: () => events.push("done"),
+      emitError: (message) => events.push(message),
+    },
+    openCodeFactory: async () => ({
+      client: {
+        global: { event: async () => ({ stream: (async function* empty() {})() }) },
+        session: {
+          create: async () => ({ data: { id: "sess-1" } }),
+          promptAsync: async () => ({ data: true }),
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+  assert.ok(events.includes("ai.opencode.v2.empty") === false);
+  assert.ok(events.includes("done") || events.some((event) => String(event).includes("empty")));
+});
+
+test("listOpenCodeV2Models returns an empty catalog when the caller already aborted", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const models = await listOpenCodeV2Models({
+    signal: controller.signal,
+    openCodeV2Factory: async () => { throw new Error("should not connect"); },
+  });
+  assert.deepEqual(models, { currentModelId: null, models: [] });
+});
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
