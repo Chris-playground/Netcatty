@@ -273,7 +273,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /resolveOptions: \(\) => \(\{[\s\S]*?shiftEnterSettings: ctx\.terminalSettingsRef\.current,[\s\S]*?\}\),/s,
+    /resolveOptions: \(\) => \(\{[\s\S]*?shiftEnterSettings: ctx\.terminalSettingsRef\.current,[\s\S]*?nativeKittyPreservesShiftEnter: !kittyKeyboardProtocolEnabled\s*&& nativeKittyKeyboardPreservesShiftEnter\(readNativeKittyKeyboardFlags\(term\)\),[\s\S]*?\}\),/s,
   );
   assert.doesNotMatch(source, /resolveShiftEnterText\([\s\S]*?alternateScreen:/s);
   assert.match(source, /getShiftEnterSubmittedInput\(logicalData\)/);

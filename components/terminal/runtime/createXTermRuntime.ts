@@ -3131,6 +3131,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       legacySuppressedKeys: broadcastLegacySuppressedKeys,
       win32InputMode: term.modes.win32InputMode,
       shiftEnterSettings: ctx.terminalSettingsRef.current,
+      nativeKittyPreservesShiftEnter: !kittyKeyboardProtocolEnabled
+        && nativeKittyKeyboardPreservesShiftEnter(readNativeKittyKeyboardFlags(term)),
       win32ShiftEnterTextKeys: broadcastWin32ShiftEnterTextKeys,
     }),
     getSessionId: () => ctx.sessionRef.current,
