@@ -230,6 +230,7 @@ declare global {
       mode?: 'temporary' | 'persistent';
       idleTimeoutMinutes?: number;
       sessionIdleTimeoutMinutes?: number;
+      redaction?: import("../../application/state/useExternalMcpToggleState").ExternalMcpRedactionSettings;
     }): Promise<Record<string, unknown>>;
     externalMcpGetUniversalSetupPrompt?(): Promise<{
       ok: boolean;

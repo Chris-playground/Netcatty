@@ -36,6 +36,7 @@ import { Select, SettingCard, SettingRow, Toggle } from "../../../settings/setti
 import { CopyableCodeBlock } from "./CopyableCodeBlock";
 import { ExternalMcpHttpSection, type ExternalMcpHttpViewStatus } from "./ExternalMcpHttpSection";
 import { getBridge } from "./types";
+import { ExternalMcpRedactionSection } from "./ExternalMcpRedactionSection";
 
 type ExternalMcpClient = "codex" | "claude" | "grok" | "cursor" | "other";
 
@@ -252,7 +253,7 @@ export function buildCursorSnippet(launcherPath: string, discoveryPath?: string 
 
 export const ExternalMcpCard: React.FC = () => {
   const { t } = useI18n();
-  const { enabled, setEnabled } = useExternalMcpToggleState();
+  const { enabled, setEnabled, error: configError } = useExternalMcpToggleState();
   const [mode, setModeRaw] = useState<ExternalMcpMode>(() => readExternalMcpMode());
   const [idleTimeoutMinutes, setIdleTimeoutRaw] = useState<number>(() => readExternalMcpIdleTimeoutMinutes());
   const [focusOnHostOpen, setFocusOnHostOpenRaw] = useState<boolean>(() => readExternalMcpFocusOnHostOpen());
@@ -681,8 +682,7 @@ export const ExternalMcpCard: React.FC = () => {
           checked={enabled}
           onChange={(nextEnabled) => {
             setActionMessage(null);
-            setEnabled(nextEnabled);
-            window.setTimeout(() => { void refreshStatus(); }, 0);
+            void setEnabled(nextEnabled).then(() => refreshStatus());
           }}
         />
       </div>
@@ -805,6 +805,8 @@ export const ExternalMcpCard: React.FC = () => {
           </div>
         </SettingRow>
       </SettingCard>
+
+      <ExternalMcpRedactionSection />
 
       <ExternalMcpHttpSection
         externalMcpEnabled={enabled}
@@ -989,8 +991,8 @@ export const ExternalMcpCard: React.FC = () => {
           {actionMessage.text}
         </div>
       ) : null}
-      {status?.error ? (
-        <div className="text-xs text-destructive">{status.error}</div>
+      {configError || status?.error ? (
+        <div role="alert" className="text-xs text-destructive">{configError || status?.error}</div>
       ) : null}
     </div>
   );
