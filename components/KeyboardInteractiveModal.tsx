@@ -59,9 +59,13 @@ function guidanceKeys(text: string): string[] {
 
 /** Server directions that are not already the field label. Plain text, not a prompt dump. */
 export function keyboardInteractiveGuidance(request: Pick<KeyboardInteractiveRequest, "name" | "instructions" | "prompts" | "hostname">): string {
-  const promptKeys = new Set<string>();
+  const labelKeys = new Set<string>();
+  const promptLines: string[] = [];
   for (const prompt of request.prompts || []) {
-    for (const key of guidanceKeys(prompt?.prompt || "")) promptKeys.add(key);
+    const parts = String(prompt?.prompt || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const last = parts.at(-1) || "";
+    for (const key of guidanceKeys(last)) labelKeys.add(key);
+    promptLines.push(...parts.slice(0, -1));
   }
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -69,7 +73,7 @@ export function keyboardInteractiveGuidance(request: Pick<KeyboardInteractiveReq
     const line = text.trim().replace(/^\|\s*/, "");
     if (!line) return;
     const keys = guidanceKeys(line);
-    if (keys.some((key) => promptKeys.has(key) || seen.has(key))) return;
+    if (keys.some((key) => labelKeys.has(key) || seen.has(key))) return;
     for (const key of keys) seen.add(key);
     lines.push(line);
   };
@@ -77,6 +81,7 @@ export function keyboardInteractiveGuidance(request: Pick<KeyboardInteractiveReq
   const name = (request.name || "").trim();
   if (name && name.toLowerCase() !== hostname) push(name);
   for (const part of String(request.instructions || "").split(/\r?\n/)) push(part);
+  for (const part of promptLines) push(part);
   return lines.join("\n");
 }
 

@@ -49,6 +49,18 @@ test("keyboardInteractiveGuidance keeps directions that are not already the fiel
     instructions: "| Verification code:",
     prompts: [{ prompt: "Verification code:", echo: false }],
   }), "host");
+  assert.equal(keyboardInteractiveGuidance({
+    name: "bastion",
+    hostname: "bastion",
+    instructions: "",
+    prompts: [{ prompt: "1. OTP\n2. SMS\nOption> ", echo: true }],
+  }), "1. OTP\n2. SMS");
+  assert.equal(keyboardInteractiveGuidance({
+    name: "bastion",
+    hostname: "bastion",
+    instructions: "1. OTP",
+    prompts: [{ prompt: "1. OTP\nOption>", echo: true }],
+  }), "1. OTP");
 });
 
 test("TOTP fill stays off password prompts and prefers verification prompts", () => {
