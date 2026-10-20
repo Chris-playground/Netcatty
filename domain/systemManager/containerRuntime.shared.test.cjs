@@ -314,6 +314,18 @@ test("kubectl popup commands skip the POSIX wrapper on Windows shells", () => {
     buildKubectlDescribeCommand("kind-kind", "default", "api", "cmd"),
     /--context "kind-kind"/,
   );
+  assert.equal(
+    buildKubectlDescribeCommand("prod-%USERNAME%", "default", "api", "cmd"),
+    'echo "Invalid context"',
+  );
+  assert.match(
+    buildKubectlDescribeCommand("prod-%USERNAME%", "default", "api", "powershell"),
+    /--context 'prod-%USERNAME%'/,
+  );
+  assert.equal(
+    buildKubectlNamespacesCommand("prod-%USERNAME%", "powershell"),
+    "kubectl --context 'prod-%USERNAME%' get namespaces -o json",
+  );
 });
 
 test("container popup commands inspect in the host shell on Windows", () => {

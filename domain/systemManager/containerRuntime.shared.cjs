@@ -166,10 +166,15 @@ function hasControlChar(text) {
   return false;
 }
 
-function isSafeShellArg(value) {
+function isSafeShellArg(value, shell) {
   const text = String(value ?? "");
   if (!text || text.length > 512) return false;
-  return !hasControlChar(text);
+  if (hasControlChar(text)) return false;
+  // Interactive cmd.exe expands %VAR% inside double quotes, and %% is not a
+  // reliable escape there. Reject the argument instead of targeting a
+  // substituted context.
+  if (shell === "cmd" && text.includes("%")) return false;
+  return true;
 }
 
 function normalizePopupShell(shell) {
@@ -185,10 +190,10 @@ function quoteShellArg(shell, value) {
 
 function kubectlPrefix(context, namespace, shell = "posix") {
   const popupShell = normalizePopupShell(shell);
-  if (!isSafeShellArg(context)) return null;
+  if (!isSafeShellArg(context, popupShell)) return null;
   const parts = ["kubectl", "--context", quoteShellArg(popupShell, context)];
   if (namespace != null && namespace !== "") {
-    if (!isSafeShellArg(namespace)) return null;
+    if (!isSafeShellArg(namespace, popupShell)) return null;
     parts.push("-n", quoteShellArg(popupShell, namespace));
   }
   return parts.join(" ");
@@ -196,7 +201,7 @@ function kubectlPrefix(context, namespace, shell = "posix") {
 
 function optionalContainerArg(container, shell = "posix") {
   if (container == null || container === "") return "";
-  if (!isSafeShellArg(container)) return null;
+  if (!isSafeShellArg(container, normalizePopupShell(shell))) return null;
   return ` -c ${quoteShellArg(normalizePopupShell(shell), container)}`;
 }
 
@@ -214,7 +219,7 @@ function buildKubectlContextsCommand() {
 
 function buildKubectlNamespacesCommand(context, shell) {
   const popupShell = normalizePopupShell(shell);
-  if (!isSafeShellArg(context)) return null;
+  if (!isSafeShellArg(context, popupShell)) return null;
   return `kubectl --context ${quoteShellArg(popupShell, context)} get namespaces -o json`;
 }
 
@@ -227,7 +232,7 @@ function buildKubectlPodsCommand(context, namespace, shell) {
 function buildKubectlDeletePodCommand(context, namespace, pod, shell) {
   const popupShell = normalizePopupShell(shell);
   const prefix = kubectlPrefix(context, namespace, popupShell);
-  if (!prefix || !isSafeShellArg(pod)) return null;
+  if (!prefix || !isSafeShellArg(pod, popupShell)) return null;
   return `${prefix} delete pod ${quoteShellArg(popupShell, pod)} --wait=false`;
 }
 
@@ -245,7 +250,8 @@ function finishKubectlPopup(shell, command) {
 function buildKubectlExecShellCommand(context, namespace, pod, container, shell) {
   const popupShell = normalizePopupShell(shell);
   const prefix = kubectlPrefix(context, namespace, popupShell);
-  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  if (!prefix) return 'echo "Invalid context"';
+  if (!isSafeShellArg(pod, popupShell)) return 'echo "Invalid pod name"';
   const containerArg = optionalContainerArg(container, popupShell);
   if (containerArg == null) return 'echo "Invalid container name"';
   const command = `${prefix} exec -it ${quoteShellArg(popupShell, pod)}${containerArg} -- ${containerShellArg(popupShell)}`;
@@ -255,7 +261,8 @@ function buildKubectlExecShellCommand(context, namespace, pod, container, shell)
 function buildKubectlLogsCommand(context, namespace, pod, container, shell) {
   const popupShell = normalizePopupShell(shell);
   const prefix = kubectlPrefix(context, namespace, popupShell);
-  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  if (!prefix) return 'echo "Invalid context"';
+  if (!isSafeShellArg(pod, popupShell)) return 'echo "Invalid pod name"';
   const containerArg = optionalContainerArg(container, popupShell);
   if (containerArg == null) return 'echo "Invalid container name"';
   const command = `${prefix} logs -f --tail 200 ${quoteShellArg(popupShell, pod)}${containerArg}`;
@@ -265,7 +272,8 @@ function buildKubectlLogsCommand(context, namespace, pod, container, shell) {
 function buildKubectlDescribeCommand(context, namespace, pod, shell) {
   const popupShell = normalizePopupShell(shell);
   const prefix = kubectlPrefix(context, namespace, popupShell);
-  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  if (!prefix) return 'echo "Invalid context"';
+  if (!isSafeShellArg(pod, popupShell)) return 'echo "Invalid pod name"';
   const command = `${prefix} describe pod ${quoteShellArg(popupShell, pod)}`;
   return finishKubectlPopup(popupShell, command);
 }
