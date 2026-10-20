@@ -369,7 +369,13 @@ function parseKnownHostTarget(value) {
  * text or the full known-hosts vault.
  */
 function fingerprintKnownHostTrust(endpoint) {
-  if (!endpoint || endpoint.verifyHostKeys === false) return "disabled";
+  if (!endpoint) return "disabled";
+  const jumps = Array.isArray(endpoint.jumpHosts) ? endpoint.jumpHosts : [];
+  // A jump host can force verification while the target turns it off. The
+  // target flag alone must not drop that hop's pin from the digest.
+  const anyVerification = endpoint.verifyHostKeys !== false
+    || jumps.some((hop) => (hop?.verifyHostKeys ?? endpoint.verifyHostKeys) !== false);
+  if (!anyVerification) return "disabled";
   const targets = [];
   const addTarget = (hostname, port, verifyHostKeys = true) => {
     if (verifyHostKeys === false) return;
@@ -378,7 +384,7 @@ function fingerprintKnownHostTrust(endpoint) {
     targets.push(`${normalizedHostname}|${Number(port) || 22}`);
   };
   addTarget(endpoint.hostname, endpoint.port, endpoint.verifyHostKeys);
-  for (const hop of Array.isArray(endpoint.jumpHosts) ? endpoint.jumpHosts : []) {
+  for (const hop of jumps) {
     addTarget(
       hop?.hostname,
       hop?.port,

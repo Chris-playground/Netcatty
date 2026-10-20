@@ -790,20 +790,42 @@ function createOpenConnectionApi(ctx) {
      * that channel. A second subsystem drops TERM-SSHD / similar logins, and
      * a fresh SSH dial would ask for OTP again.
      */
+    function hopsRequiringHostKeyCheck(request) {
+      const hops = [];
+      const add = (hostname, port) => {
+        const normalized = String(hostname || "").trim().toLowerCase();
+        if (!normalized) return;
+        hops.push({ hostname: normalized, port: Number(port) || 22 });
+      };
+      if (request?.verifyHostKeys !== false) add(request?.hostname, request?.port);
+      for (const hop of Array.isArray(request?.jumpHosts) ? request.jumpHosts : []) {
+        if ((hop?.verifyHostKeys ?? request?.verifyHostKeys) === false) continue;
+        add(hop?.hostname, hop?.port);
+      }
+      return hops;
+    }
+
     function acceptedHostKeysStillTrusted(source, request) {
-      // Verification disabled on the request: the adoption key already requires
-      // the live session to have been opened the same way.
-      if (request?.verifyHostKeys === false) return true;
+      // Every hop whose effective policy still verifies must have an accepted
+      // key that classifies as trusted. Disabling the target does not skip a
+      // jump host that explicitly verifies.
+      const required = hopsRequiringHostKeyCheck(request);
+      if (required.length === 0) return true;
       const keys = source?.__netcattyAcceptedHostKeys;
       if (!Array.isArray(keys) || keys.length === 0) return false;
       const knownHosts = Array.isArray(request?.knownHosts) ? request.knownHosts : [];
-      return keys.every((key) => hostKeyVerifier.classifyHostKey({
-        knownHosts,
-        hostname: key.hostname,
-        port: key.port || 22,
-        keyType: key.keyType,
-        fingerprint: key.fingerprint,
-      }).status === "trusted");
+      return required.every((hop) => keys.some((key) => {
+        const hostname = String(key?.hostname || "").trim().toLowerCase();
+        const port = Number(key?.port) || 22;
+        if (hostname !== hop.hostname || port !== hop.port) return false;
+        return hostKeyVerifier.classifyHostKey({
+          knownHosts,
+          hostname: key.hostname,
+          port: key.port || 22,
+          keyType: key.keyType,
+          fingerprint: key.fingerprint,
+        }).status === "trusted";
+      }));
     }
 
     function authenticatedChannelMatches(client, endpoint, request) {

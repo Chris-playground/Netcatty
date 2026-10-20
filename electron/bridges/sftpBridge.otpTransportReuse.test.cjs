@@ -1132,6 +1132,92 @@ test("an exact endpoint match still rejects a host key removed after it was trus
   );
 });
 
+test("a jump host that still verifies is not adopted after its pin is removed (#3310)", async (t) => {
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    pool.discardAllTransports("test-end");
+  });
+
+  const jumpPin = {
+    hostname: "127.0.0.1",
+    port: 1,
+    keyType: "ssh-ed25519",
+    fingerprint: "JUMPPIN",
+    publicKey: "ssh-ed25519 AAAA_JUMP_PIN",
+  };
+  const optionsFor = (knownHosts) => ({
+    hostname: "target.example",
+    hostId: "jump-pin-adopt",
+    port: 22,
+    username: "alice",
+    authMethod: "password",
+    password: "secret",
+    useSshAgent: false,
+    verifyHostKeys: false,
+    knownHosts,
+    jumpHosts: [{
+      hostname: "127.0.0.1",
+      port: 1,
+      username: "jump",
+      authMethod: "password",
+      password: "jump-secret",
+      verifyHostKeys: true,
+      useSshAgent: false,
+    }],
+    fileProtocol: "sftp",
+    identityFilePaths: [],
+    hostKeyUnattended: true,
+  });
+  const trustedOptions = optionsFor([jumpPin]);
+  const trustedEndpoint = pool.buildConnectionReuseEndpoint(trustedOptions, { sftpSudo: false });
+  const ownerId = "sftp-jump-owner";
+  sftpClients.set(ownerId, {
+    client: {},
+    sftp: {
+      readable: true,
+      destroyed: false,
+      readdir() {},
+      stat() {},
+      open() {},
+    },
+    async end() {},
+    __netcattySingleChannelSsh: true,
+    __netcattyFileProtocol: "sftp",
+    __netcattyEndpointKey: pool.buildEndpointKey(trustedEndpoint),
+    __netcattyChannelAdoptionKey: pool.buildChannelAdoptionKey(trustedEndpoint),
+    __netcattyAcceptedHostKeys: [{
+      hostname: jumpPin.hostname,
+      port: jumpPin.port,
+      keyType: jumpPin.keyType,
+      fingerprint: jumpPin.fingerprint,
+    }],
+  });
+
+  const kept = await sftpBridge.openSftp(
+    { sender: createSender() },
+    { ...trustedOptions, sessionId: "sftp-jump-kept" },
+  );
+  assert.equal(sftpClients.get(kept.sftpId)?.__netcattySharedChannelAlias, true);
+  assert.equal(sftpClients.get(kept.sftpId)?.__netcattySharedChannelOwnerId, ownerId);
+
+  const revoked = sftpBridge.openSftp(
+    { sender: createSender() },
+    { ...optionsFor([]), sessionId: "sftp-jump-revoked" },
+  );
+  await assert.rejects(revoked);
+  assert.equal(
+    [...sftpClients.values()].filter((client) => client.__netcattySharedChannelAlias).length,
+    1,
+    "removing the jump pin must not borrow the channel opened through the old key",
+  );
+});
+
 test("a closed single-channel SFTP stream is not borrowed (#3310)", { timeout: 20000 }, async (t) => {
   const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
