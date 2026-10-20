@@ -25,6 +25,8 @@ const {
 } = require("./httpSecurity.cjs");
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const DEFAULT_SESSION_IDLE_MS = 15 * 60 * 1000;
+const DEFAULT_SESSION_SWEEP_MS = 60 * 1000;
 const requestContext = new AsyncLocalStorage();
 
 class ExternalMcpHttpClient extends EventEmitter {
@@ -135,6 +137,12 @@ function createExternalMcpHttpServer(deps = {}) {
   const recordActivity = deps.recordActivity || (() => {});
   const attachExternalClient = deps.attachExternalClient || ((client) => () => client.destroy());
   const getToken = deps.getToken || (() => "");
+  const sessionIdleMs = Number.isFinite(deps.sessionIdleMs) && deps.sessionIdleMs >= 0
+    ? deps.sessionIdleMs
+    : DEFAULT_SESSION_IDLE_MS;
+  const sessionSweepMs = Number.isFinite(deps.sessionSweepMs) && deps.sessionSweepMs > 0
+    ? deps.sessionSweepMs
+    : DEFAULT_SESSION_SWEEP_MS;
 
   let mcpRuntime = null;
   let httpServer = null;
@@ -144,6 +152,7 @@ function createExternalMcpHttpServer(deps = {}) {
   let activeSockets = new Set();
   let startChain = Promise.resolve();
   let generation = 0;
+  let sweepTimer = null;
 
   function runtime() {
     if (!mcpRuntime) mcpRuntime = loadMcpRuntime();
@@ -219,12 +228,46 @@ function createExternalMcpHttpServer(deps = {}) {
 
   function dropSession(sessionId) {
     const session = sessions.get(sessionId);
-    if (!session) return;
+    if (!session || session.closing) return;
+    session.closing = true;
     sessions.delete(sessionId);
     try {
       session.detach?.();
     } catch {
       // Best-effort approval-client detach.
+    }
+    void Promise.resolve(session.server?.close?.()).catch(() => {});
+  }
+
+  function expireIdleSessions() {
+    const now = Date.now();
+    for (const [sessionId, session] of sessions) {
+      if (session.inFlight > 0) continue;
+      if (now - session.lastActivityAt < sessionIdleMs) continue;
+      dropSession(sessionId);
+    }
+  }
+
+  function startSessionSweep() {
+    if (sweepTimer) clearInterval(sweepTimer);
+    sweepTimer = setInterval(expireIdleSessions, sessionSweepMs);
+    sweepTimer.unref?.();
+  }
+
+  function stopSessionSweep() {
+    if (!sweepTimer) return;
+    clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
+
+  async function withSession(session, run) {
+    session.inFlight += 1;
+    session.lastActivityAt = Date.now();
+    try {
+      await run();
+    } finally {
+      session.inFlight = Math.max(0, session.inFlight - 1);
+      session.lastActivityAt = Date.now();
     }
   }
 
@@ -261,7 +304,16 @@ function createExternalMcpHttpServer(deps = {}) {
       detach = () => externalClient.destroy();
     }
     const server = createSessionServer();
-    const session = { server, externalClient, detach, transport: null, sessionId: null };
+    const session = {
+      server,
+      externalClient,
+      detach,
+      transport: null,
+      sessionId: null,
+      lastActivityAt: Date.now(),
+      inFlight: 0,
+      closing: false,
+    };
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       enableJsonResponse: true,
@@ -279,7 +331,9 @@ function createExternalMcpHttpServer(deps = {}) {
     };
     try {
       await server.connect(transport);
-      await requestContext.run({ externalClient }, () => transport.handleRequest(req, res, body));
+      await withSession(session, () => (
+        requestContext.run({ externalClient }, () => transport.handleRequest(req, res, body))
+      ));
     } catch (error) {
       if (session.sessionId) dropSession(session.sessionId);
       else detach();
@@ -351,9 +405,9 @@ function createExternalMcpHttpServer(deps = {}) {
           sendJson(res, 404, jsonRpcError("Session not found"));
           return;
         }
-        await requestContext.run({ externalClient: session.externalClient }, () => (
+        await withSession(session, () => requestContext.run({ externalClient: session.externalClient }, () => (
           session.transport.handleRequest(req, res, body)
-        ));
+        )));
         return;
       }
       if (!runtime().isInitializeRequest(body)) {
@@ -371,9 +425,9 @@ function createExternalMcpHttpServer(deps = {}) {
         sendJson(res, 400, jsonRpcError("Bad Request: missing session"));
         return;
       }
-      await requestContext.run({ externalClient: session.externalClient }, () => (
+      await withSession(session, () => requestContext.run({ externalClient: session.externalClient }, () => (
         session.transport.handleRequest(req, res)
-      ));
+      )));
       return;
     }
 
@@ -425,12 +479,14 @@ function createExternalMcpHttpServer(deps = {}) {
     }
     httpServer = server;
     activeSockets = ownedSockets;
+    startSessionSweep();
     const address = server.address();
     listenPort = address && typeof address === "object" ? address.port : port;
     return getState();
   }
 
   async function stopUnlocked(expectedGeneration) {
+    stopSessionSweep();
     const server = httpServer;
     const ownedSockets = activeSockets;
     httpServer = null;

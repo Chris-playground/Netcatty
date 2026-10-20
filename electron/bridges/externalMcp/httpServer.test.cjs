@@ -13,7 +13,7 @@ const { EXTERNAL_MCP_CHAT_SESSION_ID } = require("../../cli/externalMcpDiscovery
 
 const TOKEN = "test-bearer-token";
 
-function postJson(url, { token, host, origin, body }) {
+function postJson(url, { token, host, origin, body, sessionId }) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const payload = JSON.stringify(body);
@@ -25,6 +25,7 @@ function postJson(url, { token, host, origin, body }) {
     if (token) headers.Authorization = `Bearer ${token}`;
     if (host) headers.Host = host;
     if (origin) headers.Origin = origin;
+    if (sessionId) headers["mcp-session-id"] = sessionId;
     const req = http.request({
       hostname: target.hostname,
       port: target.port,
@@ -38,6 +39,7 @@ function postJson(url, { token, host, origin, body }) {
         resolve({
           status: res.statusCode,
           body: Buffer.concat(chunks).toString("utf8"),
+          sessionId: res.headers["mcp-session-id"] || "",
         });
       });
     });
@@ -195,6 +197,38 @@ describe("external MCP streamable HTTP server", () => {
     } finally {
       await client.close();
     }
+  });
+
+  it("expires an HTTP session that never sends DELETE", async () => {
+    active = await startServer({ sessionIdleMs: 40, sessionSweepMs: 15 });
+    const initialized = await postJson(active.url, {
+      token: TOKEN,
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "expire-test", version: "1.0.0" },
+        },
+      },
+    });
+    assert.equal(initialized.status, 200);
+    assert.ok(initialized.sessionId);
+    const live = await postJson(active.url, {
+      token: TOKEN,
+      sessionId: initialized.sessionId,
+      body: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+    });
+    assert.equal(live.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const expired = await postJson(active.url, {
+      token: TOKEN,
+      sessionId: initialized.sessionId,
+      body: { jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
+    });
+    assert.equal(expired.status, 404);
   });
 
   it("is not listening after stop", async () => {
