@@ -40,27 +40,43 @@ const {
   runtimeBinary,
 } = require("../../../domain/systemManager/containerRuntime.shared.cjs");
 
-function parseDockerContainers(stdout) {
-  const containers = [];
-  for (const line of (stdout || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+function parseJsonRecords(stdout) {
+  const raw = String(stdout || "").trim();
+  if (!raw) return [];
+  if (raw.startsWith("[") || raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((row) => row && typeof row === "object");
+      if (parsed && typeof parsed === "object") return [parsed];
+    } catch {
+      // Fall through to JSON lines when the CLI emits one object per line.
+    }
+  }
+  const rows = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim().replace(/,$/, "");
+    if (!trimmed || trimmed === "[" || trimmed === "]") continue;
     try {
       const row = JSON.parse(trimmed);
-      containers.push({
-        id: row.ID || row.Id || "",
-        name: String(Array.isArray(row.Names) ? (row.Names[0] || "") : (row.Names || row.Name || "")).replace(/^\//, ""),
-        image: row.Image || "",
-        status: row.Status || row.State || "",
-        state: row.State || "",
-        ports: row.Ports || "",
-        createdAt: row.CreatedAt || row.Created || "",
-      });
+      if (Array.isArray(row)) rows.push(...row.filter((item) => item && typeof item === "object"));
+      else if (row && typeof row === "object") rows.push(row);
     } catch {
       // skip malformed line
     }
   }
-  return containers;
+  return rows;
+}
+
+function parseDockerContainers(stdout) {
+  return parseJsonRecords(stdout).map((row) => ({
+    id: row.ID || row.Id || "",
+    name: String(Array.isArray(row.Names) ? (row.Names[0] || "") : (row.Names || row.Name || "")).replace(/^\//, ""),
+    image: row.Image || "",
+    status: row.Status || row.State || "",
+    state: row.State || "",
+    ports: typeof row.Ports === "string" ? row.Ports : "",
+    createdAt: row.CreatedAt || row.Created || "",
+  })).filter((container) => container.id || container.name);
 }
 
 function parseDockerStats(stdout) {
@@ -87,29 +103,64 @@ function parseDockerStats(stdout) {
   return stats;
 }
 
-function parseDockerImages(stdout) {
-  const images = [];
-  for (const line of (stdout || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const row = JSON.parse(trimmed);
-      const repository = row.Repository || "";
-      const tag = row.Tag || "";
-      images.push({
-        id: row.ID || row.Id || "",
-        repository,
-        tag,
-        size: row.Size || "",
-        createdAt: row.CreatedAt || row.CreatedSince || "",
-        digest: row.Digest || "",
-        name: repository && tag ? `${repository}:${tag}` : repository || tag || row.ID || "",
-      });
-    } catch {
-      // skip
-    }
+function splitImageName(name) {
+  const text = String(name || "");
+  const slash = text.lastIndexOf("/");
+  const colon = text.lastIndexOf(":");
+  if (colon > slash) {
+    return { repository: text.slice(0, colon), tag: text.slice(colon + 1) };
   }
-  return images;
+  return { repository: text, tag: "" };
+}
+
+function imageRepositoryAndTag(row) {
+  if (row.Repository || row.Tag) {
+    return { repository: String(row.Repository || ""), tag: String(row.Tag || "") };
+  }
+  const named = (Array.isArray(row.Names) && row.Names[0])
+    || (Array.isArray(row.RepoTags) && row.RepoTags[0])
+    || "";
+  return splitImageName(named);
+}
+
+function formatImageSize(size) {
+  if (typeof size !== "number" || !Number.isFinite(size)) return String(size || "");
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = size;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = unit === 0 || value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded}${units[unit]}`;
+}
+
+function formatImageCreated(row) {
+  if (row.CreatedAt) return String(row.CreatedAt);
+  if (row.CreatedSince) return String(row.CreatedSince);
+  if (typeof row.Created === "number" && Number.isFinite(row.Created)) {
+    const ms = row.Created > 1e12 ? row.Created : row.Created * 1000;
+    return new Date(ms).toISOString();
+  }
+  if (typeof row.Created === "string") return row.Created;
+  return "";
+}
+
+function parseDockerImages(stdout) {
+  return parseJsonRecords(stdout).map((row) => {
+    const { repository, tag } = imageRepositoryAndTag(row);
+    const id = String(row.ID || row.Id || "");
+    return {
+      id,
+      repository,
+      tag,
+      size: formatImageSize(row.Size),
+      createdAt: formatImageCreated(row),
+      digest: String(row.Digest || (Array.isArray(row.RepoDigests) ? (row.RepoDigests[0] || "") : "")),
+      name: repository && tag ? `${repository}:${tag}` : repository || tag || id,
+    };
+  }).filter((image) => image.id || image.name);
 }
 
 function summarizeImageInspect(info) {

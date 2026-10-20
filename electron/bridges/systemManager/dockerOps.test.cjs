@@ -263,3 +263,43 @@ test("listContainers runs podman and retries sudo only for the podman socket", a
   assert.equal(calls[0].command, "podman ps -a --format '{{json .}}'");
   assert.equal(calls[1].command, "sudo podman ps -a --format '{{json .}}'");
 });
+
+test("listImages reads Podman's JSON array and Docker's JSON lines", async () => {
+  const podman = createDockerOpsApi({
+    execOnSession: async () => ({
+      success: true,
+      stdout: `[
+        {
+          "Id": "abc123",
+          "Names": ["docker.io/library/alpine:3.20"],
+          "Size": 7340032,
+          "Created": 1700000000,
+          "Digest": "sha256:deadbeef"
+        }
+      ]`,
+      stderr: "",
+      code: 0,
+    }),
+  });
+  const podmanResult = await podman.listImages(null, "s1", "podman");
+  assert.equal(podmanResult.success, true);
+  assert.equal(podmanResult.images.length, 1);
+  assert.equal(podmanResult.images[0].repository, "docker.io/library/alpine");
+  assert.equal(podmanResult.images[0].tag, "3.20");
+  assert.equal(podmanResult.images[0].name, "docker.io/library/alpine:3.20");
+  assert.equal(podmanResult.images[0].size, "7MB");
+  assert.equal(podmanResult.images[0].digest, "sha256:deadbeef");
+
+  const docker = createDockerOpsApi({
+    execOnSession: async () => ({
+      success: true,
+      stdout: '{"ID":"fff","Repository":"nginx","Tag":"latest","Size":"10MB","CreatedAt":"2026-01-01"}\n',
+      stderr: "",
+      code: 0,
+    }),
+  });
+  const dockerResult = await docker.listImages(null, "s1", "docker");
+  assert.equal(dockerResult.images.length, 1);
+  assert.equal(dockerResult.images[0].name, "nginx:latest");
+  assert.equal(dockerResult.images[0].size, "10MB");
+});
