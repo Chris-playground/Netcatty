@@ -865,18 +865,20 @@ async function listSettledOpenCodeV2Catalog(client, signal, directory) {
       }
     })();
     const started = Date.now();
-    let current = await client.listCatalog(signal, directory);
+    // Count updates before the fetch. An event that arrives while the
+    // request is in flight belongs to a newer snapshot than this response.
     let seen = updates.count;
-    let quietAt = Date.now();
+    let current = await client.listCatalog(signal, directory);
+    let quietAt = updates.count === seen ? Date.now() : null;
     while (Date.now() - started < OPENCODE_V2_CATALOG_SETTLE_MAX_MS) {
-      await delayForCatalogSettle(OPENCODE_V2_CATALOG_SETTLE_POLL_MS, signal);
       if (updates.count !== seen) {
         seen = updates.count;
-        quietAt = Date.now();
         current = await client.listCatalog(signal, directory);
+        quietAt = updates.count === seen ? Date.now() : null;
         continue;
       }
-      if (Date.now() - quietAt >= OPENCODE_V2_CATALOG_SETTLE_QUIET_MS) return current;
+      if (quietAt != null && Date.now() - quietAt >= OPENCODE_V2_CATALOG_SETTLE_QUIET_MS) return current;
+      await delayForCatalogSettle(OPENCODE_V2_CATALOG_SETTLE_POLL_MS, signal);
     }
     return current;
   } finally {
