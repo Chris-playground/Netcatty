@@ -209,6 +209,9 @@ const createHostVerifier = ({
   knownHosts = [],
   verifyHostKeys = true,
   bootEpoch,
+  // Transfer dials have no SFTP-page prompt owner. Waiting out the request
+  // TTL leaves the upload on "Waiting..." with no dialog and no error.
+  unattended = false,
 }) => (rawKey, callback) => {
   if (verifyHostKeys === false) {
     callback(true);
@@ -226,6 +229,11 @@ const createHostVerifier = ({
 
   if (decision.status === "trusted") {
     callback(true);
+    return;
+  }
+
+  if (unattended) {
+    callback(false);
     return;
   }
 

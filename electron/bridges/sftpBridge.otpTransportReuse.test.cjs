@@ -29,6 +29,7 @@ const { Server } = require("ssh2");
 
 const pool = require("./sshConnectionPool.cjs");
 const kiHandler = require("./keyboardInteractiveHandler.cjs");
+const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const sftpBridge = require("./sftpBridge.cjs");
 const transferBridge = require("./transferBridge.cjs");
 
@@ -46,7 +47,7 @@ const DIR_MODE = 0o040755;
  * Minimal in-memory fs for the server side: enough of SFTP for Netcatty's
  * upload pipeline (stat / open / write / setstat / rename / backup cleanup).
  */
-function makeSftpHandlers(files, dirs) {
+function makeSftpHandlers(files, dirs, serverControl) {
   const handles = new Map();
   let nextHandle = 1;
 
@@ -153,6 +154,10 @@ function makeSftpHandlers(files, dirs) {
           sftp.status(reqid, STATUS_NO_SUCH_FILE);
           return;
         }
+        if (serverControl?.holdWrites) {
+          serverControl.writesHeld += 1;
+          return;
+        }
         const prev = files.get(entry.path) || Buffer.alloc(0);
         const next = Buffer.alloc(Math.max(prev.length, offset + data.length));
         prev.copy(next);
@@ -204,13 +209,19 @@ function startOtpOnlyServer(serverOptions = {}) {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const files = new Map();
     const dirs = new Set(["/", "/home", "/home/otpuser"]);
-    const handlers = makeSftpHandlers(files, dirs);
+    const serverControl = {
+      holdWrites: false,
+      writesHeld: 0,
+      sftpStreams: new Set(),
+    };
+    const handlers = makeSftpHandlers(files, dirs, serverControl);
     let keyboardInteractiveRounds = 0;
 
     const sshServer = new Server({
       hostKeys: [privateKey.export({ type: "pkcs1", format: "pem" })],
       ...(serverOptions.ident ? { ident: serverOptions.ident } : {}),
     }, (client) => {
+      client.on("error", () => {});
       client.on("authentication", (ctx) => {
         if (ctx.method === "keyboard-interactive") {
           keyboardInteractiveRounds += 1;
@@ -233,6 +244,8 @@ function startOtpOnlyServer(serverOptions = {}) {
           const session = accept();
           session.on("sftp", (acceptChannel) => {
             const sftp = acceptChannel();
+            serverControl.sftpStreams.add(sftp);
+            sftp.on("close", () => serverControl.sftpStreams.delete(sftp));
             handlers.attach(sftp);
           });
         });
@@ -252,6 +265,24 @@ function startOtpOnlyServer(serverOptions = {}) {
       dirs,
       getKeyboardInteractiveRounds: () => keyboardInteractiveRounds,
       getConnectionCount: () => sockets.size,
+      holdWrites() { serverControl.holdWrites = true; },
+      writesHeld: () => serverControl.writesHeld,
+      partPaths: () => [...files.keys()].filter((name) => String(name).endsWith(".part")),
+      killSftpChannels() {
+        for (const stream of serverControl.sftpStreams) {
+          try { stream.destroy(); } catch { /* ignore */ }
+        }
+      },
+      resetConnections() {
+        for (const socket of sockets) {
+          try {
+            if (typeof socket.reset === "function") socket.reset();
+            else socket.destroy();
+          } catch {
+            try { socket.destroy(); } catch { /* ignore */ }
+          }
+        }
+      },
       close: () => new Promise((done) => {
         // Include clients still waiting for authentication, before registration.
         for (const socket of sockets) socket.destroy();
@@ -777,10 +808,21 @@ test("sudo SFTP-page transfer reuses the elevated channel instead of dialing aga
     client: {},
     sftp: channel,
     __netcattyEndpointKey: pool.buildEndpointKey(endpoint),
+    __netcattyChannelAdoptionKey: pool.buildChannelAdoptionKey(endpoint),
     __netcattySudoMode: true,
     __netcattyFileProtocol: "sftp",
     __netcattyTransportManaged: false,
   });
+
+  await assert.rejects(
+    sftpBridge.openSftp(
+      { sender: createSender() },
+      { ...options, fileProtocol: "scp" },
+    ),
+    /Sudo Mode is not supported with File Protocol set to SCP/,
+  );
+  assert.equal(sftpClients.size, 1, "scp+sudo must not borrow the elevated SFTP channel");
+  assert.equal(channelEnded, false);
 
   const opened = await sftpBridge.openSftp({ sender: createSender() }, options);
   const alias = sftpClients.get(opened.sftpId);
@@ -792,4 +834,279 @@ test("sudo SFTP-page transfer reuses the elevated channel instead of dialing aga
   assert.equal(sftpClients.has(opened.sftpId), false);
   assert.equal(channelEnded, false, "closing the transfer must not drop the sudo login channel");
   assert.equal(sftpClients.has("browse-sudo"), true);
+});
+
+test("channel adoption ignores a known-host trust change and an unattended dial does not wait (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => {
+    pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  });
+
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    for (const [id, pending] of hostKeyVerifier.getRequests()) {
+      hostKeyVerifier.handleResponse(
+        { sender: { id: pending.webContentsId } },
+        { requestId: id, accept: false },
+      );
+    }
+    pool.discardAllTransports("test-end");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const probeSender = createSender();
+  const probeOpen = sftpBridge.openSftp(
+    { sender: probeSender },
+    {
+      ...BASE_OPTIONS(server.port),
+      sessionId: "sftp-probe-host-key",
+      verifyHostKeys: true,
+      knownHosts: [],
+    },
+  );
+  pendingOpens.push(probeOpen);
+  probeOpen.catch(() => {});
+  await waitFor(
+    () => probeSender.sent.some((entry) => entry.channel === "netcatty:host-key:verify"),
+    { timeoutMs: 4000, message: "the first connect must surface a host-key prompt" },
+  );
+  const prompt = probeSender.sent.find((entry) => entry.channel === "netcatty:host-key:verify");
+  const trusted = {
+    id: "kh-otp",
+    hostname: "127.0.0.1",
+    port: server.port,
+    keyType: prompt.payload.keyType,
+    publicKey: prompt.payload.publicKey,
+    fingerprint: prompt.payload.fingerprint,
+    discoveredAt: 1,
+  };
+  hostKeyVerifier.handleResponse(
+    { sender: probeSender },
+    { requestId: prompt.payload.requestId, accept: false },
+  );
+  await probeOpen.catch(() => {});
+
+  const browseOptions = {
+    ...BASE_OPTIONS(server.port),
+    verifyHostKeys: true,
+    knownHosts: [trusted],
+    sessionId: "sftp-browse-after-trust",
+  };
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp({ sender: browseSender }, browseOptions);
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(
+    () => answerOtpPrompts(browseSender),
+    { message: "reopened SFTP page must still prompt for OTP" },
+  );
+  const browse = await browseOpen;
+  const browseClient = sftpClients.get(browse.sftpId);
+  const driftedOptions = {
+    ...BASE_OPTIONS(server.port),
+    verifyHostKeys: true,
+    knownHosts: [],
+    hostKeyUnattended: true,
+  };
+  const driftedEndpoint = pool.buildConnectionReuseEndpoint(driftedOptions, { sftpSudo: false });
+  assert.notEqual(
+    browseClient.__netcattyEndpointKey,
+    pool.buildEndpointKey(driftedEndpoint),
+    "the host-key digest must differ after trust",
+  );
+  assert.equal(
+    browseClient.__netcattyChannelAdoptionKey,
+    pool.buildChannelAdoptionKey(driftedEndpoint),
+  );
+
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, driftedOptions);
+  const alias = sftpClients.get(transfer.sftpId);
+  assert.equal(alias?.__netcattySharedChannelAlias, true);
+  assert.equal(server.getConnectionCount(), 1, "a known-host drift must not dial a second SSH connection");
+  assert.equal(server.getKeyboardInteractiveRounds(), 1);
+  assert.equal(hostKeyVerifier.getRequests().size, 0);
+
+  await sftpBridge.closeSftp(null, { sftpId: browse.sftpId });
+  await sftpBridge.closeSftp(null, { sftpId: transfer.sftpId });
+  await waitFor(() => !sftpClients.has(browse.sftpId), { timeoutMs: 2000 });
+
+  const freshSender = createSender();
+  const started = Date.now();
+  const freshOpen = sftpBridge.openSftp({ sender: freshSender }, driftedOptions);
+  pendingOpens.push(freshOpen);
+  freshOpen.catch(() => {});
+  await assert.rejects(
+    freshOpen,
+    /Host key verification required/,
+  );
+  assert.ok(Date.now() - started < 4000, "an unattended transfer dial must not wait out the host-key TTL");
+  assert.equal(
+    freshSender.sent.some((entry) => entry.channel === "netcatty:host-key:verify"),
+    false,
+    "an unattended transfer dial must not leave a prompt nobody will show",
+  );
+});
+
+async function uploadUntilHeldWrite(t, server, transferId, targetSftpId) {
+  server.holdWrites();
+  const tempRoot = fs.mkdtempSync(`${tempDirBridge.getTempFilePath(transferId)}-`);
+  t.after(() => {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+  const localFile = path.join(tempRoot, "upload.txt");
+  const payload = Buffer.from("borrowed upload must fail when the channel dies\n");
+  fs.writeFileSync(localFile, payload);
+  const transferEvents = [];
+  let settled = false;
+  const transferPromise = transferBridge.startTransfer(
+    {
+      sender: {
+        send(channelName, eventPayload) {
+          transferEvents.push({ channel: channelName, payload: eventPayload });
+        },
+      },
+    },
+    {
+      transferId,
+      sourcePath: localFile,
+      targetPath: `/home/otpuser/${transferId}.txt`,
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId,
+      targetEncoding: "utf-8",
+      totalBytes: payload.length,
+    },
+  ).then((result) => {
+    settled = true;
+    return result;
+  });
+  await waitFor(() => server.writesHeld() > 0, {
+    timeoutMs: 4000,
+    message: "upload must reach a WRITE before the channel dies",
+  });
+  return { transferPromise, transferEvents, isSettled: () => settled };
+}
+
+async function assertBorrowedUploadFails(transferPromise, transferEvents, isSettled) {
+  let hangTimer = null;
+  const result = await Promise.race([
+    transferPromise,
+    new Promise((_, reject) => {
+      hangTimer = setTimeout(() => reject(new Error("borrowed upload stayed active after the channel died")), 4000);
+    }),
+  ]);
+  clearTimeout(hangTimer);
+  assert.equal(isSettled(), true);
+  assert.match(result?.error || "", /SFTP channel closed/);
+  assert.ok(
+    transferEvents.some((event) => (
+      event.channel === "netcatty:transfer:error"
+      && /SFTP channel closed/.test(String(event.payload?.error || ""))
+    )),
+    "the transfer error must be visible to the UI",
+  );
+  return result;
+}
+
+test("killing the borrowed SFTP channel mid-upload fails the transfer (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-channel-kill" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(() => answerOtpPrompts(browseSender));
+  const browse = await browseOpen;
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, { ...options });
+  const { transferPromise, transferEvents, isSettled } = await uploadUntilHeldWrite(
+    t,
+    server,
+    "otp-channel-kill",
+    transfer.sftpId,
+  );
+  pendingOpens.push(transferPromise.catch(() => {}));
+  server.killSftpChannels();
+  await assertBorrowedUploadFails(transferPromise, transferEvents, isSettled);
+});
+
+test("resetting the borrowed SSH socket mid-upload fails the transfer (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-socket-reset" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(() => answerOtpPrompts(browseSender));
+  const browse = await browseOpen;
+  assert.ok(browse.sftpId);
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, { ...options });
+  const { transferPromise, transferEvents, isSettled } = await uploadUntilHeldWrite(
+    t,
+    server,
+    "otp-socket-reset",
+    transfer.sftpId,
+  );
+  pendingOpens.push(transferPromise.catch(() => {}));
+  server.resetConnections();
+  await assertBorrowedUploadFails(transferPromise, transferEvents, isSettled);
 });

@@ -179,9 +179,11 @@ export async function openTransferSftpSession(
     // Restart/resume owns an independent SSH dial. Normal pooled transfer opens
     // leave reuseTransport enabled so the main-process registry can reuse an
     // authenticated endpoint even when no terminal tab exists.
+    // No SFTP-page host-key dialog owns this session id. An untrusted key must
+    // fail the transfer immediately instead of sitting on the verifier TTL.
     const openOpts = wantDedicated
-      ? { ...credentials, reuseTransport: false as const }
-      : credentials;
+      ? { ...credentials, reuseTransport: false as const, hostKeyUnattended: true as const }
+      : { ...credentials, hostKeyUnattended: true as const };
 
     // The main-process auth driver owns method ordering, fallback, MFA and
     // retry. A renderer-side key-then-password retry performs a second full SSH

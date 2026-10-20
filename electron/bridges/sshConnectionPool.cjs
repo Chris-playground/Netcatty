@@ -481,7 +481,14 @@ function fingerprintAuth(endpoint) {
     certificate: endpoint.certificate ? secureDigest(endpoint.certificate) : "none",
     requiresMfa: Boolean(endpoint.requiresMfa),
     verifyHostKeys: endpoint.verifyHostKeys !== false,
-    knownHostTrust: fingerprintKnownHostTrust(endpoint),
+    // Channel adoption compares a sibling key that ignores this digest. A host
+    // key trusted earlier in the same app session must not hide the live
+    // single-channel/sudo session from a later transfer open. Parked transport
+    // reuse still uses the full key, so a changed known-host record does not
+    // silently share a new dial.
+    knownHostTrust: endpoint.ignoreKnownHostTrustForReuse
+      ? "ignored"
+      : fingerprintKnownHostTrust(endpoint),
     authPolicyVersion: endpoint.authPolicyVersion ?? null,
     useSshAgent: endpoint.useSshAgent ?? null,
     identityAgent: endpoint.identityAgent ?? null,
@@ -626,6 +633,16 @@ function buildEndpointKey(endpoint) {
     auth,
     `keepalive:${ep.keepaliveIntervalMs}:${ep.keepaliveCountMax}`,
   ].join("|");
+}
+
+/**
+ * Same route as buildEndpointKey, but the known-host trust digest is ignored.
+ * Used only to find an already-authenticated SFTP channel after the renderer
+ * known-host list changes (trust during this app session).
+ */
+function buildChannelAdoptionKey(endpoint) {
+  if (!endpoint || typeof endpoint !== "object") return null;
+  return buildEndpointKey({ ...endpoint, ignoreKnownHostTrustForReuse: true });
 }
 
 function sameEndpoint(a, b) {
@@ -1544,6 +1561,7 @@ module.exports = {
   setDefaultTransportIdleTtlMs,
   getDefaultTransportIdleTtlMs,
   buildEndpointKey,
+  buildChannelAdoptionKey,
   buildConnectionReuseEndpoint,
   resolveConnectionKeepalivePolicy,
   normalizeEndpoint,

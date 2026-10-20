@@ -2400,6 +2400,7 @@ const {
   completeTransportDial,
   failTransportDial,
   buildEndpointKey,
+  buildChannelAdoptionKey,
   buildConnectionReuseEndpoint,
   resolveConnectionKeepalivePolicy,
   endpointAllowsReuse,
@@ -2422,6 +2423,7 @@ const openConnectionApi = createOpenConnectionApi({
   createTransport, borrowTransport, findTransportByEndpoint,
   beginTransportDial, waitForTransportDial, completeTransportDial, failTransportDial,
   buildEndpointKey,
+  buildChannelAdoptionKey,
   buildConnectionReuseEndpoint,
   resolveConnectionKeepalivePolicy,
 });
