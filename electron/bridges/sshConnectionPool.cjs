@@ -481,11 +481,9 @@ function fingerprintAuth(endpoint) {
     certificate: endpoint.certificate ? secureDigest(endpoint.certificate) : "none",
     requiresMfa: Boolean(endpoint.requiresMfa),
     verifyHostKeys: endpoint.verifyHostKeys !== false,
-    // Channel adoption compares a sibling key that ignores this digest. A host
-    // key trusted earlier in the same app session must not hide the live
-    // single-channel/sudo session from a later transfer open. Parked transport
-    // reuse still uses the full key, so a changed known-host record does not
-    // silently share a new dial.
+    // Channel adoption may compare a sibling key that ignores this digest, then
+    // checks the connection's accepted host key against the caller's records.
+    // Parked transport reuse still uses the full key.
     knownHostTrust: endpoint.ignoreKnownHostTrustForReuse
       ? "ignored"
       : fingerprintKnownHostTrust(endpoint),

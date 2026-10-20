@@ -78,7 +78,11 @@ function shouldRegisterFreshSftpTransport(options) {
 }
 
 function sftpChannelIsLive(sftp) {
+  // A closed ssh2 SFTP stream still has readdir/stat/open. readable/destroyed
+  // are what change when the subsystem or the socket has already ended.
   return !!sftp
+    && sftp.readable !== false
+    && sftp.destroyed !== true
     && typeof sftp.readdir === "function"
     && typeof sftp.stat === "function"
     && typeof sftp.open === "function";
@@ -247,6 +251,11 @@ function createOpenConnectionApi(ctx) {
             knownHosts: options.knownHosts,
             verifyHostKeys: jump.verifyHostKeys ?? options.verifyHostKeys,
             unattended: options.hostKeyUnattended === true,
+            onAccepted: (info) => {
+              if (!info) return;
+              if (!Array.isArray(options._acceptedHostKeys)) options._acceptedHostKeys = [];
+              options._acceptedHostKeys.push(info);
+            },
           });
     
           // Auth - support agent (certificate), key, and password fallback
@@ -781,19 +790,33 @@ function createOpenConnectionApi(ctx) {
      * that channel. A second subsystem drops TERM-SSHD / similar logins, and
      * a fresh SSH dial would ask for OTP again.
      */
-    function authenticatedChannelMatches(client, endpoint) {
+    function acceptedHostKeysStillTrusted(source, request) {
+      // Verification disabled on the request: the adoption key already requires
+      // the live session to have been opened the same way.
+      if (request?.verifyHostKeys === false) return true;
+      const keys = source?.__netcattyAcceptedHostKeys;
+      if (!Array.isArray(keys) || keys.length === 0) return false;
+      const knownHosts = Array.isArray(request?.knownHosts) ? request.knownHosts : [];
+      return keys.every((key) => hostKeyVerifier.classifyHostKey({
+        knownHosts,
+        hostname: key.hostname,
+        port: key.port || 22,
+        keyType: key.keyType,
+        fingerprint: key.fingerprint,
+      }).status === "trusted");
+    }
+
+    function authenticatedChannelMatches(client, endpoint, request) {
       const exact = buildEndpointKey(endpoint);
       if (exact && client.__netcattyEndpointKey === exact) return true;
-      // Known-host trust is hashed into the exact key. After the user trusts
-      // a key, the reopened page and a later transfer can disagree on that
-      // digest and miss the live channel. Adoption ignores only that slice.
+      // The known-host digest can change when a still-valid key is saved, or
+      // when an unrelated record is added. That may reuse the live channel.
+      // A replaced or removed key is not trusted against the caller's records,
+      // so the fresh dial runs host-key verification instead.
       if (typeof buildChannelAdoptionKey !== "function") return false;
       const adoption = buildChannelAdoptionKey(endpoint);
-      return !!(
-        adoption
-        && client.__netcattyChannelAdoptionKey
-        && client.__netcattyChannelAdoptionKey === adoption
-      );
+      if (!adoption || client.__netcattyChannelAdoptionKey !== adoption) return false;
+      return acceptedHostKeysStillTrusted(client, request);
     }
 
     function channelContractMatches(options, source) {
@@ -806,12 +829,12 @@ function createOpenConnectionApi(ctx) {
       return requested === owner;
     }
 
-    function findAuthenticatedChannelOwner(endpoint) {
+    function findAuthenticatedChannelOwner(endpoint, request) {
       if (!endpoint || !sftpClients || typeof sftpClients.entries !== "function") return null;
       for (const [sftpId, client] of sftpClients.entries()) {
         if (!sftpId || !client || client.__netcattyDisposed || client.__netcattySharedChannelAlias) continue;
         if (client.__netcattyTransportManaged) continue;
-        if (!authenticatedChannelMatches(client, endpoint)) continue;
+        if (!authenticatedChannelMatches(client, endpoint, request)) continue;
         if (!client.__netcattySingleChannelSsh && !client.__netcattySudoMode) continue;
         if (!sftpChannelIsLive(client.sftp)) continue;
         return { sftpId, client };
@@ -820,7 +843,7 @@ function createOpenConnectionApi(ctx) {
     }
 
     function adoptAuthenticatedSftpChannel(endpoint, connId, options) {
-      const found = findAuthenticatedChannelOwner(endpoint);
+      const found = findAuthenticatedChannelOwner(endpoint, options);
       if (!found || typeof createSessionBackedSftpClient !== "function") return null;
       const { sftpId: ownerId, client: source } = found;
       if (!channelContractMatches(options, source)) return null;
@@ -1137,6 +1160,11 @@ function createOpenConnectionApi(ctx) {
         knownHosts: options.knownHosts,
         verifyHostKeys: options.verifyHostKeys,
         unattended: options.hostKeyUnattended === true,
+        onAccepted: (info) => {
+          if (!info) return;
+          if (!Array.isArray(options._acceptedHostKeys)) options._acceptedHostKeys = [];
+          options._acceptedHostKeys.push(info);
+        },
       });
     
       // Use the tunneled socket if we have one
@@ -1541,6 +1569,9 @@ function createOpenConnectionApi(ctx) {
         client.__netcattySingleChannelSsh = peerSingleChannelSsh;
         if (client.client) {
           client.client.__netcattySingleChannelSsh = peerSingleChannelSsh;
+        }
+        if (Array.isArray(options._acceptedHostKeys) && options._acceptedHostKeys.length > 0) {
+          client.__netcattyAcceptedHostKeys = options._acceptedHostKeys.slice();
         }
         sftpClients.set(connId, client);
 

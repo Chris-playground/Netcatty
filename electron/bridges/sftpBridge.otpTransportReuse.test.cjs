@@ -836,7 +836,7 @@ test("sudo SFTP-page transfer reuses the elevated channel instead of dialing aga
   assert.equal(sftpClients.has("browse-sudo"), true);
 });
 
-test("channel adoption ignores a known-host trust change and an unattended dial does not wait (#3310)", { timeout: 20000 }, async (t) => {
+test("channel adoption reuses a still-trusted host key and rejects a replaced or removed one (#3310)", { timeout: 20000 }, async (t) => {
   const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
   t.after(() => {
@@ -916,49 +916,131 @@ test("channel adoption ignores a known-host trust change and an unattended dial 
   );
   const browse = await browseOpen;
   const browseClient = sftpClients.get(browse.sftpId);
-  const driftedOptions = {
+  assert.ok(browseClient.__netcattyAcceptedHostKeys?.length >= 1);
+  const stillTrusted = {
     ...BASE_OPTIONS(server.port),
     verifyHostKeys: true,
-    knownHosts: [],
+    knownHosts: [
+      trusted,
+      {
+        ...trusted,
+        id: "kh-other-algo",
+        keyType: trusted.keyType === "ssh-rsa" ? "ssh-ed25519" : "ssh-rsa",
+        fingerprint: "unrelated-fingerprint",
+        publicKey: "ssh-ed25519 AAAA",
+      },
+    ],
     hostKeyUnattended: true,
   };
-  const driftedEndpoint = pool.buildConnectionReuseEndpoint(driftedOptions, { sftpSudo: false });
+  const stillTrustedEndpoint = pool.buildConnectionReuseEndpoint(stillTrusted, { sftpSudo: false });
   assert.notEqual(
     browseClient.__netcattyEndpointKey,
-    pool.buildEndpointKey(driftedEndpoint),
-    "the host-key digest must differ after trust",
+    pool.buildEndpointKey(stillTrustedEndpoint),
+    "an extra known-host record must change the host-key digest",
   );
   assert.equal(
     browseClient.__netcattyChannelAdoptionKey,
-    pool.buildChannelAdoptionKey(driftedEndpoint),
+    pool.buildChannelAdoptionKey(stillTrustedEndpoint),
   );
 
-  const transfer = await sftpBridge.openSftp({ sender: createSender() }, driftedOptions);
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, stillTrusted);
   const alias = sftpClients.get(transfer.sftpId);
   assert.equal(alias?.__netcattySharedChannelAlias, true);
-  assert.equal(server.getConnectionCount(), 1, "a known-host drift must not dial a second SSH connection");
+  assert.equal(server.getConnectionCount(), 1, "a still-trusted key must not dial a second SSH connection");
   assert.equal(server.getKeyboardInteractiveRounds(), 1);
-  assert.equal(hostKeyVerifier.getRequests().size, 0);
+  await sftpBridge.closeSftp(null, { sftpId: transfer.sftpId });
+
+  const ownerCount = sftpClients.size;
+  const replaced = {
+    ...stillTrusted,
+    knownHosts: [{
+      ...trusted,
+      fingerprint: "replaced-fingerprint",
+      publicKey: `${trusted.keyType || "ssh-ed25519"} AAAA`,
+    }],
+  };
+  const replacedSender = createSender();
+  const replacedStarted = Date.now();
+  const replacedOpen = sftpBridge.openSftp({ sender: replacedSender }, replaced);
+  pendingOpens.push(replacedOpen);
+  replacedOpen.catch(() => {});
+  await assert.rejects(replacedOpen, /Host key verification required/);
+  assert.ok(Date.now() - replacedStarted < 4000, "a replaced host key must not wait on verification");
+  assert.equal(sftpClients.size, ownerCount, "a replaced host key must not borrow the old channel");
+  assert.equal(
+    replacedSender.sent.some((entry) => entry.channel === "netcatty:host-key:verify"),
+    false,
+  );
+
+  const revokedSender = createSender();
+  const revokedOpen = sftpBridge.openSftp(
+    { sender: revokedSender },
+    { ...stillTrusted, knownHosts: [] },
+  );
+  pendingOpens.push(revokedOpen);
+  revokedOpen.catch(() => {});
+  await assert.rejects(revokedOpen, /Host key verification required/);
+  assert.equal(sftpClients.size, ownerCount, "a removed host key must not borrow the old channel");
 
   await sftpBridge.closeSftp(null, { sftpId: browse.sftpId });
-  await sftpBridge.closeSftp(null, { sftpId: transfer.sftpId });
   await waitFor(() => !sftpClients.has(browse.sftpId), { timeoutMs: 2000 });
+});
+
+test("a closed single-channel SFTP stream is not borrowed (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-dead-channel" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(() => answerOtpPrompts(browseSender));
+  const browse = await browseOpen;
+  const browseClient = sftpClients.get(browse.sftpId);
+  server.killSftpChannels();
+  await waitFor(
+    () => browseClient.sftp?.readable === false || browseClient.sftp?.destroyed === true,
+    { timeoutMs: 4000, message: "the server SFTP close must mark the client stream dead" },
+  );
 
   const freshSender = createSender();
-  const started = Date.now();
-  const freshOpen = sftpBridge.openSftp({ sender: freshSender }, driftedOptions);
+  const freshOpen = sftpBridge.openSftp({ sender: freshSender }, { ...options });
   pendingOpens.push(freshOpen);
   freshOpen.catch(() => {});
-  await assert.rejects(
-    freshOpen,
-    /Host key verification required/,
+  await waitFor(
+    () => freshSender.sent.some((entry) => entry.channel === "netcatty:keyboard-interactive"),
+    { timeoutMs: 4000, message: "a dead channel must dial again and surface OTP" },
   );
-  assert.ok(Date.now() - started < 4000, "an unattended transfer dial must not wait out the host-key TTL");
   assert.equal(
-    freshSender.sent.some((entry) => entry.channel === "netcatty:host-key:verify"),
+    [...sftpClients.values()].some((client) => client.__netcattySharedChannelAlias),
     false,
-    "an unattended transfer dial must not leave a prompt nobody will show",
+    "a closed SFTP stream must not be borrowed",
   );
+  assert.ok(answerOtpPrompts(freshSender));
+  const fresh = await freshOpen;
+  assert.notEqual(fresh.sftpId, browse.sftpId);
+  assert.notEqual(sftpClients.get(fresh.sftpId)?.__netcattySharedChannelAlias, true);
 });
 
 async function uploadUntilHeldWrite(t, server, transferId, targetSftpId) {
