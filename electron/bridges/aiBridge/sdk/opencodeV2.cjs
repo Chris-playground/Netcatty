@@ -21,7 +21,7 @@ const OPENCODE_V2_VERSION_PROBE_MS = 8000;
 const OPENCODE_V2_CATALOG_SETTLE_POLL_MS = 100;
 const OPENCODE_V2_CATALOG_SETTLE_QUIET_MS = 400;
 const OPENCODE_V2_CATALOG_SETTLE_MAX_MS = 8000;
-const OPENCODE_V2_USERNAME = "opencode";
+const OPENCODE_V2_TRANSPORT_MESSAGE = /^(?:terminated|fetch failed|other side closed)$/i;
 const OPENCODE_V1_NOT_FOUND = "OpenCode CLI not found or not runnable. Install OpenCode and ensure `opencode` is on PATH, or set a custom path in Settings.";
 
 const versionCache = new Map();
@@ -299,6 +299,7 @@ function sanitizeOpenCodeV2Detail(message) {
   if (!raw || /[\r\n]/.test(raw) || raw.length > 240) return "";
   if (/server password|authorization\s*[:=]|bearer\s+\S+|basic\s+[a-z0-9+/=]{8,}/i.test(raw)) return "";
   if (/<html|<!doctype|node:internal|\bat\s+\S+:\d+:\d+\b/i.test(raw)) return "";
+  if (OPENCODE_V2_TRANSPORT_MESSAGE.test(raw)) return "";
   return raw;
 }
 
@@ -316,7 +317,7 @@ function isOpenCodeTransportError(error) {
       code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT"
     ) return true;
     if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up/i.test(message)) return true;
-    if (/^(?:terminated|fetch failed|other side closed)$/i.test(message)) return true;
+    if (OPENCODE_V2_TRANSPORT_MESSAGE.test(message)) return true;
     current = current.cause;
   }
   return false;
