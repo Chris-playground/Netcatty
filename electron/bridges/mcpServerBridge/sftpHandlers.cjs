@@ -260,6 +260,37 @@ function createSftpHandlerApi(ctx) {
       }
     }
     
+    async function runAdmittedSessionTransfer(params, event, payload, runner) {
+      let queued = false;
+      let cancelled = false;
+      let registered = true;
+      const cancelledResult = () => ({ transferId: payload.transferId, error: "Transfer cancelled", cancelled: true });
+      const unregister = registerSftpOp(params?.chatSessionId, params?.sessionId, () => {
+        cancelled = true;
+        if (queued) return transferBridge.cancelTransfer?.(null, { transferId: payload.transferId });
+      });
+      const releaseRegistration = () => {
+        if (!registered) return;
+        registered = false;
+        unregister();
+      };
+      try {
+        // Registration may synchronously cancel an already-closing terminal.
+        if (cancelled) return cancelledResult();
+        queued = true;
+        return await transferBridge.runAdmittedTransfer(event, payload, undefined, async () => {
+          queued = false;
+          releaseRegistration();
+          if (cancelled) return cancelledResult();
+          // The runner registers handle cleanup synchronously before its first
+          // await, so admission and active-operation cancellation never overlap.
+          return runner();
+        });
+      } finally {
+        releaseRegistration();
+      }
+    }
+
     async function handleSftpList(params, executionContext = {}) {
       const entries = await withSessionBackedSftp(
         params,
@@ -303,6 +334,7 @@ function createSftpHandlerApi(ctx) {
         sourceHostId,
       });
       try {
+        let cancellationReported = false;
         const sender = {
           send(channel, payload) {
             if (channel === "netcatty:transfer:progress") {
@@ -314,7 +346,8 @@ function createSftpHandlerApi(ctx) {
             } else if (channel === "netcatty:transfer:paused") {
               reportTransferEvent({ type: "paused", ...payload });
             } else if (channel === "netcatty:transfer:cancelled") {
-              reportTransferEvent({ type: "cancelled", ...payload, endedAt: Date.now() });
+              if (!cancellationReported) reportTransferEvent({ type: "cancelled", ...payload, endedAt: Date.now() });
+              cancellationReported = true;
             }
           },
         };
@@ -358,16 +391,16 @@ function createSftpHandlerApi(ctx) {
         );
         const result = await (
           useOuterAdmission
-            ? transferBridge.runAdmittedTransfer(
+            ? runAdmittedSessionTransfer(
+                params,
                 { sender },
                 { transferId, sourceHostId, globalConcurrency: transferBridge.getGlobalTransferConcurrency?.() },
-                undefined,
                 () => runDownload(true),
               )
             : runDownload(false)
         );
         if (result?.cancelled || result?.error === "Transfer cancelled") {
-          reportTransferEvent({ type: "cancelled", transferId, endedAt: Date.now() });
+          if (!cancellationReported) reportTransferEvent({ type: "cancelled", transferId, endedAt: Date.now() });
           return { ok: false, cancelled: true, transferId };
         }
         if (result?.error) throw new Error(result.error);
@@ -392,6 +425,7 @@ function createSftpHandlerApi(ctx) {
         targetHostId,
       });
       try {
+        let cancellationReported = false;
         const sender = {
           send(channel, payload) {
             if (channel === "netcatty:transfer:progress") {
@@ -403,7 +437,8 @@ function createSftpHandlerApi(ctx) {
             } else if (channel === "netcatty:transfer:paused") {
               reportTransferEvent({ type: "paused", ...payload });
             } else if (channel === "netcatty:transfer:cancelled") {
-              reportTransferEvent({ type: "cancelled", ...payload, endedAt: Date.now() });
+              if (!cancellationReported) reportTransferEvent({ type: "cancelled", ...payload, endedAt: Date.now() });
+              cancellationReported = true;
             }
           },
         };
@@ -445,16 +480,16 @@ function createSftpHandlerApi(ctx) {
         );
         const result = await (
           useOuterAdmissionUpload
-            ? transferBridge.runAdmittedTransfer(
+            ? runAdmittedSessionTransfer(
+                params,
                 { sender },
                 { transferId, targetHostId, globalConcurrency: transferBridge.getGlobalTransferConcurrency?.() },
-                undefined,
                 () => runUpload(true),
               )
             : runUpload(false)
         );
         if (result?.cancelled || result?.error === "Transfer cancelled") {
-          reportTransferEvent({ type: "cancelled", transferId, endedAt: Date.now() });
+          if (!cancellationReported) reportTransferEvent({ type: "cancelled", transferId, endedAt: Date.now() });
           return { ok: false, cancelled: true, transferId };
         }
         if (result?.error) throw new Error(result.error);
