@@ -283,17 +283,21 @@ export function getCommandToRecordOnEnter(
  * Keystrokes that remove the text a snippet acceptance replaces.
  * Line-start keeps the shell kill-line (Ctrl+U, or backspaces on Windows).
  * Mid-line and program read-prompts delete only the word being typed.
+ * Script snippets run automation and do not replace the line, so they keep
+ * the full-line clear.
  */
 export function computeSnippetAcceptClearSequence(options: {
   line: string | null;
   os: string;
   promptText: string;
+  snippetKind?: "snippet" | "script";
 }): string {
   const line = options.line ?? "";
   if (line.length === 0) return "";
 
   const { currentWord, wordIndex } = parseCommandLine(line);
-  const replaceWord = currentWord.length > 0
+  const replaceWord = options.snippetKind !== "script"
+    && currentWord.length > 0
     && line.endsWith(currentWord)
     && (wordIndex > 0 || isProgramInputPromptText(options.promptText));
   if (replaceWord) return "\b".repeat(Array.from(currentWord).length);

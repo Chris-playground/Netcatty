@@ -350,6 +350,45 @@ test("snippet accept deletes only the mid-line word (#3622)", () => {
   );
 });
 
+test("script snippet accept still clears the whole line (#3622)", () => {
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "echo sm",
+      os: "linux",
+      promptText: "user@host:~$ ",
+      snippetKind: "script",
+    }),
+    "\x15",
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "echo sm",
+      os: "windows",
+      promptText: "C:\\Users\\me>",
+      snippetKind: "script",
+    }),
+    "\b".repeat("echo sm".length),
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "hello use",
+      os: "linux",
+      promptText: "Email: ",
+      snippetKind: "script",
+    }),
+    "\x15",
+  );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "echo sm",
+      os: "linux",
+      promptText: "user@host:~$ ",
+      snippetKind: "snippet",
+    }),
+    "\b\b",
+  );
+});
+
 test("program input prompts keep snippet suggestions only (#3622)", () => {
   const suggestions = [
     { text: "useradd", displayText: "useradd", source: "history", score: 10 },

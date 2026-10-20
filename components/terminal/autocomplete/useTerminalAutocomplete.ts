@@ -1343,8 +1343,8 @@ export function useTerminalAutocomplete(
     [handleCommandHistoryCleared],
   );
 
-  /** Accept a snippet: clear the matched word (or the whole line at a shell
-   *  prompt), then run it via the host-canonical send path (onAcceptSnippet). */
+  /** Accept a snippet: clear the matched word (or the whole line for a script
+   *  or a shell prompt), then run it via onAcceptSnippet. */
   const acceptSnippet = useCallback((snippet: Snippet): boolean => {
     const term = termRef.current;
     if (term) {
@@ -1360,6 +1360,7 @@ export function useTerminalAutocomplete(
           line,
           os: hostOsRef.current,
           promptText: prompt.promptText,
+          snippetKind: snippet.kind,
         });
         if (clearSequence) writeToTerminal(clearSequence);
       }
