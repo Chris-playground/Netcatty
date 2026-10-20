@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { generateText, isStepCount, streamText, tool } from 'ai';
+import { generateText, isStepCount, streamText, tool, wrapLanguageModel } from 'ai';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart, LanguageModelV4StreamResult } from '@ai-sdk/provider';
 import { z } from 'zod';
 import {
+  createModelPrivacyMiddleware,
   initializeModelPrivacy,
   protectModel,
   redactOpenAIChatAssistantFields,
@@ -576,3 +577,42 @@ test('enabling privacy during an off-mode turn blocks its next model call', asyn
   await assert.rejects(async () => protectedModel.doGenerate(params), /privacy protection is unavailable/);
   assert.equal(model.doGenerateCalls.length, 1);
 });
+
+for (const method of ['doGenerate', 'doStream'] as const) {
+  test(`enabling privacy after prompt transformation blocks the ${method} provider handoff`, async (t) => {
+    const { bridge, service } = await fixture(t);
+    service.configure({ enabled: false });
+    const chatSessionId = `${t.name}-off`;
+    t.after(() => setReversibleModelPrivacy(chatSessionId, false));
+    const privacy = await initializeModelPrivacy(bridge, chatSessionId);
+    assert.ok(privacy);
+    assert.equal(privacy.enabled, false);
+    const model = new MockLanguageModelV4({
+      doGenerate: {
+        content: [{ type: 'text', text: 'ok' }],
+        finishReason: { unified: 'stop', raw: undefined },
+        usage,
+        warnings: [],
+      },
+      doStream: stream([]),
+    });
+    const middleware = createModelPrivacyMiddleware(privacy);
+    const protectedModel = wrapLanguageModel({
+      model,
+      middleware: {
+        ...middleware,
+        async transformParams(options) {
+          const params = await middleware.transformParams!(options);
+          // Model the SDK await gap after the disabled prompt was validated.
+          service.configure({ enabled: true });
+          return params;
+        },
+      },
+    });
+    await assert.rejects(async () => protectedModel[method]({
+      prompt: [{ role: 'user', content: [{ type: 'text', text: ADDRESS }] }],
+    }), /privacy protection is unavailable/);
+    assert.equal(model.doGenerateCalls.length, 0);
+    assert.equal(model.doStreamCalls.length, 0);
+  });
+}

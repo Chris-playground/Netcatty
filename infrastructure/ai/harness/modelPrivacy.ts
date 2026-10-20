@@ -284,6 +284,8 @@ export function createModelPrivacyMiddleware(
       params, privacy, context.getOpenAIChatAssistantFields?.(),
     ),
     wrapGenerate: async ({ doGenerate }) => {
+      // The SDK awaits transformed params before entering this provider handoff.
+      await privacy.transform('restore', []);
       if (!privacy.enabled) return doGenerate();
       const result = await doGenerate();
       const content: LanguageModelV4Content[] = [];
@@ -295,6 +297,7 @@ export function createModelPrivacyMiddleware(
       return { ...result, content };
     },
     wrapStream: async ({ doStream }) => {
+      await privacy.transform('restore', []);
       if (!privacy.enabled) return doStream();
       const result = await doStream();
       const pending = new Map<string, { text: string; chunk: Extract<LanguageModelV4StreamPart, { type: 'text-delta' }> }>();
