@@ -54,6 +54,16 @@ test("build.files includes the single-channel SSH banner matcher", () => {
   assert.equal(banner.remoteSoftwareRequiresSingleChannel("JumpServer"), false);
 });
 
+test("build.files includes the shared TOTP runtime required by SSH bridges", () => {
+  assert.ok(
+    config.files.includes("domain/totp.shared.cjs"),
+    "packaged SSH bridges require domain/totp.shared.cjs at load",
+  );
+  const totp = require("../domain/totp.shared.cjs");
+  assert.equal(typeof totp.generateTotp, "function");
+  assert.equal(typeof totp.planTotpAutoSubmit, "function");
+});
+
 test("unpacked Tool CLI includes capability runtime dependencies", () => {
   assert.ok(
     config.asarUnpack.includes("electron/cli/**/*"),
