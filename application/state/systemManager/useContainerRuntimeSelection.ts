@@ -9,9 +9,9 @@ import type {
 import {
   describeRuntimeFailure,
   firstContainerRuntime,
+  isAutomaticRuntimeFallback,
   isKubectlForbiddenError,
-  pickContainerSource,
-  rememberedContainerSource,
+  reconcileContainerSource,
   sourcesFromCapabilities,
 } from '../../../domain/systemManager/containerRuntime';
 import type { SessionCapabilities } from '../../../domain/systemManager/types';
@@ -40,7 +40,7 @@ export function useContainerRuntimeSelection({
   const detectedKey = detected.join('|');
   const [source, setSource] = useState<ContainerSourceId | null>(() => {
     const remembered = readContainerRuntimePreference(hostKey);
-    return pickContainerSource(detected, null, rememberedContainerSource(remembered, detected));
+    return reconcileContainerSource(detected, null, remembered);
   });
   const [contextName, setContextName] = useState<string | null>(() => (
     readContainerRuntimePreference(hostKey)?.context ?? null
@@ -59,7 +59,7 @@ export function useContainerRuntimeSelection({
   useEffect(() => {
     skipPersist.current = true;
     const remembered = readContainerRuntimePreference(hostKey);
-    setSource(pickContainerSource(detected, null, rememberedContainerSource(remembered, detected)));
+    setSource(reconcileContainerSource(detected, null, remembered));
     setContextName(remembered?.context ?? null);
     setNamespaceName(remembered?.namespace ?? null);
     setContexts([]);
@@ -72,10 +72,10 @@ export function useContainerRuntimeSelection({
 
   useEffect(() => {
     const available = sourcesFromCapabilities(capabilities);
-    setSource((current) => pickContainerSource(
+    setSource((current) => reconcileContainerSource(
       available,
       current,
-      rememberedContainerSource(readContainerRuntimePreference(hostKey), available),
+      readContainerRuntimePreference(hostKey),
     ));
   }, [capabilities, detectedKey, hostKey]);
 
@@ -87,6 +87,7 @@ export function useContainerRuntimeSelection({
     if (!source) return;
     const remembered = readContainerRuntimePreference(hostKey);
     const available = sourcesFromCapabilities(capabilities);
+    if (isAutomaticRuntimeFallback(remembered, source, available)) return;
     const engine = source === 'kubernetes'
       ? (remembered?.engine ?? firstContainerRuntime(available) ?? undefined)
       : source;
@@ -178,10 +179,20 @@ export function useContainerRuntimeSelection({
   }, [backend, contextName, contexts, sessionId, source, scopeNonce, stableT]);
 
   const selectSource = useCallback((value: string) => {
-    if (value === 'docker' || value === 'podman' || value === 'nerdctl' || value === 'kubernetes') {
-      setSource(value);
-    }
-  }, []);
+    if (value !== 'docker' && value !== 'podman' && value !== 'nerdctl' && value !== 'kubernetes') return;
+    setSource(value);
+    const remembered = readContainerRuntimePreference(hostKey);
+    const available = sourcesFromCapabilities(capabilities);
+    const engine = value === 'kubernetes'
+      ? (remembered?.engine ?? firstContainerRuntime(available) ?? undefined)
+      : value;
+    writeContainerRuntimePreference(hostKey, {
+      source: value,
+      engine,
+      context: contextName || undefined,
+      namespace: namespaceName || undefined,
+    });
+  }, [capabilities, contextName, hostKey, namespaceName]);
 
   const selectContext = useCallback((value: string) => {
     setContextName(value);

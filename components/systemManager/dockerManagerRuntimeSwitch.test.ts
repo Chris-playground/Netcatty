@@ -16,4 +16,6 @@ test('kubernetes keeps the shared runtime select and drops the Containers back b
   assert.match(tab, /section="k8s-namespace-select"/);
   assert.match(hook, /const showRuntimeSwitcher = detected\.length > 1;/);
   assert.doesNotMatch(hook, /source !== 'kubernetes' && detected\.length/);
+  assert.match(hook, /reconcileContainerSource\(/);
+  assert.match(hook, /isAutomaticRuntimeFallback\(remembered, source, available\)/);
 });

@@ -89,6 +89,93 @@ function parseJsonRecords(stdout) {
   return rows;
 }
 
+function portInRange(value) {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+function formatHostBind(ip, hostLabel) {
+  const bind = ip || "0.0.0.0";
+  const host = bind.includes(":") && !bind.startsWith("[") ? `[${bind}]` : bind;
+  return `${host}:${hostLabel}`;
+}
+
+function formatPortMapping(mapping) {
+  if (!mapping || typeof mapping !== "object") return [];
+  const containerPort = portInRange(mapping.container_port ?? mapping.containerPort ?? mapping.ContainerPort ?? mapping.PrivatePort);
+  if (containerPort === null) return [];
+  const hostPort = portInRange(mapping.host_port ?? mapping.hostPort ?? mapping.HostPort ?? mapping.PublicPort);
+  const requestedRange = Number(mapping.range ?? mapping.Range);
+  const range = Number.isInteger(requestedRange) && requestedRange > 1 ? requestedRange : 1;
+  if (containerPort + range - 1 > 65535) return [];
+  if (hostPort !== null && hostPort + range - 1 > 65535) return [];
+  const hostIp = String(mapping.host_ip ?? mapping.hostIP ?? mapping.HostIP ?? mapping.HostIp ?? mapping.IP ?? "").trim();
+  const protocols = String(mapping.protocol ?? mapping.Protocol ?? mapping.Type ?? "tcp")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const protocolList = protocols.length > 0 ? protocols : ["tcp"];
+  const containerLabel = range > 1 ? `${containerPort}-${containerPort + range - 1}` : String(containerPort);
+  const hostLabel = hostPort === null
+    ? ""
+    : (range > 1 ? `${hostPort}-${hostPort + range - 1}` : String(hostPort));
+  return protocolList.map((protocol) => {
+    const keys = [];
+    for (let offset = 0; offset < range; offset += 1) keys.push(`${containerPort + offset}/${protocol}`);
+    const label = hostLabel
+      ? `${formatHostBind(hostIp, hostLabel)}->${containerLabel}/${protocol}`
+      : `${containerLabel}/${protocol}`;
+    return { label, keys };
+  });
+}
+
+function formatExposedPorts(exposed, published) {
+  if (!exposed || typeof exposed !== "object" || Array.isArray(exposed)) return [];
+  const entries = [];
+  for (const [key, value] of Object.entries(exposed)) {
+    const slash = key.indexOf("/");
+    if (slash > 0) {
+      const port = portInRange(key.slice(0, slash));
+      const protocol = key.slice(slash + 1).trim() || "tcp";
+      if (port !== null) entries.push({ port, protocol });
+      continue;
+    }
+    const port = portInRange(key);
+    if (port === null) continue;
+    const protocols = Array.isArray(value) && value.length > 0 ? value : ["tcp"];
+    for (const protocol of protocols) {
+      const name = String(protocol || "tcp").trim();
+      if (name) entries.push({ port, protocol: name });
+    }
+  }
+  entries.sort((left, right) => left.port - right.port || left.protocol.localeCompare(right.protocol));
+  const labels = [];
+  for (const entry of entries) {
+    const label = `${entry.port}/${entry.protocol}`;
+    if (published.has(label) || labels.includes(label)) continue;
+    labels.push(label);
+  }
+  return labels;
+}
+
+function formatContainerPorts(row) {
+  const ports = row.Ports ?? row.ports;
+  if (typeof ports === "string") return ports;
+  const labels = [];
+  const published = new Set();
+  if (Array.isArray(ports)) {
+    for (const mapping of ports) {
+      for (const formatted of formatPortMapping(mapping)) {
+        if (labels.includes(formatted.label)) continue;
+        labels.push(formatted.label);
+        for (const key of formatted.keys) published.add(key);
+      }
+    }
+  }
+  labels.push(...formatExposedPorts(row.ExposedPorts ?? row.exposedPorts, published));
+  return labels.join(", ");
+}
+
 function parseDockerContainers(stdout) {
   return parseJsonRecords(stdout).map((row) => ({
     id: row.ID || row.Id || "",
@@ -96,7 +183,7 @@ function parseDockerContainers(stdout) {
     image: row.Image || "",
     status: row.Status || row.State || "",
     state: row.State || "",
-    ports: typeof row.Ports === "string" ? row.Ports : "",
+    ports: formatContainerPorts(row),
     createdAt: row.CreatedAt || row.Created || "",
   })).filter((container) => container.id || container.name);
 }

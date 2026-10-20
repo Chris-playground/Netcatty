@@ -19,7 +19,9 @@ const {
   parseKubectlPodList,
   parseNamespaceList,
   parseRuntimeProbe,
+  isAutomaticRuntimeFallback,
   pickContainerSource,
+  reconcileContainerSource,
   rememberedContainerSource,
   sourcesFromCapabilities,
   isKubectlForbiddenError,
@@ -89,6 +91,25 @@ test("pickContainerSource remembers the last choice per host and falls back when
   );
   assert.equal(firstContainerRuntime(["kubernetes", "podman"]), "podman");
   assert.equal(firstContainerRuntime(["kubernetes"]), null);
+});
+
+test("reconcileContainerSource restores a runtime after a probe gap and does not treat the fallback as the choice", () => {
+  const nerdctl = { source: "nerdctl", engine: "nerdctl" };
+  assert.equal(reconcileContainerSource(["docker", "podman"], "nerdctl", nerdctl), "docker");
+  assert.equal(isAutomaticRuntimeFallback(nerdctl, "docker", ["docker", "podman"]), true);
+  assert.equal(
+    reconcileContainerSource(["docker", "podman", "nerdctl"], "docker", nerdctl),
+    "nerdctl",
+  );
+  assert.equal(isAutomaticRuntimeFallback(nerdctl, "podman", ["docker", "podman"]), false);
+
+  const kubernetes = { source: "kubernetes", engine: "podman" };
+  assert.equal(reconcileContainerSource(["docker", "podman"], "kubernetes", kubernetes), "podman");
+  assert.equal(isAutomaticRuntimeFallback(kubernetes, "podman", ["docker", "podman"]), true);
+  assert.equal(
+    reconcileContainerSource(["docker", "podman", "kubernetes"], "podman", kubernetes),
+    "kubernetes",
+  );
 });
 
 test("buildRuntimeCommand uses the detected CLI and defaults unknown runtimes to docker", () => {

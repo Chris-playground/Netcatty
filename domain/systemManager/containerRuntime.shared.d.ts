@@ -50,6 +50,16 @@ export function rememberedContainerSource(
   preference: { source?: string; engine?: string } | null | undefined,
   detected: readonly ContainerSourceId[] | null | undefined,
 ): ContainerSourceId | null;
+export function reconcileContainerSource(
+  detected: readonly ContainerSourceId[] | null | undefined,
+  current: ContainerSourceId | null | undefined,
+  preference: { source?: string; engine?: string } | null | undefined,
+): ContainerSourceId | null;
+export function isAutomaticRuntimeFallback(
+  preference: { source?: string; engine?: string } | null | undefined,
+  source: ContainerSourceId | null | undefined,
+  detected: readonly ContainerSourceId[] | null | undefined,
+): boolean;
 export function firstContainerRuntime(
   detected: readonly ContainerSourceId[] | null | undefined,
 ): ContainerRuntimeId | null;

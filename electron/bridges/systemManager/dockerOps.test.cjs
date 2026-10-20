@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createDockerOpsApi } = require("./dockerOps.cjs");
+const { createDockerOpsApi, parseDockerContainers } = require("./dockerOps.cjs");
 
 test("listContainers uses plain docker first even when a saved session password exists", async () => {
   const calls = [];
@@ -465,4 +465,25 @@ test("listContainers keeps a specific nerdctl command error and docker stderr", 
   const denied = await docker.listContainers(null, "s1", "docker");
   assert.match(denied.error, /permission denied/i);
   assert.equal(denied.errorCode, undefined);
+});
+
+test("parseDockerContainers formats podman port mappings and exposed ports", () => {
+  const docker = parseDockerContainers('{"ID":"abc","Names":"web","Ports":"0.0.0.0:8080->80/tcp"}\n');
+  assert.equal(docker[0].ports, "0.0.0.0:8080->80/tcp");
+
+  const podman = parseDockerContainers(JSON.stringify({
+    Id: "def",
+    Names: ["api"],
+    Ports: [
+      { host_ip: "127.0.0.1", container_port: 80, host_port: 8080, range: 1, protocol: "tcp" },
+      { host_ip: "", container_port: 53, host_port: 5353, range: 2, protocol: "udp" },
+      { host_ip: "::", container_port: 443, host_port: 8443, protocol: "tcp,udp" },
+    ],
+    ExposedPorts: { 80: ["tcp"], 443: ["tcp"], 90: ["tcp"] },
+  }));
+  assert.equal(podman[0].name, "api");
+  assert.equal(
+    podman[0].ports,
+    "127.0.0.1:8080->80/tcp, 0.0.0.0:5353-5354->53-54/udp, [::]:8443->443/tcp, [::]:8443->443/udp, 90/tcp",
+  );
 });

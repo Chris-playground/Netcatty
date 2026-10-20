@@ -18,8 +18,10 @@ export {
   firstContainerRuntime,
   isContainerSource,
   isKubectlForbiddenError,
+  isAutomaticRuntimeFallback,
   pickContainerSource,
   podStatusMessageKey,
+  reconcileContainerSource,
   rememberedContainerSource,
   sourcesFromCapabilities,
 } from "./containerRuntime.shared.cjs";

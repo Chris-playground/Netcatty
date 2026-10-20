@@ -71,6 +71,25 @@ function rememberedContainerSource(preference, detected) {
   return source;
 }
 
+function reconcileContainerSource(detected, current, preference) {
+  const available = SOURCE_ORDER.filter((id) => Array.isArray(detected) && detected.includes(id));
+  const preferred = rememberedContainerSource(preference, available);
+  if (preferred && available.includes(preferred)) return preferred;
+  return pickContainerSource(available, current, preferred);
+}
+
+function isAutomaticRuntimeFallback(preference, source, detected) {
+  if (!preference?.source || !isContainerSource(source) || preference.source === source) return false;
+  const available = Array.isArray(detected) ? detected : [];
+  if (available.includes(preference.source)) return false;
+  const automatic = pickContainerSource(
+    available,
+    null,
+    rememberedContainerSource(preference, available),
+  );
+  return source === automatic;
+}
+
 function firstContainerRuntime(detected) {
   return CONTAINER_RUNTIMES.find((id) => Array.isArray(detected) && detected.includes(id)) || null;
 }
@@ -502,6 +521,8 @@ module.exports = {
   sourcesFromCapabilities,
   pickContainerSource,
   rememberedContainerSource,
+  reconcileContainerSource,
+  isAutomaticRuntimeFallback,
   firstContainerRuntime,
   isRuntimeSocketPermissionError,
   sanitizeContainerId,
