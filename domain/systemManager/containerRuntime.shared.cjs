@@ -4,6 +4,13 @@ const CONTAINER_RUNTIMES = ["docker", "podman", "nerdctl"];
 const SOURCE_ORDER = ["docker", "podman", "nerdctl", "kubernetes"];
 
 const CLEAR_STARTUP_OUTPUT = "printf '\\033[H\\033[2J\\033[3J';";
+const NETCATTY_POPUP_HISTORY_MARKER = "__NC_POPUP__";
+
+function popupHistoryPrefix(shell) {
+  if (shell === "powershell") return `$__nc_popup='${NETCATTY_POPUP_HISTORY_MARKER}'; `;
+  if (shell === "cmd") return `set "${NETCATTY_POPUP_HISTORY_MARKER}=1"& `;
+  return "";
+}
 
 function shQuote(str) {
   return `'${String(str).replace(/'/g, "'\"'\"'")}'`;
@@ -121,10 +128,10 @@ function buildContainerCommandWithSudoFallback(runtime, containerId, cliArgs, sh
   const bin = runtimeBinary(runtime);
   const plainCommand = `${bin} ${cliArgs}`;
   if (popupShell === "powershell") {
-    return `${bin} inspect ${containerId} >$null; if ($LASTEXITCODE -eq 0) { ${plainCommand} } else { exit $LASTEXITCODE }`;
+    return `${popupHistoryPrefix(popupShell)}${bin} inspect ${containerId} >$null; if ($LASTEXITCODE -eq 0) { ${plainCommand} } else { exit $LASTEXITCODE }`;
   }
   if (popupShell === "cmd") {
-    return `${bin} inspect ${containerId} >nul && ${plainCommand}`;
+    return `${popupHistoryPrefix(popupShell)}${bin} inspect ${containerId} >nul && ${plainCommand}`;
   }
   const sudoCommand = `sudo ${plainCommand}`;
   const script = [
@@ -244,7 +251,7 @@ function containerShellArg(shell) {
 }
 
 function finishKubectlPopup(shell, command) {
-  return shell === "posix" ? wrapClearAndExec(command) : command;
+  return shell === "posix" ? wrapClearAndExec(command) : `${popupHistoryPrefix(shell)}${command}`;
 }
 
 function buildKubectlExecShellCommand(context, namespace, pod, container, shell) {
@@ -417,6 +424,7 @@ function parseKubectlPodList(jsonText, now = Date.now()) {
 }
 
 module.exports = {
+  NETCATTY_POPUP_HISTORY_MARKER,
   CONTAINER_RUNTIMES,
   SOURCE_ORDER,
   normalizeContainerRuntime,

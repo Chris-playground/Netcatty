@@ -1,4 +1,5 @@
 import { RemoteHistoryEntry, RemoteHistorySource } from './models';
+import { NETCATTY_POPUP_HISTORY_MARKER } from './systemManager/containerRuntime.ts';
 
 /** Marker prefix Netcatty AI uses when executing commands via the PTY bridge. */
 export const NETCATTY_AI_HISTORY_MARKER = '__NCMCP_';
@@ -11,13 +12,15 @@ export function isNetcattyAiHistoryCommand(command: string): boolean {
 const NETCATTY_MANAGED_STARTUP_COMMAND =
   /^(?:sh\s+-c\s+.*printf .*\\033\[H\\033\[2J\\033\[3J.*(?:_nc_(?:docker|rt)_err=.*\b(?:docker|podman|nerdctl)\s+inspect\b|exec\s+kubectl\b)|printf '\\033\[H\\033\[2J\\033\[3J';\s*(?:_nc_(?:docker|rt)_err=.*\b(?:docker|podman|nerdctl)\s+inspect\b|exec\s+(?:(?:docker|podman|nerdctl)\s+(?:exec|logs)\b|tmux\s+attach\b)))/;
 
-const NETCATTY_WINDOWS_POPUP_COMMAND =
-  /^(?:(?:docker|podman|nerdctl) inspect [a-zA-Z0-9]+ (?:>\$null; if \(\$LASTEXITCODE -eq 0\) \{|>nul && )|kubectl --context \S+.*\b(?:exec -it\b.*\bcommand -v bash\b|logs -f --tail 200\b|describe pod\b))/;
+const NETCATTY_WINDOWS_CONTAINER_POPUP_COMMAND =
+  /^(?:\$__nc_popup='__NC_POPUP__'; |set "__NC_POPUP__=1"& )?(?:docker|podman|nerdctl) inspect [a-zA-Z0-9]+ (?:>\$null; if \(\$LASTEXITCODE -eq 0\) \{|>nul && )/;
 
 /** True when a shell history line came from a Netcatty-managed terminal launch. */
 export function isNetcattyManagedStartupHistoryCommand(command: string): boolean {
   const text = command.trim();
-  return NETCATTY_MANAGED_STARTUP_COMMAND.test(text) || NETCATTY_WINDOWS_POPUP_COMMAND.test(text);
+  return text.includes(NETCATTY_POPUP_HISTORY_MARKER)
+    || NETCATTY_MANAGED_STARTUP_COMMAND.test(text)
+    || NETCATTY_WINDOWS_CONTAINER_POPUP_COMMAND.test(text);
 }
 
 const ZSH_EXTENDED_RECORD = /^: (\d+):\d+;([\s\S]*)$/;

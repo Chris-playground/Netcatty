@@ -24,6 +24,8 @@ export interface KubectlPodInfo {
   shellContainers: string[];
 }
 
+export const NETCATTY_POPUP_HISTORY_MARKER: string;
+
 export function normalizeContainerRuntime(runtime: unknown): ContainerRuntimeId;
 export function isContainerSource(value: unknown): value is ContainerSourceId;
 export function runtimeBinary(runtime: unknown): string;

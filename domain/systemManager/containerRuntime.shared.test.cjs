@@ -299,9 +299,10 @@ test("kubectl popup commands skip the POSIX wrapper on Windows shells", () => {
     const exec = buildKubectlExecShellCommand("kind-kind", "default", "api", "sidecar", shell);
     const logs = buildKubectlLogsCommand("kind-kind", "default", "api", "app", shell);
     const described = buildKubectlDescribeCommand("kind-kind", "default", "api", shell);
-    assert.equal(exec.startsWith("kubectl "), true, shell);
-    assert.equal(logs.startsWith("kubectl "), true, shell);
-    assert.equal(described.startsWith("kubectl "), true, shell);
+    assert.match(exec, /kubectl --context/, shell);
+    assert.match(logs, /kubectl --context/, shell);
+    assert.match(described, /kubectl --context/, shell);
+    assert.match(exec, /__NC_POPUP__/, shell);
     assert.equal(exec.startsWith("sh -c "), false, shell);
     assert.match(exec, /exec -it/);
     assert.match(exec, /sidecar/);
@@ -333,12 +334,12 @@ test("kubectl popup commands skip the POSIX wrapper on Windows shells", () => {
 test("container popup commands inspect in the host shell on Windows", () => {
   const powershellLogs = buildContainerLogsCommand("podman", "abc123", "powershell");
   assert.equal(powershellLogs.startsWith("sh -c "), false);
-  assert.match(powershellLogs, /^podman inspect abc123 >\$null;/);
+  assert.match(powershellLogs, /\$__nc_popup='__NC_POPUP__'; podman inspect abc123 >\$null;/);
   assert.match(powershellLogs, /podman logs -f --tail 200 abc123/);
 
   const cmdShell = buildContainerExecShellCommand("nerdctl", "abc123", "cmd");
   assert.equal(cmdShell.startsWith("sh -c "), false);
-  assert.match(cmdShell, /^nerdctl inspect abc123 >nul && nerdctl exec -it abc123/);
+  assert.match(cmdShell, /^set "__NC_POPUP__=1"& nerdctl inspect abc123 >nul && nerdctl exec -it abc123/);
   assert.match(cmdShell, /sh -c "command -v bash/);
 });
 

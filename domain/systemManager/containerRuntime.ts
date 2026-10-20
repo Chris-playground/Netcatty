@@ -7,6 +7,7 @@ export type {
 } from "./containerRuntime.shared.cjs";
 
 export {
+  NETCATTY_POPUP_HISTORY_MARKER,
   buildContainerExecShellCommand,
   buildContainerLogsCommand,
   buildKubectlDescribeCommand,

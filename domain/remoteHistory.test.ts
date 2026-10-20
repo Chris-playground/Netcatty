@@ -236,6 +236,14 @@ test('isNetcattyManagedStartupHistoryCommand: detects Docker and tmux terminal l
   assert.equal(isNetcattyManagedStartupHistoryCommand('podman logs -f abc123'), false);
   assert.equal(isNetcattyManagedStartupHistoryCommand('kubectl logs api'), false);
   assert.equal(isNetcattyManagedStartupHistoryCommand('kubectl describe pod api'), false);
+  assert.equal(
+    isNetcattyManagedStartupHistoryCommand('kubectl --context prod -n default logs -f --tail 200 api'),
+    false,
+  );
+  assert.equal(
+    isNetcattyManagedStartupHistoryCommand('kubectl --context prod describe pod api'),
+    false,
+  );
   assert.equal(isNetcattyManagedStartupHistoryCommand('docker ps -a'), false);
   assert.equal(isNetcattyManagedStartupHistoryCommand('docker logs -f 587abcdef123'), false);
   assert.equal(isNetcattyManagedStartupHistoryCommand('docker exec -it 587abcdef123 bash'), false);
