@@ -18,6 +18,9 @@ const {
 
 const OPENCODE_V2_PASSWORD_GRACE_MS = 400;
 const OPENCODE_V2_VERSION_PROBE_MS = 8000;
+const OPENCODE_V2_CATALOG_SETTLE_POLL_MS = 100;
+const OPENCODE_V2_CATALOG_SETTLE_QUIET_MS = 400;
+const OPENCODE_V2_CATALOG_SETTLE_MAX_MS = 8000;
 const OPENCODE_V2_USERNAME = "opencode";
 const OPENCODE_V1_NOT_FOUND = "OpenCode CLI not found or not runnable. Install OpenCode and ensure `opencode` is on PATH, or set a custom path in Settings.";
 
@@ -63,13 +66,12 @@ function isOpenCodeV2Version(version) {
   return Boolean(version && Number(version.major) >= 2);
 }
 
-function versionCacheKey(binPath, env) {
-  const resolved = resolveUsableOpenCodeBinPath(binPath, env) || "";
+function versionCacheKey(resolvedPath, env) {
   let mtime = "";
-  if (resolved) {
-    try { mtime = String(fs.statSync(resolved).mtimeMs); } catch {}
+  if (resolvedPath) {
+    try { mtime = String(fs.statSync(resolvedPath).mtimeMs); } catch {}
   }
-  return [resolved || String(binPath || ""), mtime, env?.PATH || ""].join("\0");
+  return [resolvedPath || "", mtime, env?.PATH || ""].join("\0");
 }
 
 function execFileResult(command, args, options, execFileImpl = execFile) {
@@ -87,9 +89,9 @@ function execFileResult(command, args, options, execFileImpl = execFile) {
 }
 
 async function detectOpenCodeCliVersion({ binPath, env, execFileImpl } = {}) {
-  const key = versionCacheKey(binPath, env);
-  if (versionCache.has(key)) return versionCache.get(key);
   const resolved = resolveUsableOpenCodeBinPath(binPath, env) || resolveCliFromPath("opencode", env);
+  const key = versionCacheKey(resolved, env);
+  if (versionCache.has(key)) return versionCache.get(key);
   const command = resolved || (binPath ? String(binPath) : "opencode");
   const spec = prepareCommandForSpawn(command, ["--version"], { unwrapNativeExe: false });
   let output = "";
@@ -814,6 +816,79 @@ function emptyCatalog() {
   return { currentModelId: null, models: [] };
 }
 
+function delayForCatalogSettle(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const error = signal.reason instanceof Error ? signal.reason : new Error("aborted");
+      if (!error.name) error.name = "AbortError";
+      reject(error);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      const error = signal.reason instanceof Error ? signal.reason : new Error("aborted");
+      if (!(signal.reason instanceof Error)) error.name = "AbortError";
+      reject(error);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function listSettledOpenCodeV2Catalog(client, signal, directory) {
+  if (typeof client.openEventStream !== "function") return client.listCatalog(signal, directory);
+  const streamAbort = new AbortController();
+  const stopStream = () => streamAbort.abort(signal?.reason);
+  if (signal?.aborted) stopStream();
+  else signal?.addEventListener("abort", stopStream);
+  const updates = { count: 0 };
+  let reader = Promise.resolve();
+  try {
+    let subscription;
+    try {
+      subscription = await client.openEventStream(streamAbort.signal);
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") throw error;
+      return client.listCatalog(signal, directory);
+    }
+    reader = (async () => {
+      try {
+        for await (const event of subscription) {
+          if (event?.type === "model.updated" || event?.type === "provider.updated") updates.count += 1;
+        }
+      } catch (error) {
+        if (streamAbort.signal.aborted || error?.name === "AbortError") return;
+        throw error;
+      }
+    })();
+    const started = Date.now();
+    let current = await client.listCatalog(signal, directory);
+    let seen = updates.count;
+    let quietAt = Date.now();
+    while (Date.now() - started < OPENCODE_V2_CATALOG_SETTLE_MAX_MS) {
+      await delayForCatalogSettle(OPENCODE_V2_CATALOG_SETTLE_POLL_MS, signal);
+      if (updates.count !== seen) {
+        seen = updates.count;
+        quietAt = Date.now();
+        current = await client.listCatalog(signal, directory);
+        continue;
+      }
+      if (Date.now() - quietAt >= OPENCODE_V2_CATALOG_SETTLE_QUIET_MS) return current;
+    }
+    return current;
+  } finally {
+    stopStream();
+    signal?.removeEventListener("abort", stopStream);
+    await Promise.race([
+      reader.catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 200)),
+    ]);
+  }
+}
+
 async function listOpenCodeV2Models(args = {}) {
   const signal = args.signal || args.abortController?.signal;
   if (signal?.aborted) return emptyCatalog();
@@ -828,7 +903,7 @@ async function listOpenCodeV2Models(args = {}) {
       opened = acquired.server;
     }
     if (signal?.aborted) return emptyCatalog();
-    return await opened.client.listCatalog(signal, args.cwd);
+    return await listSettledOpenCodeV2Catalog(opened.client, signal, args.cwd);
   } catch (error) {
     if (signal?.aborted || error?.name === "AbortError") return emptyCatalog();
     throw toUserFacingOpenCodeV2Error(error);

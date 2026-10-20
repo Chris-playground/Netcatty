@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const {
   buildOpenCodeBasicAuthorization,
@@ -34,6 +37,26 @@ test("parseOpenCodeVersionOutput distinguishes OpenCode 1.x from 2.x", () => {
   assert.equal(isOpenCodeV2Version(parseOpenCodeVersionOutput("v2.1.0")), true);
   assert.equal(isOpenCodeV2Version(parseOpenCodeVersionOutput("1.19.3")), false);
   assert.equal(isOpenCodeV2Version(null), false);
+});
+
+test("version cache follows the PATH binary when OpenCode is replaced", async () => {
+  resetOpenCodeVersionCache();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-version-cache-"));
+  const bin = path.join(dir, "opencode");
+  fs.writeFileSync(bin, "#!/bin/sh\necho v1.19.3\n", { mode: 0o755 });
+  try {
+    const env = { PATH: `${dir}${path.delimiter}${process.env.PATH || ""}` };
+    const first = await detectOpenCodeCliVersion({ env });
+    assert.equal(first.major, 1);
+    fs.writeFileSync(bin, "#!/bin/sh\necho v2.1.0\n", { mode: 0o755 });
+    const replacedAt = new Date(Date.now() + 2000);
+    fs.utimesSync(bin, replacedAt, replacedAt);
+    const replaced = await detectOpenCodeCliVersion({ env });
+    assert.equal(replaced.major, 2);
+  } finally {
+    resetOpenCodeVersionCache();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a crashed --version probe is not classified as OpenCode 2", async () => {
@@ -564,6 +587,39 @@ test("listOpenCodeModels stays on the 1.x factory for OpenCode 1.x", async () =>
   assert.equal(v1, true);
   assert.deepEqual(models.models, []);
   resetOpenCodeListServerPool();
+});
+
+test("listOpenCodeV2Models refetches the catalog after model.updated", async () => {
+  let updated = false;
+  const result = await listOpenCodeV2Models({
+    openCodeV2Factory: async () => ({
+      client: {
+        async listCatalog() {
+          if (!updated) {
+            return { currentModelId: null, models: [{ id: "opencode/big-pickle", name: "builtin" }] };
+          }
+          return {
+            currentModelId: "custom/coder",
+            models: [
+              { id: "opencode/big-pickle", name: "builtin" },
+              { id: "custom/coder", name: "Coder" },
+            ],
+          };
+        },
+        async openEventStream() {
+          return (async function* partialCatalog() {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            updated = true;
+            yield { type: "model.updated", data: {} };
+            await new Promise(() => {});
+          })();
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+  assert.deepEqual(result.models.map((model) => model.id), ["opencode/big-pickle", "custom/coder"]);
+  assert.equal(result.currentModelId, "custom/coder");
 });
 
 test("listOpenCodeModels uses the 2.x catalog when the binary is 2.x", async () => {
