@@ -14,6 +14,10 @@ test('kubernetes keeps the shared runtime select and drops the Containers back b
   assert.match(tab, /section="container-runtime-switcher"/);
   assert.match(tab, /section="k8s-context-select"/);
   assert.match(tab, /section="k8s-namespace-select"/);
+  assert.doesNotMatch(tab, /<div className="flex-1" \/>/);
+  assert.match(tab, /section="k8s-context-select"[\s\S]*className="w-full min-w-0 max-w-none flex-1"/);
+  assert.match(tab, /section="container-runtime-switcher"[\s\S]*className="shrink-0"/);
+  assert.match(tab, /section="k8s-namespace-select"[\s\S]*className="shrink-0"/);
   assert.match(hook, /const showRuntimeSwitcher = detected\.length > 1;/);
   assert.doesNotMatch(hook, /source !== 'kubernetes' && detected\.length/);
   assert.match(hook, /reconcileContainerSource\(/);
