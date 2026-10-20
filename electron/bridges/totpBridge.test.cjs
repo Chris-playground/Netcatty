@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { scanScreensForTotp, previewTotpInput } = require("./totpBridge.cjs");
+const { scanScreensForTotp, previewTotpInput, captureScreenBitmaps } = require("./totpBridge.cjs");
 const { encodeBase32 } = require("../../domain/totp.shared.cjs");
 
 const SECRET = Buffer.from("12345678901234567890", "ascii");
@@ -48,6 +48,58 @@ test("an empty macOS capture without screen-recording permission is a clear deni
     capture: async () => [],
   });
   assert.equal(result.error, "screen-permission-denied");
+});
+
+function thumbnail(label) {
+  return {
+    getSize: () => ({ width: 2, height: 2 }),
+    toBitmap: () => Buffer.from(label),
+  };
+}
+
+test("screen capture scans each unmatched source once", async () => {
+  let calls = 0;
+  const images = await captureScreenBitmaps({
+    screen: {
+      getAllDisplays: () => [
+        { id: 1, size: { width: 800, height: 600 }, scaleFactor: 1 },
+        { id: 2, size: { width: 1920, height: 1080 }, scaleFactor: 1 },
+      ],
+    },
+    desktopCapturer: {
+      getSources: async (options) => {
+        calls += 1;
+        assert.deepEqual(options.thumbnailSize, { width: 1920, height: 1080 });
+        return [
+          { id: "left", display_id: "", thumbnail: thumbnail("left") },
+          { id: "right", display_id: "", thumbnail: thumbnail("right") },
+        ];
+      },
+    },
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(images.map((image) => image.bitmap.toString()), ["left", "right"]);
+});
+
+test("screen capture keeps a matched display and still scans an unmatched source", async () => {
+  const images = await captureScreenBitmaps({
+    screen: {
+      getAllDisplays: () => [
+        { id: 10, size: { width: 100, height: 100 }, scaleFactor: 2 },
+        { id: 20, size: { width: 100, height: 100 }, scaleFactor: 1 },
+      ],
+    },
+    desktopCapturer: {
+      getSources: async (options) => {
+        assert.deepEqual(options.thumbnailSize, { width: 200, height: 200 });
+        return [
+          { id: "known", display_id: "10", thumbnail: thumbnail("known") },
+          { id: "other", display_id: "", thumbnail: thumbnail("other") },
+        ];
+      },
+    },
+  });
+  assert.deepEqual(images.map((image) => image.bitmap.toString()), ["known", "other"]);
 });
 
 test("screen scan reports HOTP and a friendly miss", async () => {

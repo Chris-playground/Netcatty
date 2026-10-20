@@ -23,32 +23,64 @@ function isScreenPermissionError(error) {
   return /denied|permission|not authorized|not permitted/i.test(message);
 }
 
+function thumbnailSizeForDisplay(display) {
+  const scale = Number(display?.scaleFactor) || 1;
+  const width = Math.max(1, Math.round((display?.size?.width || display?.bounds?.width || 1920) * scale));
+  const height = Math.max(1, Math.round((display?.size?.height || display?.bounds?.height || 1080) * scale));
+  return { width, height };
+}
+
+function largestThumbnailSize(displays) {
+  if (!displays.length) return { width: 1920, height: 1080 };
+  return displays.reduce((best, display) => {
+    const size = thumbnailSizeForDisplay(display);
+    return size.width * size.height > best.width * best.height ? size : best;
+  }, thumbnailSizeForDisplay(displays[0]));
+}
+
+function pushThumbnail(images, image) {
+  if (!image?.getSize || typeof image.toBitmap !== "function") return;
+  const size = image.getSize();
+  if (!size?.width || !size?.height) return;
+  images.push({ width: size.width, height: size.height, bitmap: image.toBitmap() });
+}
+
+function sourceDisplayId(source) {
+  if (source?.display_id == null) return "";
+  return String(source.display_id);
+}
+
 async function captureScreenBitmaps(electron) {
   const desktopCapturer = electron?.desktopCapturer;
   const screen = electron?.screen;
   if (!desktopCapturer?.getSources || !screen?.getAllDisplays) {
     throw new Error("unavailable");
   }
-  const displays = screen.getAllDisplays();
-  const targets = displays.length > 0 ? displays : [null];
+  const displays = screen.getAllDisplays() || [];
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: largestThumbnailSize(displays),
+    fetchWindowIcons: false,
+  });
   const images = [];
-  for (const display of targets) {
-    const scale = Number(display?.scaleFactor) || 1;
-    const width = Math.max(1, Math.round((display?.size?.width || display?.bounds?.width || 1920) * scale));
-    const height = Math.max(1, Math.round((display?.size?.height || display?.bounds?.height || 1080) * scale));
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: { width, height },
-      fetchWindowIcons: false,
-    });
-    const match = display
-      ? sources.find((source) => String(source.display_id) === String(display.id))
-      : sources[0];
-    const image = (match || sources[0])?.thumbnail;
-    if (!image?.getSize || typeof image.toBitmap !== "function") continue;
-    const size = image.getSize();
-    if (!size?.width || !size?.height) continue;
-    images.push({ width: size.width, height: size.height, bitmap: image.toBitmap() });
+  const used = new Set();
+  const take = (source) => {
+    if (!source || used.has(source)) return;
+    used.add(source);
+    pushThumbnail(images, source.thumbnail);
+  };
+  const matchedDisplayIds = new Set();
+  for (const display of displays) {
+    const displayId = String(display?.id);
+    const match = sources.find((source) => sourceDisplayId(source) !== "" && sourceDisplayId(source) === displayId);
+    if (!match) continue;
+    matchedDisplayIds.add(displayId);
+    take(match);
+  }
+  for (const source of sources) {
+    const displayId = sourceDisplayId(source);
+    if (displayId && matchedDisplayIds.has(displayId)) continue;
+    take(source);
   }
   return images;
 }

@@ -5,7 +5,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { keyboardInteractiveFieldLabel, totpFillPlacement, visibleTotpFillPlacements } from "./KeyboardInteractiveModal.tsx";
+import {
+  keyboardInteractiveFieldLabel,
+  keyboardInteractiveGuidance,
+  totpFillPlacement,
+  visibleTotpFillPlacements,
+} from "./KeyboardInteractiveModal.tsx";
 
 const modalSource = readFileSync(new URL("./KeyboardInteractiveModal.tsx", import.meta.url), "utf8");
 
@@ -19,9 +24,31 @@ test("keyboardInteractiveFieldLabel uses the cleaned last prompt line", () => {
 test("keyboard-interactive dialog shows a field label and an inline TOTP action", () => {
   assert.doesNotMatch(modalSource, /<pre/);
   assert.match(modalSource, /keyboardInteractiveFieldLabel\(/);
+  assert.match(modalSource, /keyboardInteractiveGuidance\(/);
   assert.match(modalSource, /data-totp-fill=\{fillPlacement\}/);
   assert.doesNotMatch(modalSource, /className="w-full"/);
   assert.doesNotMatch(modalSource, /onTypeTotp/);
+});
+
+test("keyboardInteractiveGuidance keeps directions that are not already the field label", () => {
+  assert.equal(keyboardInteractiveGuidance({
+    name: "bastion",
+    hostname: "bastion",
+    instructions: "",
+    prompts: [{ prompt: "Verification code:", echo: false }],
+  }), "");
+  assert.equal(keyboardInteractiveGuidance({
+    name: "Duo Security",
+    hostname: "vpn.example",
+    instructions: "1. Duo Push\n2. SMS\nPasscode or option (1-3):",
+    prompts: [{ prompt: "Passcode or option (1-3):", echo: true }],
+  }), "Duo Security\n1. Duo Push\n2. SMS");
+  assert.equal(keyboardInteractiveGuidance({
+    name: "host",
+    hostname: "other",
+    instructions: "| Verification code:",
+    prompts: [{ prompt: "Verification code:", echo: false }],
+  }), "host");
 });
 
 test("TOTP fill stays off password prompts and prefers verification prompts", () => {

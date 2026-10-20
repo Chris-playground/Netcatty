@@ -51,6 +51,35 @@ export function keyboardInteractiveFieldLabel(prompt: string | undefined, fallba
   return cleaned || fallback;
 }
 
+function guidanceKeys(text: string): string[] {
+  const trimmed = text.trim().toLowerCase();
+  const label = keyboardInteractiveFieldLabel(text, "").toLowerCase();
+  return [trimmed, label].filter(Boolean);
+}
+
+/** Server directions that are not already the field label. Plain text, not a prompt dump. */
+export function keyboardInteractiveGuidance(request: Pick<KeyboardInteractiveRequest, "name" | "instructions" | "prompts" | "hostname">): string {
+  const promptKeys = new Set<string>();
+  for (const prompt of request.prompts || []) {
+    for (const key of guidanceKeys(prompt?.prompt || "")) promptKeys.add(key);
+  }
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  const push = (text: string) => {
+    const line = text.trim().replace(/^\|\s*/, "");
+    if (!line) return;
+    const keys = guidanceKeys(line);
+    if (keys.some((key) => promptKeys.has(key) || seen.has(key))) return;
+    for (const key of keys) seen.add(key);
+    lines.push(line);
+  };
+  const hostname = (request.hostname || "").trim().toLowerCase();
+  const name = (request.name || "").trim();
+  if (name && name.toLowerCase() !== hostname) push(name);
+  for (const part of String(request.instructions || "").split(/\r?\n/)) push(part);
+  return lines.join("\n");
+}
+
 const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) => {
   if (prompt.echo) return false;
   const lower = prompt.prompt.toLowerCase();
@@ -223,6 +252,7 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
       : t("keyboard.interactive.desc");
   const fillPlacements = canFillTotp ? visibleTotpFillPlacements(request.prompts) : [];
   const preferredFillIndex = fillPlacements.findIndex((placement) => placement === "preferred");
+  const guidance = keyboardInteractiveGuidance(request);
 
   return (
     <Dialog open={!!request} onOpenChange={() => {/* intentionally non-dismissable */}}>
@@ -247,6 +277,11 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {guidance ? (
+            <p className="max-h-36 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+              {guidance}
+            </p>
+          ) : null}
           {request.prompts.map((prompt, index) => {
             const isPassword = !prompt.echo;
             const showPassword = showPasswords[index];
