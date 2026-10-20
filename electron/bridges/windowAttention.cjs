@@ -10,9 +10,26 @@ function createWindowAttentionController({ app, getWindows, platform }) {
   let bounceId = -1;
   let flashing = false;
   let flashedWin = null;
-  const bound = new WeakSet();
+  let watchingFocus = false;
+
+  function onBrowserWindowFocus() {
+    stop();
+  }
+
+  function startFocusWatch() {
+    if (watchingFocus || typeof app?.on !== "function") return;
+    app.on("browser-window-focus", onBrowserWindowFocus);
+    watchingFocus = true;
+  }
+
+  function stopFocusWatch() {
+    if (!watchingFocus) return;
+    watchingFocus = false;
+    try { app.removeListener("browser-window-focus", onBrowserWindowFocus); } catch { /* ignore */ }
+  }
 
   function stop() {
+    stopFocusWatch();
     if (flashing && flashedWin && !flashedWin.isDestroyed?.() && typeof flashedWin.flashFrame === "function") {
       try { flashedWin.flashFrame(false); } catch { /* ignore */ }
     }
@@ -24,12 +41,6 @@ function createWindowAttentionController({ app, getWindows, platform }) {
     }
   }
 
-  function bind(win) {
-    if (!win || bound.has(win) || typeof win.on !== "function") return;
-    bound.add(win);
-    win.on("focus", () => stop());
-  }
-
   function request() {
     const windows = (typeof getWindows === "function" ? getWindows() : [])
       .filter((win) => win && !win.isDestroyed?.());
@@ -37,13 +48,13 @@ function createWindowAttentionController({ app, getWindows, platform }) {
     if (windows.some((win) => typeof win.isFocused === "function" && win.isFocused())) {
       return { requested: false, reason: "focused" };
     }
-    for (const win of windows) bind(win);
 
     if (platform === "darwin") {
       if (bounceId >= 0) return { requested: true, kind: "bounce" };
       const id = app?.dock?.bounce?.("informational");
       if (typeof id !== "number" || id < 0) return { requested: false, reason: "unavailable" };
       bounceId = id;
+      startFocusWatch();
       return { requested: true, kind: "bounce" };
     }
 
@@ -52,6 +63,7 @@ function createWindowAttentionController({ app, getWindows, platform }) {
     win.flashFrame(true);
     flashing = true;
     flashedWin = win;
+    startFocusWatch();
     return { requested: true, kind: "flash" };
   }
 

@@ -25,19 +25,47 @@ function createWindow(overrides = {}) {
 }
 
 test("linux attention flashes until focus or stop", () => {
+  const app = new EventEmitter();
   const win = createWindow();
   const controller = createWindowAttentionController({
+    app,
     platform: "linux",
     getWindows: () => [win],
   });
   assert.deepEqual(controller.request(), { requested: true, kind: "flash" });
   assert.deepEqual(win.flashes, [true]);
-  win.emit("focus");
+  assert.equal(app.listenerCount("browser-window-focus"), 1);
+  app.emit("browser-window-focus", {}, win);
   assert.deepEqual(win.flashes, [true, false]);
+  assert.equal(app.listenerCount("browser-window-focus"), 0);
 
   assert.deepEqual(controller.request(), { requested: true, kind: "flash" });
   controller.stop();
   assert.deepEqual(win.flashes, [true, false, true, false]);
+  assert.equal(app.listenerCount("browser-window-focus"), 0);
+});
+
+test("focus on a window created after attention starts clears the flash", () => {
+  const app = new EventEmitter();
+  const original = createWindow();
+  const windows = [original];
+  const controller = createWindowAttentionController({
+    app,
+    platform: "win32",
+    getWindows: () => windows,
+  });
+  assert.deepEqual(controller.request(), { requested: true, kind: "flash" });
+
+  const later = createWindow();
+  windows.push(later);
+  later.emit("focus");
+  assert.deepEqual(original.flashes, [true]);
+
+  app.emit("browser-window-focus", {}, later);
+  assert.deepEqual(original.flashes, [true, false]);
+  assert.equal(app.listenerCount("browser-window-focus"), 0);
+  app.emit("browser-window-focus", {}, later);
+  assert.deepEqual(original.flashes, [true, false]);
 });
 
 test("attention stays quiet while any window is focused", () => {
@@ -54,26 +82,28 @@ test("attention stays quiet while any window is focused", () => {
 test("macOS attention uses an informational dock bounce and cancels it", () => {
   const win = createWindow();
   const cancelled = [];
+  const app = new EventEmitter();
+  app.dock = {
+    bounce(type) {
+      assert.equal(type, "informational");
+      return 4;
+    },
+    cancelBounce(id) { cancelled.push(id); },
+  };
   const controller = createWindowAttentionController({
     platform: "darwin",
-    app: {
-      dock: {
-        bounce(type) {
-          assert.equal(type, "informational");
-          return 4;
-        },
-        cancelBounce(id) { cancelled.push(id); },
-      },
-    },
+    app,
     getWindows: () => [win],
   });
   assert.deepEqual(controller.request(), { requested: true, kind: "bounce" });
   assert.deepEqual(controller.request(), { requested: true, kind: "bounce" });
+  assert.equal(app.listenerCount("browser-window-focus"), 1);
   assert.deepEqual(win.flashes, []);
   controller.stop();
   assert.deepEqual(cancelled, [4]);
-  win.emit("focus");
+  app.emit("browser-window-focus", {}, win);
   assert.deepEqual(cancelled, [4]);
+  assert.equal(app.listenerCount("browser-window-focus"), 0);
 });
 
 test("external MCP approvals flash while unfocused and stop when resolved", (t) => {
