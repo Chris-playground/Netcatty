@@ -28,6 +28,19 @@ function finishFrame(x, y, width, height, workArea) {
   return frame;
 }
 
+function intersection(a, b) {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  return {
+    x: Math.ceil(x),
+    y: Math.ceil(y),
+    width: Math.floor(right) - Math.ceil(x),
+    height: Math.floor(bottom) - Math.ceil(y),
+  };
+}
+
 /**
  * Place a terminal popup in the largest region of the source window that does
  * not cover `avoid` (the system-manager panel). Without a usable gap, center
@@ -81,37 +94,31 @@ function placeTerminalPopup({
     });
   }
 
-  const slot = slots
+  const centeredFallback = () => finishFrame(
+    sourceBounds.x + (sourceBounds.width - preferred.width) / 2,
+    sourceBounds.y + (sourceBounds.height - preferred.height) / 2,
+    preferred.width,
+    preferred.height,
+    workArea,
+  );
+  const visibleSlot = slots
+    .map((candidate) => intersection(candidate, workArea))
     .filter((candidate) => candidate.width >= minWidth && candidate.height >= minHeight)
     .sort((a, b) => area(b) - area(a))[0];
-  if (!slot) {
-    return finishFrame(
-      sourceBounds.x + (sourceBounds.width - preferred.width) / 2,
-      sourceBounds.y + (sourceBounds.height - preferred.height) / 2,
-      preferred.width,
-      preferred.height,
-      workArea,
-    );
-  }
+  if (!visibleSlot) return centeredFallback();
 
-  const popupWidth = Math.min(preferred.width, slot.width);
-  const popupHeight = Math.min(preferred.height, slot.height);
-  let frame = finishFrame(
-    slot.x + (slot.width - popupWidth) / 2,
-    slot.y + (slot.height - popupHeight) / 2,
+  const popupWidth = Math.min(preferred.width, visibleSlot.width);
+  const popupHeight = Math.min(preferred.height, visibleSlot.height);
+  const centered = finishFrame(
+    visibleSlot.x + (visibleSlot.width - popupWidth) / 2,
+    visibleSlot.y + (visibleSlot.height - popupHeight) / 2,
     popupWidth,
     popupHeight,
     workArea,
   );
-  if (intersects(frame, avoid)) {
-    frame = {
-      x: Math.round(slot.x),
-      y: Math.round(slot.y),
-      width: Math.round(popupWidth),
-      height: Math.round(popupHeight),
-    };
-  }
-  return frame;
+  if (!intersects(centered, avoid)) return centered;
+  const pinned = finishFrame(visibleSlot.x, visibleSlot.y, popupWidth, popupHeight, workArea);
+  return intersects(pinned, avoid) ? centeredFallback() : pinned;
 }
 
 module.exports = {

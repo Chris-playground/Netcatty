@@ -50,3 +50,22 @@ test("a popup above a bottom dock does not cover the dock", () => {
   assert.equal(intersects(frame, avoid), false);
   assert.ok(frame.y + frame.height <= avoid.y);
 });
+
+test("a popup for an off-screen source stays in the work area and off the panel", () => {
+  const avoid = { x: 500, y: 0, width: 440, height: 900 };
+  const frame = placeTerminalPopup({
+    workArea,
+    sourceBounds: { x: -500, y: 0, width: 1440, height: 900 },
+    avoid,
+    width: 920,
+    height: 580,
+  });
+
+  assert.equal(intersects(frame, avoid), false);
+  assert.ok(frame.x >= workArea.x);
+  assert.ok(frame.y >= workArea.y);
+  assert.ok(frame.x + frame.width <= workArea.x + workArea.width);
+  assert.ok(frame.y + frame.height <= workArea.y + workArea.height);
+  assert.ok(frame.width >= 480);
+  assert.ok(frame.height >= 320);
+});
