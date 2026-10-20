@@ -394,6 +394,9 @@ function formatPodAge(iso, now = Date.now()) {
 }
 
 function podDisplayStatus(pod) {
+  if (typeof pod?.metadata?.deletionTimestamp === "string" && pod.metadata.deletionTimestamp) {
+    return "Terminating";
+  }
   const statuses = [
     ...(Array.isArray(pod?.status?.initContainerStatuses) ? pod.status.initContainerStatuses : []),
     ...(Array.isArray(pod?.status?.containerStatuses) ? pod.status.containerStatuses : []),
@@ -416,6 +419,7 @@ function podContainerNames(pod) {
   const specs = [
     ...(Array.isArray(pod?.spec?.containers) ? pod.spec.containers : []),
     ...(Array.isArray(pod?.spec?.initContainers) ? pod.spec.initContainers : []),
+    ...(Array.isArray(pod?.spec?.ephemeralContainers) ? pod.spec.ephemeralContainers : []),
   ];
   for (const container of specs) {
     const name = container?.name;
@@ -429,6 +433,7 @@ function podShellContainerNames(pod) {
   const statuses = [
     ...(Array.isArray(pod?.status?.containerStatuses) ? pod.status.containerStatuses : []),
     ...(Array.isArray(pod?.status?.initContainerStatuses) ? pod.status.initContainerStatuses : []),
+    ...(Array.isArray(pod?.status?.ephemeralContainerStatuses) ? pod.status.ephemeralContainerStatuses : []),
   ];
   for (const status of statuses) {
     if (status?.state?.running && typeof status.name === "string" && status.name) {

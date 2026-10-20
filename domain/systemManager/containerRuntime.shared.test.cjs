@@ -233,6 +233,34 @@ test("parseKubectlPodList reports status, restarts, age, and containers", () => 
       shellContainers: [],
     },
   ]);
+  const terminating = parseKubectlPodList(JSON.stringify({
+    items: [{
+      metadata: {
+        name: "api",
+        namespace: "default",
+        creationTimestamp: "2026-10-20T00:08:30Z",
+        deletionTimestamp: "2026-10-20T00:10:00Z",
+      },
+      spec: {
+        containers: [{ name: "app" }],
+        ephemeralContainers: [{ name: "debugger" }, { name: "old-debug" }],
+      },
+      status: {
+        phase: "Running",
+        containerStatuses: [
+          { name: "app", restartCount: 0, state: { running: {} } },
+        ],
+        ephemeralContainerStatuses: [
+          { name: "debugger", restartCount: 0, state: { running: {} } },
+          { name: "old-debug", restartCount: 0, state: { terminated: { reason: "Completed" } } },
+        ],
+      },
+    }],
+  }), now);
+  assert.equal(terminating[0].status, "Terminating");
+  assert.deepEqual(terminating[0].containers, ["app", "debugger", "old-debug"]);
+  assert.deepEqual(terminating[0].shellContainers, ["app", "debugger"]);
+
   assert.equal(formatPodAge("2026-10-20T00:09:10Z", now), "50s");
   assert.equal(formatPodAge("2026-10-20T00:07:00Z", now), "3m");
   assert.equal(formatPodAge("2026-10-19T22:10:00Z", now), "2h");
