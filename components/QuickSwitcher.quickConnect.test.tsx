@@ -40,13 +40,27 @@ const renderSwitcher = (
   </I18nProvider>,
 );
 
-test("quick switcher offers quick connect first when the query is an address", () => {
+test("quick switcher keeps a matching host ahead of an address row", () => {
   const markup = renderSwitcher("10.1.1.1", [host()]);
   const quickConnectAt = markup.indexOf("Quick connect to 10.1.1.1");
   const hostAt = markup.indexOf("core-switch");
+  const selectedAt = markup.indexOf("bg-primary/15");
 
-  assert.ok(quickConnectAt >= 0);
-  assert.ok(hostAt > quickConnectAt);
+  assert.ok(selectedAt >= 0);
+  assert.ok(hostAt > selectedAt);
+  assert.ok(quickConnectAt > hostAt);
+  assert.equal(markup.indexOf("bg-primary/15", selectedAt + 1), -1);
+});
+
+test("quick switcher does not steal Enter from a saved host label", () => {
+  for (const label of ["lab", "web01", "prod", "lab-switch"]) {
+    const markup = renderSwitcher(label, [host({ id: label, label, hostname: "10.0.0.5" })]);
+    const hostAt = markup.indexOf(`>${label}<`);
+    const selectedAt = markup.indexOf("bg-primary/15");
+
+    assert.equal(markup.includes("Quick connect to"), false, label);
+    assert.ok(selectedAt >= 0 && hostAt > selectedAt, label);
+  }
 });
 
 test("quick switcher offers quick connect when nothing else matches", () => {
@@ -63,7 +77,52 @@ test("quick switcher does not offer quick connect for ordinary search text", () 
 });
 
 test("quick switcher quick connect row uses zh-TW wording", () => {
-  const markup = renderSwitcher("10.0.0.8", [], "zh-TW");
+  const markup = renderToStaticMarkup(
+    <I18nProvider locale="zh-TW">
+      <QuickSwitcher
+        isOpen
+        query="10.0.0.8"
+        results={[host()]}
+        sessions={[]}
+        workspaces={[]}
+        onQueryChange={() => undefined}
+        onSelect={() => undefined}
+        onSelectTab={() => undefined}
+        onClose={() => undefined}
+        onQuickConnect={() => undefined}
+        onCreateWorkspace={() => undefined}
+        showSftpTab={false}
+      />
+    </I18nProvider>,
+  );
 
   assert.match(markup, /快速連線到 10\.0\.0\.8/);
+  assert.match(markup, />主機</);
+  assert.match(markup, />新增工作區</);
+  assert.doesNotMatch(markup, /New Workspace/);
+});
+
+test("quick switcher section labels use zh-CN wording", () => {
+  const markup = renderToStaticMarkup(
+    <I18nProvider locale="zh-CN">
+      <QuickSwitcher
+        isOpen
+        query=""
+        results={[host()]}
+        sessions={[]}
+        workspaces={[]}
+        onQueryChange={() => undefined}
+        onSelect={() => undefined}
+        onSelectTab={() => undefined}
+        onClose={() => undefined}
+        onQuickConnect={() => undefined}
+        onCreateWorkspace={() => undefined}
+        showSftpTab={false}
+      />
+    </I18nProvider>,
+  );
+
+  assert.match(markup, />主机</);
+  assert.match(markup, />标签页</);
+  assert.match(markup, />新建工作区</);
 });

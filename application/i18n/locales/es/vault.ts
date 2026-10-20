@@ -669,6 +669,9 @@ export const esVaultMessages: Messages = {
   // Quick Switcher
   'qs.search.placeholder': 'Buscar hosts o pestañas',
   'qs.quickConnectTo': 'Conexión rápida a {target}',
+  'qs.hosts': 'Hosts',
+  'qs.tabs': 'Pestañas',
+  'qs.newWorkspace': 'Nuevo espacio de trabajo',
   'qs.jumpTo': 'Ir a',
   'qs.localTerminal': 'Terminal local',
   'qs.localShells': 'Shells locales',

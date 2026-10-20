@@ -14,7 +14,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { Host, TerminalSession, TerminalSettings, Workspace } from "../types";
 import { KeyBinding } from "../domain/models";
 import type { PaneMagnificationState } from "../domain/paneMagnification";
-import { isQuickConnectInput } from "../domain/quickConnect";
+import { isSwitcherQuickConnectInput } from "../domain/quickConnect";
 import { matchesSearchQuery } from "../lib/searchMatcher";
 import { buildQuickSwitcherShells, useDiscoveredShells, getShellIconPath, isMonochromeShellIcon } from "../lib/useDiscoveredShells";
 import { usePluginContributions } from "../application/state/usePluginContributions";
@@ -339,20 +339,28 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       });
     };
 
-    if (trimmedQuery && isQuickConnectInput(trimmedQuery)) {
-      pushItem({
-        type: "quick-connect",
-        id: "quick-connect",
-        title: t("qs.quickConnectTo", { target: trimmedQuery }),
-        quickConnectInput: trimmedQuery,
-      });
+    const quickConnectItem: QuickSwitcherItem | null =
+      trimmedQuery && isSwitcherQuickConnectInput(trimmedQuery)
+        ? {
+            type: "quick-connect",
+            id: "quick-connect",
+            title: t("qs.quickConnectTo", { target: trimmedQuery }),
+            quickConnectInput: trimmedQuery,
+          }
+        : null;
+
+    // With no host match the address row is the default Enter target.
+    // When hosts match, they stay first so Enter still connects to the saved host.
+    if (quickConnectItem && results.length === 0) {
+      pushItem(quickConnectItem);
     }
 
     if (results.length > 0) {
-      pushHeader("header:hosts", "Hosts");
+      pushHeader("header:hosts", t("qs.hosts"));
       results.forEach((host) =>
         pushItem({ type: "host", id: host.id, data: host }),
       );
+      if (quickConnectItem) pushItem(quickConnectItem);
     }
 
     const hasTabsSection =
@@ -360,7 +368,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       || filteredOrphanSessions.length > 0
       || filteredWorkspaces.length > 0;
     if (hasTabsSection) {
-      pushHeader("header:tabs", "Tabs");
+      pushHeader("header:tabs", t("qs.tabs"));
       builtInTabs.forEach((tabId) => {
         pushItem({ type: "tab", id: tabId });
       });
@@ -559,7 +567,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
               className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground border border-border rounded px-1.5 py-0.5 transition-colors hover:bg-muted/50"
             >
               <Plus size={11} />
-              <span>New Workspace</span>
+              <span>{t("qs.newWorkspace")}</span>
             </button>
           )}
         </div>
