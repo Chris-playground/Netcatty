@@ -112,7 +112,14 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
   };
 
   const proxyProfiles = options.proxyProfiles ?? [];
-  const inheritanceOptions = { validProxyProfileIds: new Set(proxyProfiles.map((profile) => profile.id)) };
+  // Materialize group proxies so the file stays self-contained, but never the
+  // ambient global default. An empty Proxy cell means inherit for grouped and
+  // ungrouped hosts alike; injecting the global profile would embed its
+  // credentials and change routing based only on whether `group` is set.
+  const inheritanceOptions = {
+    validProxyProfileIds: new Set(proxyProfiles.map((profile) => profile.id)),
+    globalProxyProfileId: "",
+  };
   for (const host of exportableHosts) {
     // For telnet hosts, use telnet-specific port and username
     const isTelnet = host.protocol === "telnet";
@@ -132,9 +139,13 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
       : "";
     // Proxy profiles are materialized inline so the CSV stays self-contained;
     // encrypted credential placeholders are never written to the file.
-    const effectiveHost = host.group
-      ? applyGroupDefaults(host, resolveGroupDefaults(host.group, options.groupConfigs ?? [], inheritanceOptions), inheritanceOptions)
-      : host;
+    const effectiveHost = applyGroupDefaults(
+      host,
+      host.group
+        ? resolveGroupDefaults(host.group, options.groupConfigs ?? [], inheritanceOptions)
+        : {},
+      inheritanceOptions,
+    );
     // `direct` is the reversible CSV form of directProxy. An empty Proxy cell
     // still means inherit, including a configured global default.
     let proxyValue = "";

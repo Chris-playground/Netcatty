@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { publishActiveGlobalDefaultProxyProfileId } from "../globalDefaultProxy.ts";
 import { applyGroupDefaults } from "../groupConfig.ts";
 import { importVaultHostsFromText } from "../vaultImport.ts";
 import { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./csvExport.ts";
@@ -452,6 +453,45 @@ test("CSV round-trips explicit direct proxy mode and still treats an empty Proxy
   assert.equal(literal.hosts[0]?.directProxy, true);
   assert.equal(literal.hosts[0]?.proxyConfig, undefined);
   assert.equal(literal.hosts[1]?.directProxy, undefined);
+});
+
+test("CSV export keeps an empty Proxy cell when only the global default is set", () => {
+  publishActiveGlobalDefaultProxyProfileId("global-proxy");
+  try {
+    const groupProxy = { type: "socks5" as const, host: "group.example.com", port: 1080 };
+    const hosts: Host[] = [
+      { ...hostDefaults, id: "grouped", label: "Grouped", hostname: "grouped.example.com", group: "Corp" },
+      { ...hostDefaults, id: "plain", label: "Plain", hostname: "plain.example.com" },
+      { ...hostDefaults, id: "edge", label: "Edge", hostname: "edge.example.com", group: "Corp/Edge" },
+    ];
+    const { csv } = exportHostsToCsvWithStats(hosts, {
+      groupConfigs: [{ path: "Corp/Edge", proxyConfig: groupProxy }],
+      proxyProfiles: [{
+        id: "global-proxy",
+        label: "Global",
+        createdAt: 0,
+        config: {
+          type: "http",
+          host: "secret-proxy.example.com",
+          port: 8080,
+          username: "alice",
+          password: "s3cret",
+        },
+      }],
+    });
+    const lines = csv.replace(/^\uFEFF/, "").trimEnd().split("\r\n");
+    const proxyIndex = lines[0].split(",").indexOf("Proxy");
+    const proxyCell = (line: string) => line.split(",")[proxyIndex];
+    assert.equal(proxyCell(lines[1]), "");
+    assert.equal(proxyCell(lines[2]), "");
+    assert.equal(proxyCell(lines[3]), "socks5://group.example.com:1080");
+    assert.equal(csv.includes("secret-proxy.example.com"), false);
+    assert.equal(csv.includes("s3cret"), false);
+    assert.equal(importVaultHostsFromText("csv", csv).hosts[0]?.proxyConfig, undefined);
+    assert.equal(importVaultHostsFromText("csv", csv).hosts[1]?.proxyConfig, undefined);
+  } finally {
+    publishActiveGlobalDefaultProxyProfileId(undefined);
+  }
 });
 
 test("CSV preserves IPv6 proxies and multiline commands with CSV punctuation", () => {
