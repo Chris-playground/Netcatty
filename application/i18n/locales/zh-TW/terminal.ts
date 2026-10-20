@@ -996,6 +996,7 @@ export const zhTWTerminalMessages: Messages = {
   'keyboard.interactive.desc': '伺服器需要額外的身分驗證。',
   'keyboard.interactive.descWithHost': '伺服器 {hostname} 需要額外的身分驗證。',
   'keyboard.interactive.response': '回應',
+  'keyboard.interactive.verificationCode': '驗證碼',
   'keyboard.interactive.enterCode': '輸入驗證碼',
   'keyboard.interactive.enterResponse': '輸入回應',
   'keyboard.interactive.submit': '提交',

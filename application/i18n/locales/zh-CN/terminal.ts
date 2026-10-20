@@ -996,6 +996,7 @@ export const zhCNTerminalMessages: Messages = {
   'keyboard.interactive.desc': '服务器需要额外的身份验证。',
   'keyboard.interactive.descWithHost': '服务器 {hostname} 需要额外的身份验证。',
   'keyboard.interactive.response': '响应',
+  'keyboard.interactive.verificationCode': '验证码',
   'keyboard.interactive.enterCode': '输入验证码',
   'keyboard.interactive.enterResponse': '输入响应',
   'keyboard.interactive.submit': '提交',

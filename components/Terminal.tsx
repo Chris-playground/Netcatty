@@ -3509,6 +3509,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
     scrollToBottomAfterProgrammaticInput,
     onClipboardImageUploadResult: handleClipboardImageUploadResult,
+    getTotpUri: host.totp?.uri ? () => host.totp?.uri : undefined,
   });
   // Kept fresh on every render so the mouseTracking capture handler at
   // handleContextMenuCapture (which is bound once per sessionId) can

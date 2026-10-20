@@ -60,7 +60,7 @@ test("paste selection dismisses the history preview before sending text", async 
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("./hooks/useTerminalContextActions.ts", import.meta.url), "utf8");
   assert.match(source, /requestHistoryPreviewHide\(term\.element\?\.parentElement\)/);
-  assert.equal(source.split("requestHistoryPreviewHide(term.element?.parentElement)").length - 1, 2);
+  assert.equal(source.split("requestHistoryPreviewHide(term.element?.parentElement)").length - 1, 3);
 });
 
 test("paste selection routes through the multi-line paste confirmation gate", async () => {

@@ -38,34 +38,17 @@ export interface KeyboardInteractiveRequest {
   totpUri?: string;
 }
 
-type KeyboardInteractiveServerPromptInput = Pick<
-  KeyboardInteractiveRequest,
-  "name" | "instructions" | "prompts" | "hostname"
->;
-
-/** Formats the server-supplied keyboard-interactive prompt block for display. */
-export function formatKeyboardInteractiveServerPrompt(request: KeyboardInteractiveServerPromptInput): string {
-  const lines: string[] = [];
-  const name = request.name?.trim();
-  const hostname = request.hostname?.trim();
-  const instructions = request.instructions?.trim();
-  const hasServerText = !!instructions || !!(name && name !== hostname);
-  if (!hasServerText) return "";
-  if (name && name !== hostname) {
-    lines.push(name.endsWith(":") ? name : `${name}:`);
-  }
-  if (instructions) {
-    for (const line of instructions.split(/\r?\n/).map((part) => part.trim()).filter(Boolean)) {
-      lines.push(`| ${line}`);
-    }
-  }
-  for (const prompt of request.prompts || []) {
-    const promptText = prompt.prompt?.trim();
-    if (promptText) {
-      lines.push(`| ${promptText}`);
-    }
-  }
-  return lines.join("\n");
+/** Last meaningful line of a server prompt, without the raw banner. */
+export function keyboardInteractiveFieldLabel(prompt: string | undefined, fallback: string): string {
+  const lines = String(prompt || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const last = lines.at(-1) || "";
+  const cleaned = last
+    .replace(/^[\s|｜>•*-]+/, "")
+    .replace(/[:：]\s*$/, "")
+    .trim()
+    .replace(/^\[(.+)\]$/, "$1")
+    .trim();
+  return cleaned || fallback;
 }
 
 const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) => {
@@ -219,12 +202,12 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
 
   if (!request) return null;
 
-  const serverPromptText = formatKeyboardInteractiveServerPrompt(request);
   const title = t("keyboard.interactive.title");
   const description =
     request.hostname
       ? t("keyboard.interactive.descWithHost", { hostname: request.hostname })
       : t("keyboard.interactive.desc");
+  const fillIndex = canFillTotp ? totpResponseIndex(request.prompts) : -1;
 
   return (
     <Dialog open={!!request} onOpenChange={() => {/* intentionally non-dismissable */}}>
@@ -249,47 +232,54 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {serverPromptText && (
-            <pre className="max-h-36 overflow-auto rounded-md border border-border/60 bg-muted/45 px-3 py-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
-              {serverPromptText}
-            </pre>
-          )}
-
           {request.prompts.map((prompt, index) => {
             const isPassword = !prompt.echo;
             const showPassword = showPasswords[index];
-            const showPromptLabel = !(serverPromptText && request.prompts.length === 1);
-            // Clean up prompt text (remove trailing colon and whitespace)
-            const promptLabel = prompt.prompt.replace(/:\s*$/, "").trim();
+            const promptLabel = keyboardInteractiveFieldLabel(
+              prompt.prompt,
+              t("keyboard.interactive.verificationCode"),
+            );
 
             return (
               <div key={index} className="space-y-2">
-                {showPromptLabel && (
-                  <Label htmlFor={`ki-prompt-${index}`}>
-                    {promptLabel || t("keyboard.interactive.response")}
-                  </Label>
-                )}
-                <div className="relative">
-                  <Input
-                    id={`ki-prompt-${index}`}
-                    type={isPassword && !showPassword ? "password" : "text"}
-                    value={responses[index] || ""}
-                    onChange={(e) => handleResponseChange(index, e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder=""
-                    className={isPassword ? "pr-10" : undefined}
-                    autoFocus={index === 0}
-                    disabled={isSubmitting}
-                  />
-                  {isPassword && (
-                    <button
+                <Label htmlFor={`ki-prompt-${index}`}>
+                  {promptLabel}
+                </Label>
+                <div className="flex items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <Input
+                      id={`ki-prompt-${index}`}
+                      type={isPassword && !showPassword ? "password" : "text"}
+                      value={responses[index] || ""}
+                      onChange={(e) => handleResponseChange(index, e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder=""
+                      className={isPassword ? "pr-10" : undefined}
+                      autoFocus={index === 0}
+                      disabled={isSubmitting}
+                    />
+                    {isPassword && (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50 p-1"
+                        onClick={() => toggleShowPassword(index)}
+                        disabled={isSubmitting}
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    )}
+                  </div>
+                  {index === fillIndex && (
+                    <Button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50 p-1"
-                      onClick={() => toggleShowPassword(index)}
+                      variant="secondary"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => { void handleFillTotp(); }}
                       disabled={isSubmitting}
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
+                      {t("keyboard.interactive.fillTotp")}
+                    </Button>
                   )}
                 </div>
                 {/* Save password checkbox - first-factor password prompts only */}
@@ -310,18 +300,7 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
               </div>
             );
           })}
-          {canFillTotp && (
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() => { void handleFillTotp(); }}
-              disabled={isSubmitting}
-            >
-              {t("keyboard.interactive.fillTotp")}
-            </Button>
-          )}
-</div>
+        </div>
 
         <div className="flex items-center justify-between pt-2">
           <Button
