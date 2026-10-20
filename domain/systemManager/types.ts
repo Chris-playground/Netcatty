@@ -200,7 +200,7 @@ export type DockerContainerAction =
 
 export type DockerImageManageAction =
   | { action: 'pull'; imageRef: string }
-  | { action: 'rm'; imageId: string; force?: boolean }
+  | { action: 'rm'; imageId: string; force?: boolean; repository?: string; tag?: string }
   | { action: 'prune'; all?: boolean }
   | { action: 'tag'; imageId: string; repository: string; tag?: string };
 

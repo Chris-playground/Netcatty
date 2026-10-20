@@ -188,12 +188,19 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     const actionGeneration = actionGenerationRef.current;
     setActionBusy(true);
     try {
+      const tagged = Boolean(
+        image.repository
+        && image.tag
+        && image.repository !== '<none>'
+        && image.tag !== '<none>',
+      );
       const result = await backend.dockerImageAction({
         sessionId,
         runtime,
         action: 'rm',
         imageId: image.id.slice(0, 12),
-        force: image.tag === '<none>',
+        force: !tagged,
+        ...(tagged ? { repository: image.repository, tag: image.tag } : {}),
       });
       if (actionGenerationRef.current !== actionGeneration) return;
       if (!result.success) {

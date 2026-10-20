@@ -389,6 +389,14 @@ function createDockerOpsApi({ execOnSession, getSession }) {
         return runDocker(event, sessionId, `pull ${shQuote(ref)}`, 600000, runtime);
       }
       case "rm": {
+        const repo = String(repository || "").trim();
+        const tagName = String(tag || "").trim();
+        const tagged = repo && tagName && repo !== "<none>" && tagName !== "<none>";
+        if (tagged) {
+          const ref = sanitizeImageRef(`${repo}:${tagName}`);
+          if (!ref) return { success: false, error: "Invalid image reference" };
+          return runDocker(event, sessionId, `rmi ${shQuote(ref)}`, 15000, runtime);
+        }
         const safeId = sanitizeDockerId(imageId);
         if (!safeId) return { success: false, error: "Missing image id" };
         const forceFlag = force ? " -f" : "";

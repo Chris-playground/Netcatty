@@ -347,6 +347,39 @@ test("getStats reads Podman's JSON array and Docker's JSON lines", async () => {
   assert.equal(dockerResult.stats[0].memUsage, "1MiB / 2GiB");
 });
 
+test("image removal targets a selected tag and keeps id removal for dangling images", async () => {
+  const calls = [];
+  const dockerOps = createDockerOpsApi({
+    execOnSession: async (_event, _sessionId, command) => {
+      calls.push(command);
+      return { success: true, stdout: "", stderr: "", code: 0 };
+    },
+  });
+
+  const tagged = await dockerOps.imageAction(null, {
+    sessionId: "s1",
+    runtime: "podman",
+    action: "rm",
+    imageId: "abc123",
+    repository: "localhost/alpine",
+    tag: "dev",
+  });
+  assert.equal(tagged.success, true);
+  assert.equal(calls[0], "podman rmi 'localhost/alpine:dev'");
+
+  const dangling = await dockerOps.imageAction(null, {
+    sessionId: "s1",
+    runtime: "podman",
+    action: "rm",
+    imageId: "abc123",
+    repository: "<none>",
+    tag: "<none>",
+    force: true,
+  });
+  assert.equal(dangling.success, true);
+  assert.equal(calls[1], "podman rmi -f abc123");
+});
+
 test("getStats sums Podman per-interface Network counters", async () => {
   const podman = createDockerOpsApi({
     execOnSession: async () => ({
