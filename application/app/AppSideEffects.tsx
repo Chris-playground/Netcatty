@@ -1557,7 +1557,7 @@ export function AppSideEffects() {
     | { kind: 'ssh'; payload: DeepLinkPayload }
     | { kind: 'telnet'; payload: DeepLinkPayload }
     | { kind: 'jms'; payload: { url?: string } }
-    | { kind: 'open-terminal-path'; payload: { path?: string } }
+    | { kind: 'open-terminal-path'; payload: { path?: string; shell?: string } }
   >>([]);
 
   const _processSshDeepLink = useEffectEvent((payload: DeepLinkPayload) => {
@@ -1721,14 +1721,38 @@ export function AppSideEffects() {
     });
   }, [isPeerSessionWindow]);
 
-  const _processOpenTerminalPath = useEffectEvent((payload: { path?: string }) => {
+  const _processOpenTerminalPath = useEffectEvent((payload: { path?: string; shell?: string }) => {
     startupLaunchIntentReceivedRef.current = true;
     const localStartDir = typeof payload?.path === 'string' ? payload.path : '';
-    if (!localStartDir.trim()) return;
-    handleCreateLocalTerminal(undefined, { localStartDir });
+    const shellSetting = typeof payload?.shell === 'string' ? payload.shell.trim() : '';
+    if (!shellSetting) {
+      if (!localStartDir.trim()) return;
+      handleCreateLocalTerminal(undefined, { localStartDir });
+      return;
+    }
+
+    void (async () => {
+      const shells = await ensureDiscoveredShells();
+      const resolved = resolveShellSetting(shellSetting, shells);
+      if (!resolved?.command) {
+        if (!localStartDir.trim()) return;
+        handleCreateLocalTerminal(undefined, { localStartDir });
+        return;
+      }
+      const matchedShell = shells.find((shell) => shell.id === shellSetting);
+      handleCreateLocalTerminal(
+        {
+          command: resolved.command,
+          args: resolved.args,
+          name: matchedShell?.name,
+          icon: matchedShell?.icon,
+        },
+        localStartDir.trim() ? { localStartDir } : undefined,
+      );
+    })();
   });
 
-  const _handleOpenTerminalPath = useEffectEvent((payload: { path?: string }) => {
+  const _handleOpenTerminalPath = useEffectEvent((payload: { path?: string; shell?: string }) => {
     if (shouldDeferExternalActionWhileAppLocked({ locked: appLockLocked })) {
       pendingDeepLinksWhileLockedRef.current.push({
         kind: 'open-terminal-path',
