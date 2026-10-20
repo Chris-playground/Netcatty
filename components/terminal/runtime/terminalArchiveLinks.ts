@@ -104,21 +104,20 @@ function modifierMatches(event: MouseEvent, modifier: LinkModifier): boolean {
   return event.ctrlKey || event.metaKey;
 }
 
-function needsLeadingSpace(term: Terminal): boolean {
+function neighborNeedsSpace(term: Terminal, direction: -1 | 1): boolean {
   const buffer = term.buffer.active;
-  if (buffer.cursorX <= 0) return false;
   const line = buffer.getLine(buffer.baseY + buffer.cursorY);
   if (!line || typeof line.getCell !== "function") return false;
-  let index = buffer.cursorX - 1;
-  while (index >= 0) {
+  let index = buffer.cursorX + (direction < 0 ? -1 : 0);
+  for (let steps = 0; steps < term.cols; steps += 1) {
+    if (index < 0 || index >= term.cols) return false;
     const cell = line.getCell(index);
     if (!cell) return false;
     if (cell.getWidth() === 0) {
-      index -= 1;
+      index += direction;
       continue;
     }
-    const chars = cell.getChars() || " ";
-    return chars !== " ";
+    return (cell.getChars() || " ") !== " ";
   }
   return false;
 }
@@ -197,7 +196,9 @@ export function registerTerminalArchiveLinks(options: TerminalArchiveLinkHost): 
             const freshAbs = resolveArchivePath(token.path, freshCwd);
             const freshCommand = freshAbs ? buildArchiveExtractCommand(freshAbs) : null;
             if (!freshCommand || /[\r\n]/u.test(freshCommand)) return;
-            term.paste(needsLeadingSpace(term) ? ` ${freshCommand}` : freshCommand);
+            const lead = neighborNeedsSpace(term, -1) ? " " : "";
+            const trail = neighborNeedsSpace(term, 1) ? " " : "";
+            term.paste(`${lead}${freshCommand}${trail}`);
             term.focus();
           },
         });

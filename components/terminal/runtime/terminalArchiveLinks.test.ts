@@ -136,6 +136,13 @@ function fixture() {
       cursorX = x;
       baseY = 0;
     },
+    atPrompt() {
+      const prompt = lines.length;
+      lines = [...lines, { text: "", wrapped: false }];
+      cursorY = prompt;
+      cursorX = 0;
+      baseY = 0;
+    },
     setBroadcast(value: boolean) {
       broadcast = value;
     },
@@ -164,6 +171,7 @@ test("no modifier is a no-op, Ctrl fills one command, and Cmd works on macOS", (
   const link = linux.linksAt(1)?.[0];
   assert.ok(link);
   assert.deepEqual(link.range, { start: { x: 1, y: 1 }, end: { x: 18, y: 1 } });
+  linux.atPrompt();
   link.activate(click(), link.text);
   assert.deepEqual(linux.pasted, []);
   link.activate(ctrl, link.text);
@@ -174,6 +182,7 @@ test("no modifier is a no-op, Ctrl fills one command, and Cmd works on macOS", (
   const mac = fixture();
   const macLink = mac.linksAt(1)?.[0];
   assert.ok(macLink);
+  mac.atPrompt();
   macLink.activate(click({ metaKey: true }), macLink.text);
   assert.deepEqual(mac.pasted, ["tar -xvzf '/tmp/backup.tar.gz' -C '/tmp'"]);
 });
@@ -249,6 +258,43 @@ test("a non-space before the cursor is kept and separated with one space", () =>
   assert.equal(spaced.pasted[0], "tar -xvzf '/tmp/backup.tar.gz' -C '/tmp'");
 });
 
+test("a non-space after the cursor is separated with one space", () => {
+  const command = "tar -xvzf '/tmp/backup.tar.gz' -C '/tmp'";
+  const before = fixture();
+  before.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: "echo", wrapped: false },
+  ]);
+  before.setCursor(1, 0);
+  const beforeLink = before.linksAt(1)?.[0];
+  assert.ok(beforeLink);
+  beforeLink.activate(ctrl, beforeLink.text);
+  assert.equal(before.pasted[0], `${command} `);
+  assert.equal(before.pasted[0]?.includes("\r"), false);
+
+  const middle = fixture();
+  middle.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: "echo", wrapped: false },
+  ]);
+  middle.setCursor(1, 2);
+  const middleLink = middle.linksAt(1)?.[0];
+  assert.ok(middleLink);
+  middleLink.activate(ctrl, middleLink.text);
+  assert.equal(middle.pasted[0], ` ${command} `);
+
+  const already = fixture();
+  already.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: "echo foo", wrapped: false },
+  ]);
+  already.setCursor(1, 4);
+  const alreadyLink = already.linksAt(1)?.[0];
+  assert.ok(alreadyLink);
+  alreadyLink.activate(ctrl, alreadyLink.text);
+  assert.equal(already.pasted[0], ` ${command}`);
+});
+
 test("a name that starts on the next wrapped row is not anchored on the previous row", () => {
   const f = fixture();
   f.setLines([
@@ -289,6 +335,7 @@ test("a wrapped logical line is one multi-row link and fills the full path", () 
     start: { x: 1, y: 1 },
     end: { x: 9, y: 2 },
   });
+  f.atPrompt();
   link.activate(ctrl, link.text);
   assert.deepEqual(f.pasted, ["tar -xvzf '/tmp/backup.tar.gz' -C '/tmp'"]);
 });
@@ -302,6 +349,7 @@ test("absolute names link without markers and relative names do not", () => {
   absolute.setLine(0, "/var/pack.zip");
   const link = absolute.linksAt(1)?.[0];
   assert.ok(link);
+  absolute.atPrompt();
   link.activate(ctrl, link.text);
   assert.deepEqual(absolute.pasted, ["unzip '/var/pack.zip' -d '/var'"]);
 
@@ -313,6 +361,7 @@ test("absolute names link without markers and relative names do not", () => {
   open.noteAt(0, { cwd: "/var", host: "box" });
   const openLink = open.linksAt(2)?.[0];
   assert.ok(openLink);
+  open.atPrompt();
   openLink.activate(ctrl, openLink.text);
   assert.equal(open.pasted[0], "unzip '/var/pack.zip' -d '/var'");
   open.setLine(1, "pack.zip");
@@ -328,6 +377,7 @@ test("absolute names link without markers and relative names do not", () => {
   mismatched.noteAt(2, { cwd: "/other", host: "box" });
   const mismatchLink = mismatched.linksAt(2)?.[0];
   assert.ok(mismatchLink);
+  mismatched.atPrompt();
   mismatchLink.activate(ctrl, mismatchLink.text);
   assert.equal(mismatched.pasted[0], "tar -xvzf '/tmp/a.tar.gz' -C '/tmp'");
   mismatched.setLine(1, "a.tar.gz");
@@ -358,6 +408,7 @@ test("ls -l links only the archive name and a symlink line links both names", ()
   listing.noteAt(2, { cwd: "/data", host: "box" });
   const links = listing.linksAt(2);
   assert.deepEqual(links?.map((link) => link.text), ["bundle.tar.gz"]);
+  listing.atPrompt();
   links?.[0]?.activate(ctrl, links[0].text);
   assert.deepEqual(listing.pasted, ["tar -xvzf '/data/bundle.tar.gz' -C '/data'"]);
 
