@@ -56,14 +56,17 @@ function loadDiscovery() {
 // already dead, or to a reused port whose token is stale, and fail until the
 // chat is reopened.
 //
-// Retry a bounded number of times by re-reading the discovery file. Identity
-// is port + token + pid (the same triple `isCliDiscoveryFileCurrent` uses),
-// because the OS may hand the new bridge the same ephemeral port. A missing,
-// unreadable, or unparseable file in this window is transient: the old host
-// removes it before the new one writes it, so keep the remaining delays.
-// Unchanged identity stops immediately instead of hammering the same bridge.
-// At most two extra attempts (300ms + 900ms, ~1.2s). When every attempt
-// fails, the original error is surfaced unchanged.
+// Retry a bounded number of times by re-reading the discovery file, including
+// the initial read. The old host removes the file before the new one writes
+// it, so a missing, unreadable, or unparseable file at startup is the same
+// transient gap as a later re-read. Identity is port + token + pid (the same
+// triple `isCliDiscoveryFileCurrent` uses), because the OS may hand the new
+// bridge the same ephemeral port. A socket that closes or resets while
+// auth/verify is in flight is retried the same way: the process that accepted
+// the handshake may already be gone. Unchanged identity stops immediately
+// instead of hammering the same bridge. At most two extra attempts
+// (300ms + 900ms, ~1.2s). When every attempt fails, the original error is
+// surfaced unchanged.
 const CONNECT_RETRY_DELAYS_MS = [300, 900];
 
 function discoveryIdentity(record) {
@@ -82,9 +85,18 @@ function sameDiscoveryIdentity(left, right) {
 
 // Stale token: the bridge returns `{ ok: false }` (AUTH_FAILED) or, in the
 // live host, RPC -32001 "Authentication required. Send auth/verify with valid
-// token first." Other RPC failures mean this bridge is current.
+// token first." CONNECTION_CLOSED / CONNECTION_ERROR are the handshake that
+// dies with the old process while auth/verify is pending. Other RPC failures
+// mean this bridge is current.
 function isRetryableConnectError(err) {
-  if (err?.code === "CONNECT_FAILED" || err?.code === "AUTH_FAILED") return true;
+  if (
+    err?.code === "CONNECT_FAILED"
+    || err?.code === "AUTH_FAILED"
+    || err?.code === "CONNECTION_CLOSED"
+    || err?.code === "CONNECTION_ERROR"
+  ) {
+    return true;
+  }
   return err?.code === "RPC_ERROR"
     && typeof err.message === "string"
     && err.message.includes("Authentication required");
@@ -150,27 +162,29 @@ async function establishConnection(discovery) {
 
 async function connectClient() {
   const discoveryPath = getCliDiscoveryFilePath();
-  let discovery = loadDiscovery();
   let lastError = null;
   let attemptedIdentity = null;
 
   // Bounded retry: at most CONNECT_RETRY_DELAYS_MS.length extra attempts
-  // (adds at most ~1.2s of latency in the worst case).
+  // (adds at most ~1.2s of latency in the worst case). The initial read is
+  // inside the loop so a restart gap with no discovery file yet can heal.
   for (let attempt = 0; attempt <= CONNECT_RETRY_DELAYS_MS.length; attempt += 1) {
     if (attempt > 0) {
       if (!discoveryPath) break;
       await sleep(CONNECT_RETRY_DELAYS_MS[attempt - 1]);
-      let refreshed = null;
-      try {
-        refreshed = loadDiscovery();
-      } catch {
-        // Old host removed discovery.json, or the new one has not finished
-        // writing a parseable file yet. Use the next bounded delay.
-        continue;
-      }
-      if (sameDiscoveryIdentity(refreshed, attemptedIdentity)) break;
-      discovery = refreshed;
     }
+
+    let discovery = null;
+    try {
+      discovery = loadDiscovery();
+    } catch (err) {
+      // Missing, unreadable, or still being written. Use the next delay.
+      // A connect or auth error from an earlier attempt stays the one we
+      // surface; this load error matters only when no bridge was reached.
+      if (!lastError) lastError = err;
+      continue;
+    }
+    if (attemptedIdentity && sameDiscoveryIdentity(discovery, attemptedIdentity)) break;
 
     attemptedIdentity = discoveryIdentity(discovery);
     try {
