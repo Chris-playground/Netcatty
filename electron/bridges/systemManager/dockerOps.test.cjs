@@ -271,7 +271,7 @@ test("listImages reads Podman's JSON array and Docker's JSON lines", async () =>
       stdout: `[
         {
           "Id": "abc123",
-          "Names": ["docker.io/library/alpine:3.20"],
+          "Names": ["docker.io/library/alpine:3.20", "localhost/alpine:dev"],
           "Size": 7340032,
           "Created": 1700000000,
           "Digest": "sha256:deadbeef"
@@ -283,10 +283,12 @@ test("listImages reads Podman's JSON array and Docker's JSON lines", async () =>
   });
   const podmanResult = await podman.listImages(null, "s1", "podman");
   assert.equal(podmanResult.success, true);
-  assert.equal(podmanResult.images.length, 1);
+  assert.equal(podmanResult.images.length, 2);
   assert.equal(podmanResult.images[0].repository, "docker.io/library/alpine");
   assert.equal(podmanResult.images[0].tag, "3.20");
   assert.equal(podmanResult.images[0].name, "docker.io/library/alpine:3.20");
+  assert.equal(podmanResult.images[1].name, "localhost/alpine:dev");
+  assert.equal(podmanResult.images[1].id, "abc123");
   assert.equal(podmanResult.images[0].size, "7MB");
   assert.equal(podmanResult.images[0].digest, "sha256:deadbeef");
 

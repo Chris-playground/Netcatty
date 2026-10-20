@@ -120,14 +120,15 @@ function splitImageName(name) {
   return { repository: text, tag: "" };
 }
 
-function imageRepositoryAndTag(row) {
+function imageAliases(row) {
   if (row.Repository || row.Tag) {
-    return { repository: String(row.Repository || ""), tag: String(row.Tag || "") };
+    return [{ repository: String(row.Repository || ""), tag: String(row.Tag || "") }];
   }
-  const named = (Array.isArray(row.Names) && row.Names[0])
-    || (Array.isArray(row.RepoTags) && row.RepoTags[0])
-    || "";
-  return splitImageName(named);
+  const names = Array.isArray(row.Names) && row.Names.length > 0
+    ? row.Names
+    : (Array.isArray(row.RepoTags) ? row.RepoTags : []);
+  const aliases = names.filter(Boolean).map((name) => splitImageName(name));
+  return aliases.length > 0 ? aliases : [{ repository: "", tag: "" }];
 }
 
 function formatImageSize(size) {
@@ -155,19 +156,20 @@ function formatImageCreated(row) {
 }
 
 function parseDockerImages(stdout) {
-  return parseJsonRecords(stdout).map((row) => {
-    const { repository, tag } = imageRepositoryAndTag(row);
+  const images = [];
+  for (const row of parseJsonRecords(stdout)) {
     const id = String(row.ID || row.Id || "");
-    return {
-      id,
-      repository,
-      tag,
-      size: formatImageSize(row.Size),
-      createdAt: formatImageCreated(row),
-      digest: String(row.Digest || (Array.isArray(row.RepoDigests) ? (row.RepoDigests[0] || "") : "")),
-      name: repository && tag ? `${repository}:${tag}` : repository || tag || id,
-    };
-  }).filter((image) => image.id || image.name);
+    const size = formatImageSize(row.Size);
+    const createdAt = formatImageCreated(row);
+    const digest = String(row.Digest || (Array.isArray(row.RepoDigests) ? (row.RepoDigests[0] || "") : ""));
+    for (const alias of imageAliases(row)) {
+      const { repository, tag } = alias;
+      const name = repository && tag ? `${repository}:${tag}` : repository || tag || id;
+      if (!id && !name) continue;
+      images.push({ id, repository, tag, size, createdAt, digest, name });
+    }
+  }
+  return images;
 }
 
 function summarizeImageInspect(info) {
