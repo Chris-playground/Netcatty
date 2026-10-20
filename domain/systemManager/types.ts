@@ -4,6 +4,12 @@ export interface SessionCapabilities {
   targetOs: TargetOs;
   hasTmux: boolean;
   hasDocker: boolean;
+  /** `podman` binary present. A podman-docker shim may also set hasDocker. */
+  hasPodman?: boolean;
+  /** `nerdctl` binary present. */
+  hasNerdctl?: boolean;
+  /** `kubectl` binary present on the remote host. */
+  hasKubectl?: boolean;
   hasNvidiaSmi: boolean;
   hasNpuSmi: boolean;
   /** `ss` binary present (preferred listening-port collector). */

@@ -2,6 +2,7 @@ import { Layers, Loader2, Tag, Trash2 } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
+import type { ContainerRuntimeId } from '../../domain/systemManager/containerRuntime';
 import { dockerImageRowKey, type DockerImageInfo } from '../../domain/systemManager/types';
 import { dockerImageInfoEqual } from '../../domain/systemManager/pollEquals';
 import { DockerImageIcon } from './DockerImageIcon';
@@ -35,6 +36,7 @@ type PendingImageConfirm =
 
 interface DockerImagesPanelProps {
   sessionId: string;
+  runtime?: ContainerRuntimeId;
   isVisible: boolean;
   warmupEnabled?: boolean;
   backend: Backend;
@@ -89,6 +91,7 @@ const DockerImageRow = memo(function DockerImageRow({
 
 export const DockerImagesPanel = memo(function DockerImagesPanel({
   sessionId,
+  runtime = 'docker',
   isVisible,
   warmupEnabled = false,
   backend,
@@ -111,15 +114,15 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     // Clear busy so a hung/in-flight action from the previous session cannot
     // leave the new session's confirm dialog permanently disabled.
     setActionBusy(false);
-  }, [sessionId]);
+  }, [runtime, sessionId]);
 
   const imagesFetcher = useCallback(async () => {
-    const result = await backend.listDockerImages(sessionId);
+    const result = await backend.listDockerImages(sessionId, runtime);
     if (!result.success || !result.images) {
       throw new Error(result.error || stableT('systemManager.errors.loadDockerImages'));
     }
     return result.images;
-  }, [backend, sessionId, stableT]);
+  }, [backend, runtime, sessionId, stableT]);
 
   const listIntervalMs = Math.max(3, listRefreshIntervalSec) * 1000;
   const { data: images, error, loading, refresh } = usePolling<DockerImageInfo[]>(
@@ -127,7 +130,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     listIntervalMs,
     isVisible || warmupEnabled,
     (prev, next) => mergePollListByKey(prev, next, dockerImageRowKey, dockerImageInfoEqual),
-    { poll: isVisible, resetKey: sessionId },
+    { poll: isVisible, resetKey: `${sessionId}:${runtime}` },
   );
 
   const filtered = useMemo(() => {
@@ -160,12 +163,13 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     const result = await backend.dockerImageInspect({
       sessionId,
       imageId: image.id.slice(0, 12),
+      runtime,
     });
     if (!result.success) {
       throw new Error(result.error || stableT('systemManager.errors.actionFailed'));
     }
     return result.inspect ?? null;
-  }, [backend, sessionId, stableT]);
+  }, [backend, runtime, sessionId, stableT]);
   const {
     records: inspectByImageKey,
     loadRecord: loadImageInspect,
@@ -186,6 +190,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     try {
       const result = await backend.dockerImageAction({
         sessionId,
+        runtime,
         action: 'rm',
         imageId: image.id.slice(0, 12),
         force: image.tag === '<none>',
@@ -205,7 +210,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
         setActionBusy(false);
       }
     }
-  }, [backend, getImageInspectKey, invalidateImageInspect, refresh, selectedId, sessionId, t]);
+  }, [backend, getImageInspectKey, invalidateImageInspect, refresh, runtime, selectedId, sessionId, t]);
 
   const handleRemove = useCallback((image: DockerImageInfo) => {
     const label = image.name || image.id.slice(0, 12);
@@ -216,7 +221,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     const actionGeneration = actionGenerationRef.current;
     setActionBusy(true);
     try {
-      const result = await backend.dockerImageAction({ sessionId, action: 'prune', all });
+      const result = await backend.dockerImageAction({ sessionId, runtime, action: 'prune', all });
       if (actionGenerationRef.current !== actionGeneration) return;
       if (!result.success) {
         showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
@@ -228,7 +233,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
         setActionBusy(false);
       }
     }
-  }, [backend, refresh, sessionId, t]);
+  }, [backend, refresh, runtime, sessionId, t]);
 
   const handlePrune = useCallback((all: boolean) => {
     setConfirmTarget({ kind: 'prune', all });
@@ -237,6 +242,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
   const handleTagSubmit = async (image: DockerImageInfo, repository: string, tag: string) => {
     const result = await backend.dockerImageAction({
       sessionId,
+      runtime,
       action: 'tag',
       imageId: image.id.slice(0, 12),
       repository,

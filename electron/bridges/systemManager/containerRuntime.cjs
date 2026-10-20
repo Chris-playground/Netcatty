@@ -1,0 +1,360 @@
+"use strict";
+
+const CONTAINER_RUNTIMES = ["docker", "podman", "nerdctl"];
+const SOURCE_ORDER = ["docker", "podman", "nerdctl", "kubernetes"];
+
+const CLEAR_STARTUP_OUTPUT = "printf '\\033[H\\033[2J\\033[3J';";
+
+function shQuote(str) {
+  return `'${String(str).replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function normalizeContainerRuntime(runtime) {
+  return CONTAINER_RUNTIMES.includes(runtime) ? runtime : "docker";
+}
+
+function isContainerSource(value) {
+  return SOURCE_ORDER.includes(value);
+}
+
+function runtimeBinary(runtime) {
+  return normalizeContainerRuntime(runtime);
+}
+
+function buildRuntimeCommand(runtime, args) {
+  return `${runtimeBinary(runtime)} ${String(args || "")}`.trim();
+}
+
+function parseRuntimeProbe(stdout) {
+  const text = stdout || "";
+  const hasFlag = (name) => new RegExp(`(?:^|\\r?\\n)${name}=1(?:\\r?\\n|$)`).test(text);
+  return {
+    docker: hasFlag("__NC_DOCKER__"),
+    podman: hasFlag("__NC_PODMAN__"),
+    nerdctl: hasFlag("__NC_NERDCTL__"),
+    kubernetes: hasFlag("__NC_KUBECTL__"),
+  };
+}
+
+function sourcesFromCapabilities(capabilities) {
+  if (!capabilities) return [];
+  const present = {
+    docker: capabilities.hasDocker === true || capabilities.docker === true,
+    podman: capabilities.hasPodman === true || capabilities.podman === true,
+    nerdctl: capabilities.hasNerdctl === true || capabilities.nerdctl === true,
+    kubernetes: capabilities.hasKubectl === true || capabilities.kubernetes === true,
+  };
+  return SOURCE_ORDER.filter((id) => present[id]);
+}
+
+function pickContainerSource(detected, current, remembered) {
+  const available = SOURCE_ORDER.filter((id) => Array.isArray(detected) && detected.includes(id));
+  if (current && available.includes(current)) return current;
+  if (remembered && available.includes(remembered)) return remembered;
+  return available[0] || null;
+}
+
+function firstContainerRuntime(detected) {
+  return CONTAINER_RUNTIMES.find((id) => Array.isArray(detected) && detected.includes(id)) || null;
+}
+
+function socketNeedles(runtime) {
+  if (runtime === "podman") {
+    return ["podman.sock", "/run/podman", "podman daemon"];
+  }
+  if (runtime === "nerdctl") {
+    return ["containerd.sock", "/run/containerd"];
+  }
+  return ["docker daemon", "docker.sock", "/var/run/docker.sock", "connect to the docker daemon"];
+}
+
+function isRuntimeSocketPermissionError(runtime, result) {
+  const text = `${result?.stderr || ""}\n${result?.stdout || ""}\n${result?.error || ""}`.toLowerCase();
+  if (!text.includes("permission denied")) return false;
+  return socketNeedles(normalizeContainerRuntime(runtime)).some((needle) => text.includes(needle));
+}
+
+function socketCasePatterns(runtime) {
+  if (runtime === "podman") {
+    return [
+      "*permission\\ denied*podman.sock*",
+      "*podman.sock*permission\\ denied*",
+      "*permission\\ denied*/run/podman*",
+      "*/run/podman*permission\\ denied*",
+      "*permission\\ denied*podman\\ daemon*",
+      "*podman\\ daemon*permission\\ denied*",
+    ];
+  }
+  if (runtime === "nerdctl") {
+    return [
+      "*permission\\ denied*containerd.sock*",
+      "*containerd.sock*permission\\ denied*",
+      "*permission\\ denied*/run/containerd*",
+      "*/run/containerd*permission\\ denied*",
+    ];
+  }
+  return [
+    "*permission\\ denied*docker\\ daemon*",
+    "*docker\\ daemon*permission\\ denied*",
+    "*permission\\ denied*docker.sock*",
+    "*docker.sock*permission\\ denied*",
+    "*permission\\ denied*/var/run/docker.sock*",
+    "*/var/run/docker.sock*permission\\ denied*",
+    "*permission\\ denied*connect\\ to\\ the\\ docker\\ daemon*",
+    "*connect\\ to\\ the\\ docker\\ daemon*permission\\ denied*",
+  ];
+}
+
+function sanitizeContainerId(id) {
+  return String(id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
+}
+
+function buildContainerCommandWithSudoFallback(runtime, containerId, cliArgs) {
+  const bin = runtimeBinary(runtime);
+  const plainCommand = `${bin} ${cliArgs}`;
+  const sudoCommand = `sudo ${plainCommand}`;
+  const script = [
+    CLEAR_STARTUP_OUTPUT,
+    `_nc_rt_err=$(${bin} inspect ${containerId} 2>&1 >/dev/null);`,
+    "_nc_rt_status=$?;",
+    `if [ "$_nc_rt_status" -eq 0 ]; then exec ${plainCommand}; fi;`,
+    "_nc_rt_lc=$(printf '%s' \"$_nc_rt_err\" | tr '[:upper:]' '[:lower:]');",
+    "case \"$_nc_rt_lc\" in",
+    `${socketCasePatterns(normalizeContainerRuntime(runtime)).join("|")}) exec ${sudoCommand} ;;`,
+    "*) printf '%s\\n' \"$_nc_rt_err\" >&2; exit \"$_nc_rt_status\" ;;",
+    "esac",
+  ].join(" ");
+  return `sh -c ${shQuote(script)}`;
+}
+
+function buildContainerExecShellCommand(runtime, containerId) {
+  const safeId = sanitizeContainerId(containerId);
+  if (!safeId) return 'echo "Invalid container id"';
+  return buildContainerCommandWithSudoFallback(
+    runtime,
+    safeId,
+    `exec -it ${safeId} sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'`,
+  );
+}
+
+function buildContainerLogsCommand(runtime, containerId) {
+  const safeId = sanitizeContainerId(containerId);
+  if (!safeId) return 'echo "Invalid container id"';
+  return buildContainerCommandWithSudoFallback(runtime, safeId, `logs -f --tail 200 ${safeId}`);
+}
+
+function isSafeShellArg(value) {
+  const text = String(value ?? "");
+  if (!text || text.length > 512) return false;
+  return !/[\u0000-\u001f\u007f]/.test(text);
+}
+
+function kubectlPrefix(context, namespace) {
+  if (!isSafeShellArg(context)) return null;
+  const parts = ["kubectl", "--context", shQuote(context)];
+  if (namespace != null && namespace !== "") {
+    if (!isSafeShellArg(namespace)) return null;
+    parts.push("-n", shQuote(namespace));
+  }
+  return parts.join(" ");
+}
+
+function optionalContainerArg(container) {
+  if (container == null || container === "") return "";
+  if (!isSafeShellArg(container)) return null;
+  return ` -c ${shQuote(container)}`;
+}
+
+function wrapClearAndExec(command) {
+  return `sh -c ${shQuote(`${CLEAR_STARTUP_OUTPUT} exec ${command}`)}`;
+}
+
+function buildKubectlContextsCommand() {
+  return "kubectl config view -o json";
+}
+
+function buildKubectlNamespacesCommand(context) {
+  if (!isSafeShellArg(context)) return null;
+  return `kubectl --context ${shQuote(context)} get namespaces -o json`;
+}
+
+function buildKubectlPodsCommand(context, namespace) {
+  const prefix = kubectlPrefix(context, namespace);
+  if (!prefix) return null;
+  return `${prefix} get pods -o json`;
+}
+
+function buildKubectlDeletePodCommand(context, namespace, pod) {
+  const prefix = kubectlPrefix(context, namespace);
+  if (!prefix || !isSafeShellArg(pod)) return null;
+  return `${prefix} delete pod ${shQuote(pod)} --wait=false`;
+}
+
+function buildKubectlExecShellCommand(context, namespace, pod, container) {
+  const prefix = kubectlPrefix(context, namespace);
+  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  const containerArg = optionalContainerArg(container);
+  if (containerArg == null) return 'echo "Invalid container name"';
+  const inner = "sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'";
+  return wrapClearAndExec(`${prefix} exec -it ${shQuote(pod)}${containerArg} -- ${inner}`);
+}
+
+function buildKubectlLogsCommand(context, namespace, pod, container) {
+  const prefix = kubectlPrefix(context, namespace);
+  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  const containerArg = optionalContainerArg(container);
+  if (containerArg == null) return 'echo "Invalid container name"';
+  return wrapClearAndExec(`${prefix} logs -f --tail 200 ${shQuote(pod)}${containerArg}`);
+}
+
+function buildKubectlDescribeCommand(context, namespace, pod) {
+  const prefix = kubectlPrefix(context, namespace);
+  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  return wrapClearAndExec(`${prefix} describe pod ${shQuote(pod)}`);
+}
+
+function parseJsonValue(text) {
+  const raw = String(text || "");
+  const objectAt = raw.indexOf("{");
+  const arrayAt = raw.indexOf("[");
+  let start = -1;
+  if (objectAt >= 0 && arrayAt >= 0) start = Math.min(objectAt, arrayAt);
+  else start = Math.max(objectAt, arrayAt);
+  if (start < 0) {
+    throw new Error("Invalid JSON");
+  }
+  return JSON.parse(raw.slice(start));
+}
+
+function parseKubeconfigContexts(jsonText) {
+  const parsed = parseJsonValue(jsonText);
+  const current = typeof parsed["current-context"] === "string" ? parsed["current-context"] : "";
+  const contexts = [];
+  const list = Array.isArray(parsed.contexts) ? parsed.contexts : [];
+  for (const entry of list) {
+    const name = typeof entry?.name === "string" ? entry.name : "";
+    if (!name) continue;
+    const rawNamespace = entry?.context?.namespace;
+    const namespace = typeof rawNamespace === "string" && rawNamespace ? rawNamespace : "default";
+    contexts.push({
+      name,
+      namespace,
+      current: name === current,
+    });
+  }
+  return { contexts, current };
+}
+
+function parseNamespaceList(jsonText) {
+  const parsed = parseJsonValue(jsonText);
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  const names = [];
+  for (const item of items) {
+    const name = item?.metadata?.name;
+    if (typeof name === "string" && name) names.push(name);
+  }
+  return names;
+}
+
+function formatPodAge(iso, now = Date.now()) {
+  const timestamp = Date.parse(String(iso || ""));
+  if (!Number.isFinite(timestamp)) return "";
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function podDisplayStatus(pod) {
+  const statuses = [
+    ...(Array.isArray(pod?.status?.initContainerStatuses) ? pod.status.initContainerStatuses : []),
+    ...(Array.isArray(pod?.status?.containerStatuses) ? pod.status.containerStatuses : []),
+  ];
+  for (const status of statuses) {
+    const reason = status?.state?.waiting?.reason;
+    if (reason) return String(reason);
+  }
+  for (const status of statuses) {
+    const reason = status?.state?.terminated?.reason;
+    if (reason && reason !== "Completed") return String(reason);
+  }
+  const phase = String(pod?.status?.phase || "Unknown");
+  if (phase === "Succeeded") return "Completed";
+  return phase;
+}
+
+function podContainerNames(pod) {
+  const names = [];
+  const specs = [
+    ...(Array.isArray(pod?.spec?.containers) ? pod.spec.containers : []),
+    ...(Array.isArray(pod?.spec?.initContainers) ? pod.spec.initContainers : []),
+  ];
+  for (const container of specs) {
+    const name = container?.name;
+    if (typeof name === "string" && name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+function podRestartCount(pod) {
+  const statuses = [
+    ...(Array.isArray(pod?.status?.containerStatuses) ? pod.status.containerStatuses : []),
+    ...(Array.isArray(pod?.status?.initContainerStatuses) ? pod.status.initContainerStatuses : []),
+  ];
+  let restarts = 0;
+  for (const status of statuses) {
+    const count = Number(status?.restartCount || 0);
+    if (Number.isFinite(count)) restarts += count;
+  }
+  return restarts;
+}
+
+function parseKubectlPodList(jsonText, now = Date.now()) {
+  const parsed = parseJsonValue(jsonText);
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  const pods = [];
+  for (const pod of items) {
+    const name = typeof pod?.metadata?.name === "string" ? pod.metadata.name : "";
+    if (!name) continue;
+    pods.push({
+      name,
+      namespace: typeof pod?.metadata?.namespace === "string" ? pod.metadata.namespace : "",
+      status: podDisplayStatus(pod),
+      restarts: podRestartCount(pod),
+      age: formatPodAge(pod?.metadata?.creationTimestamp, now),
+      containers: podContainerNames(pod),
+    });
+  }
+  return pods;
+}
+
+module.exports = {
+  CONTAINER_RUNTIMES,
+  SOURCE_ORDER,
+  normalizeContainerRuntime,
+  isContainerSource,
+  runtimeBinary,
+  buildRuntimeCommand,
+  parseRuntimeProbe,
+  sourcesFromCapabilities,
+  pickContainerSource,
+  firstContainerRuntime,
+  isRuntimeSocketPermissionError,
+  sanitizeContainerId,
+  buildContainerExecShellCommand,
+  buildContainerLogsCommand,
+  buildKubectlContextsCommand,
+  buildKubectlNamespacesCommand,
+  buildKubectlPodsCommand,
+  buildKubectlDeletePodCommand,
+  buildKubectlExecShellCommand,
+  buildKubectlLogsCommand,
+  buildKubectlDescribeCommand,
+  parseKubeconfigContexts,
+  parseNamespaceList,
+  parseKubectlPodList,
+  formatPodAge,
+};

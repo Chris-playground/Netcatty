@@ -232,3 +232,34 @@ test("docker image actions retry with sudo and send saved passwords through stdi
   );
   assert.deepEqual(calls[2].execOptions, { stdin: "pa'ss\n" });
 });
+
+test("listContainers runs podman and retries sudo only for the podman socket", async () => {
+  const calls = [];
+  const dockerOps = createDockerOpsApi({
+    getSession: () => ({ systemManagerSudoPassword: "host-secret" }),
+    execOnSession: async (_event, sessionId, command) => {
+      calls.push({ sessionId, command });
+      if (calls.length === 1) {
+        return {
+          success: true,
+          stdout: "",
+          stderr: "dial unix /run/podman/podman.sock: connect: permission denied",
+          code: 1,
+        };
+      }
+      return {
+        success: true,
+        stdout: '{"ID":"abc123","Names":["web"],"Image":"nginx","State":"running"}\n',
+        stderr: "",
+        code: 0,
+      };
+    },
+  });
+
+  const result = await dockerOps.listContainers(null, "s1", "podman");
+
+  assert.equal(result.success, true);
+  assert.equal(result.containers[0].name, "web");
+  assert.equal(calls[0].command, "podman ps -a --format '{{json .}}'");
+  assert.equal(calls[1].command, "sudo podman ps -a --format '{{json .}}'");
+});
