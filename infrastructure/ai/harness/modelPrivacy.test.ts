@@ -20,6 +20,9 @@ import { pruneStaleToolContext } from './staleContextPruner';
 import { compactCattyMessages } from './cattyRuntime';
 import { createBridgeFetchForSDK, createModelFromConfig } from '../sdk/providers';
 import { getOpenAIChatAssistantFieldsForHistoryMessage } from '../providerContinuation';
+import { createCattyToolsFromCatalog } from './capabilityTools';
+import { buildCattyToolApproval } from './cattyToolApproval';
+import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 
 const require = createRequire(import.meta.url);
 const { createAiPrivacyService } = require('../../../electron/shared/aiPrivacyService.cjs');
@@ -283,6 +286,89 @@ test('full tool input is restored before schema validation, approval and executi
   assert.equal(approved, true);
   assert.equal(executed, true);
   assert.equal(requests, 2);
+});
+
+test('policy changes while restored tool arguments await approval prevent execution', async (t) => {
+  const { privacy, bridge, service, chatSessionId } = await fixture(t);
+  const token = await privacy.transform('redact', ADDRESS);
+  let calls = 0;
+  const bundle = createCattyToolsFromCatalog({
+    ...bridge,
+    aiExec: async () => { calls++; return { ok: true }; },
+    aiCapability: async () => { calls++; return { ok: true }; },
+  }, { sessions: [] }, [], 'confirm', undefined, chatSessionId);
+  const catalogExecute = bundle.tools.sftp_write_file.execute as (
+    input: unknown, options: unknown,
+  ) => Promise<unknown>;
+  let approvalEntered!: () => void;
+  let finishApproval!: (approved: boolean) => void;
+  const pendingApproval = new Promise<void>(resolve => { approvalEntered = resolve; });
+  const decision = new Promise<boolean>(resolve => { finishApproval = resolve; });
+  const approve = buildCattyToolApproval({
+    permissionMode: 'confirm',
+    chatSessionId,
+    requestApproval: async (_id, _name, args) => {
+      assert.equal(args.content, ADDRESS);
+      approvalEntered();
+      return decision;
+    },
+  });
+  const model = new MockLanguageModelV4({
+    doStream: stream([{
+      type: 'tool-call', toolCallId: 'write', toolName: 'sftp_write_file',
+      input: JSON.stringify({ sessionId: 'session', path: '/synthetic.txt', content: token }),
+    }]),
+  });
+  const result = streamText({
+    model: protectModel(model, privacy),
+    messages: [{ role: 'user', content: `Write ${ADDRESS}` }],
+    tools: {
+      sftp_write_file: tool({
+        inputSchema: z.object({ sessionId: z.string(), path: z.string(), content: z.literal(ADDRESS) }),
+        execute: async (args, options) => catalogExecute(args, {
+          ...options, context: bundle.toolsContext.sftp_write_file,
+        }),
+      }),
+    },
+    toolApproval: async ({ toolCall }) => approve({ toolCall } as Parameters<typeof approve>[0]),
+    stopWhen: isStepCount(1),
+  });
+  const failures: string[] = [];
+  const consumed = (async () => {
+    for await (const chunk of result.stream) {
+      if (chunk.type === 'tool-error' || chunk.type === 'error') failures.push(String(chunk.error));
+    }
+  })();
+  await pendingApproval;
+  service.configure({ enabled: false });
+  finishApproval(true);
+  await consumed;
+  assert.equal(calls, 0);
+  assert.match(failures.join('\n'), /privacy protection is unavailable/);
+});
+
+test('queued catalog calls recheck the pinned privacy policy after their slot becomes ready', async (t) => {
+  const { bridge, service, chatSessionId } = await fixture(t);
+  let calls = 0;
+  const bundle = createCattyToolsFromCatalog({
+    ...bridge,
+    aiExec: async () => { calls++; return { ok: true }; },
+    aiCapability: async () => { calls++; return { ok: true }; },
+  }, { sessions: [] }, [], 'auto', undefined, chatSessionId);
+  const slot = reserveSessionSlot(`${chatSessionId}:session`);
+  const catalogExecute = bundle.tools.sftp_write_file.execute as (
+    input: unknown, options: unknown,
+  ) => Promise<unknown>;
+  const result = catalogExecute({
+    sessionId: 'session', path: '/synthetic.txt', content: ADDRESS,
+  }, {
+    toolCallId: 'queued-write', messages: [], context: bundle.toolsContext.sftp_write_file,
+  });
+  const rejected = assert.rejects(async () => result, /privacy protection is unavailable/);
+  service.configure({ enabled: false });
+  slot.release();
+  await rejected;
+  assert.equal(calls, 0);
 });
 
 test('generate path used by compaction redacts requests and restores returned summaries', async (t) => {

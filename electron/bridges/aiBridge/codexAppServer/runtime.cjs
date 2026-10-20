@@ -259,6 +259,7 @@ class CodexAppServerRuntime {
     emitter,
     signal,
     sender,
+    assertSessionValid,
   }) {
     const throwIfAborted = () => {
       if (!signal?.aborted) return;
@@ -281,9 +282,11 @@ class CodexAppServerRuntime {
       config: buildThreadConfig(injectedMcpServers),
     };
 
+    assertSessionValid?.();
+    const requestOptions = { beforeSend: assertSessionValid };
     const threadResult = resumeThreadId
-      ? await connection.request("thread/resume", { threadId: resumeThreadId, ...threadParams })
-      : await connection.request("thread/start", threadParams);
+      ? await connection.request("thread/resume", { threadId: resumeThreadId, ...threadParams }, undefined, requestOptions)
+      : await connection.request("thread/start", threadParams, undefined, requestOptions);
     throwIfAborted();
     const threadId = threadResult?.thread?.id || resumeThreadId;
     if (!threadId) throw new Error("Codex App Server did not return a thread id");
@@ -299,6 +302,7 @@ class CodexAppServerRuntime {
       emitter,
       signal,
       sender,
+      assertSessionValid,
       lastError: null,
       settled: false,
       cancelRequested: false,
@@ -327,6 +331,7 @@ class CodexAppServerRuntime {
     }
 
     try {
+      assertSessionValid?.();
       const turnResult = await connection.request("turn/start", {
         threadId,
         input: buildTurnInput(prompt, attachments),
@@ -337,7 +342,7 @@ class CodexAppServerRuntime {
         model: selection.model || null,
         effort: selection.effort || null,
         summary: "concise",
-      });
+      }, undefined, requestOptions);
       const turnId = turnResult?.turn?.id;
       if (turnId) this.#assignTurnId(context, turnId);
       await completion;
@@ -390,12 +395,13 @@ class CodexAppServerRuntime {
 
     const steerPromise = (async () => {
       try {
+        context.assertSessionValid?.();
         const response = await context.connection.request("turn/steer", {
           threadId: context.threadId,
           expectedTurnId: context.turnId,
           input: buildTurnInput(prompt, attachments),
           clientUserMessageId: clientUserMessageId || null,
-        });
+        }, undefined, { beforeSend: context.assertSessionValid });
         if (context.cancelRequested || context.signal?.aborted || context.settled) {
           return { status: "cancelled" };
         }

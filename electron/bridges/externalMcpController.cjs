@@ -196,6 +196,7 @@ function createExternalMcpController(options = {}) {
             chatSessionId: deps.chatSessionId,
           }, {
             externalSocket: context?.externalClient || null,
+            beforeExecute: aiPrivacyService.createPolicyGuard(),
           });
         },
       });

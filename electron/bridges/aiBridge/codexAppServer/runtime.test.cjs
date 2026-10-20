@@ -898,3 +898,45 @@ test("model and file-change normalization preserve UI contract", async () => {
   assert.deepEqual(catalog.models[1].thinkingLevels, ["low", "high"]);
   assert.equal(catalog.models[1].defaultThinkingLevel, "high");
 });
+
+for (const startupStage of ["connection", "thread"]) {
+  test(`privacy off-to-on while Codex ${startupStage} startup is paused prevents turn/start`, async () => {
+    const { createAiPrivacyService } = require("../../../shared/aiPrivacyService.cjs");
+    const privacy = createAiPrivacyService();
+    privacy.checkSession("chat-privacy-race");
+    let notifyReady;
+    let release;
+    const ready = new Promise((resolve) => { notifyReady = resolve; });
+    const gate = new Promise((resolve) => { release = resolve; });
+    let connection;
+    const runtime = new CodexAppServerRuntime({
+      connectionFactory: (options) => {
+        connection = new FakeConnection(options);
+        if (startupStage === "connection") {
+          connection.start = async () => { notifyReady(); await gate; };
+        } else {
+          const request = connection.request.bind(connection);
+          connection.request = async (method, params) => {
+            if (method === "thread/start") { notifyReady(); await gate; }
+            return request(method, params);
+          };
+        }
+        return connection;
+      },
+    });
+    const run = runtime.runTurn({
+      requestId: "privacy-race", chatSessionId: "chat-privacy-race",
+      prompt: "raw-secret", binPath: "/bin/codex", emitter: createEmitter(),
+      assertSessionValid: () => privacy.checkSession("chat-privacy-race"),
+    });
+    const rejected = assert.rejects(run, /start a new chat/);
+    await ready;
+    privacy.configure({ enabled: true });
+    release();
+    await rejected;
+    assert.equal(connection.requests.some(({ method }) => method === "turn/start"), false);
+    assert.equal(runtime.activeByRequest.size, 0);
+    assert.equal(runtime.activeByThread.size, 0);
+    await runtime.cleanupChatSession("chat-privacy-race");
+  });
+}

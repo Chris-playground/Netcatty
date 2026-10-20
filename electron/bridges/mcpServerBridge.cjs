@@ -1518,7 +1518,10 @@ async function handleMessage(socket, line) {
     notifyExternalMcpActivity(method, callParams);
     let result;
     if (isExternalScope || externalMcpSockets.has(socket)) {
-      result = await dispatch(method, callParams, { externalSocket: socket });
+      result = await dispatch(method, callParams, {
+        externalSocket: socket,
+        beforeExecute: aiPrivacyService.createPolicyGuard(),
+      });
     } else {
       const boundScope = managedPrivacyScopes.get(socket);
       if (boundScope && boundScope !== callParams.chatSessionId) {
@@ -1528,7 +1531,7 @@ async function handleMessage(socket, line) {
         managedPrivacyScopes.set(socket, callParams.chatSessionId);
       }
       result = await createManagedPrivacyBoundary(
-        (rpcMethod, rpcParams) => dispatch(rpcMethod, rpcParams),
+        (rpcMethod, rpcParams, context) => dispatch(rpcMethod, rpcParams, context),
         aiPrivacyService,
       )(method, callParams);
     }
@@ -2252,6 +2255,9 @@ async function dispatch(method, params, approvalContext = {}) {
     if (!handler) {
       throw new Error(`Unknown method: ${method}`);
     }
+    // Approval may have waited across a privacy-policy change. Check at execution,
+    // not only when the managed request entered the dispatcher.
+    approvalContext.beforeExecute?.();
     if (capability?.id === "terminal.execute" && params?.sessionId && !sessions?.get?.(params.sessionId)) {
       return await handleWorkerTerminalExec(params);
     }
@@ -2264,7 +2270,7 @@ async function dispatch(method, params, approvalContext = {}) {
     if (capability?.id === "terminal.stop" && workerBackgroundJobs.has(params?.jobId)) {
       return await handleWorkerJobStop(params);
     }
-    return await handler(params);
+    return await handler(params, approvalContext);
   } finally {
     if (activityStarted) {
       sessionIdleManager.endActivity(params?.chatSessionId, params.sessionId);

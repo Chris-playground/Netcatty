@@ -8,13 +8,17 @@ function createManagedPrivacyBoundary(dispatch, privacyService) {
       if (privacyService.isEnabled()) {
         throw new Error("AI privacy requires a managed chat session.");
       }
-      return dispatch(method, params);
+      return dispatch(method, params, { beforeExecute: () => {
+        if (privacyService.isEnabled()) throw new Error("AI privacy requires a managed chat session.");
+      } });
     }
     const enabled = privacyService.checkSession(chatSessionId);
     const restored = enabled ? privacyService.restore(chatSessionId, params) : params;
     let result;
     try {
-      result = await dispatch(method, restored);
+      result = await dispatch(method, restored, {
+        beforeExecute: () => privacyService.checkSession(chatSessionId),
+      });
     } catch (error) {
       privacyService.checkSession(chatSessionId);
       if (!enabled) throw error;

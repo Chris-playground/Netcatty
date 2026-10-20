@@ -2050,3 +2050,28 @@ test("list-models persists a first current-only success for later failures", asy
     cleanup();
   }
 });
+
+test("SDK adapter passes a live privacy guard through asynchronous driver startup even when initially disabled", async () => {
+  const { createAiPrivacyService } = require("../../../shared/aiPrivacyService.cjs");
+  const privacy = createAiPrivacyService();
+  let notifyReady;
+  let release;
+  let sent = false;
+  const ready = new Promise((resolve) => { notifyReady = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  const h = createPrivacyStreamHarness(privacy, async (context) => {
+    notifyReady();
+    await gate;
+    context.assertSessionValid();
+    sent = true;
+  });
+  const run = h.stream();
+  await ready;
+  privacy.configure({ enabled: true });
+  release();
+  const result = await run;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /start a new chat/);
+  assert.equal(sent, false);
+  assert.equal(h.ctx.sdkActiveStreams.size, 0);
+});

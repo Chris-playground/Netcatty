@@ -32,6 +32,7 @@ function createAiPrivacyService({ maxSessions = 64, initialized = true } = {}) {
   let fingerprint = JSON.stringify(config);
   let invalidConfiguration = false;
   let configurationInitialized = initialized;
+  let policyRevision = 0;
   // Only enabled chats allocate secret-bearing maps. Disabled and retired
   // identities retain no content and must not impose a limit on ordinary use.
   const sessions = new Map();
@@ -60,6 +61,7 @@ function createAiPrivacyService({ maxSessions = 64, initialized = true } = {}) {
   }
 
   function invalidateConfiguration() {
+    policyRevision += 1;
     invalidConfiguration = true;
     retireAll();
   }
@@ -78,12 +80,26 @@ function createAiPrivacyService({ maxSessions = 64, initialized = true } = {}) {
       throw new Error(CONFIG_ERROR);
     }
     const nextFingerprint = JSON.stringify(next);
-    if (nextFingerprint !== fingerprint) retireAll();
+    if (nextFingerprint !== fingerprint) {
+      policyRevision += 1;
+      retireAll();
+    }
     config = next;
     fingerprint = nextFingerprint;
     invalidConfiguration = false;
     configurationInitialized = true;
     return getConfig();
+  }
+
+  // External clients own their maps elsewhere, but delayed effects still need
+  // to honor a policy change in main, including a change away and back.
+  function createPolicyGuard() {
+    requireValidConfig();
+    const revision = policyRevision;
+    return () => {
+      requireValidConfig();
+      if (revision !== policyRevision) throw new Error(SESSION_ERROR);
+    };
   }
 
   function getConfig() {
@@ -153,6 +169,7 @@ function createAiPrivacyService({ maxSessions = 64, initialized = true } = {}) {
   return Object.freeze({
     configure,
     getConfig,
+    createPolicyGuard,
     invalidateConfiguration,
     isEnabled,
     hasSession,

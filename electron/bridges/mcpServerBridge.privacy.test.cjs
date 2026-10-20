@@ -69,6 +69,17 @@ test("managed TCP restores prompt aliases before approval and masks results acro
   const context = await next.call("netcatty/getContext", { chatSessionId: "managed-chat" });
   assert.doesNotMatch(JSON.stringify(context), /smoke\.example/);
   await assert.rejects(next.call("netcatty/getContext", { chatSessionId: "other-chat" }), /cannot change/);
+
+  const callsBeforeApproval = commands.length;
+  const nextApproval = new Promise((resolve) => { receiveApproval = resolve; });
+  const staleRequest = client.call("netcatty/exec", { chatSessionId: "managed-chat", sessionId: "ssh", command: `echo ${token}` });
+  const rejected = assert.rejects(staleRequest, /settings changed|unavailable/);
+  const staleApproval = await nextApproval;
+  privacy.configure({ enabled: false });
+  bridge.resolveApprovalFromRenderer(staleApproval.approvalId, true, "once");
+  await rejected;
+  assert.equal(commands.length, callsBeforeApproval, "policy changes during approval must prevent execution");
+
 });
 
 test("privacy-disabled TCP preserves legacy multi-scope and unscoped calls on one socket", { timeout: 10000 }, async (t) => {

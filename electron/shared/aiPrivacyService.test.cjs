@@ -276,3 +276,18 @@ test("IDs, unsupported values and capacity errors are sanitized without leaking 
     assert.throws(() => createAiPrivacyService(limits), /Invalid AI privacy configuration/);
   }
 });
+
+test("external execution guards reject policy changes even when settings change back", () => {
+  const service = createAiPrivacyService();
+  service.configure({ enabled: true });
+  const guard = service.createPolicyGuard();
+  guard();
+  service.configure({ enabled: true });
+  guard();
+  service.configure({ enabled: false });
+  service.configure({ enabled: true });
+  assert.throws(guard, /settings changed/);
+  const current = service.createPolicyGuard();
+  service.invalidateConfiguration();
+  assert.throws(current, /Invalid AI privacy/);
+});

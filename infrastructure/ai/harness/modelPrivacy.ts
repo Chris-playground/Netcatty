@@ -32,6 +32,24 @@ const BINARY_ERROR = 'AI privacy protection cannot inspect this attachment. Use 
 const SIGNED_REASONING_ERROR = 'AI privacy protection cannot safely rewrite signed reasoning from an earlier conversation. Start a new chat.';
 const TOKEN_PREFIX = '[NC_';
 
+/** Revalidate the pinned policy after approval/queue waits, before tool effects. */
+export async function assertModelPrivacySession(
+  bridge: ModelPrivacyBridge,
+  chatSessionId?: string,
+): Promise<void> {
+  if (!bridge.aiPrivacyStatus) return;
+  if (!bridge.aiPrivacyTransform || !chatSessionId) throw new Error(PRIVACY_ERROR);
+  try {
+    // Restore cannot create a map. Deleted/retired chats must not be reopened.
+    const result = await bridge.aiPrivacyTransform({
+      chatSessionId, operation: 'restore', value: [],
+    });
+    if (!result?.ok) throw new Error(PRIVACY_ERROR);
+  } catch {
+    throw new Error(PRIVACY_ERROR);
+  }
+}
+
 /** Main owns the reverse map; the renderer retains only the enabled flag. */
 export async function initializeModelPrivacy(
   bridge: ModelPrivacyBridge,

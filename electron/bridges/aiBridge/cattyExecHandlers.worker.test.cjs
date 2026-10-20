@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { registerCattyExecHandlers } = require("./cattyExecHandlers.cjs");
+const { createAiPrivacyService } = require("../../shared/aiPrivacyService.cjs");
 
 function createFakeIpcMain() {
   return {
@@ -14,6 +15,8 @@ function createFakeIpcMain() {
 
 test("catty AI exec proxies to the terminal worker when the real session lives in the worker", async () => {
   const ipcMain = createFakeIpcMain();
+  const aiPrivacyService = createAiPrivacyService();
+  aiPrivacyService.checkSession("chat-1");
   const requests = [];
   const terminalWorkerManager = {
     request(channel, payload, options) {
@@ -55,6 +58,7 @@ test("catty AI exec proxies to the terminal worker when the real session lives i
 
   registerCattyExecHandlers({
     ipcMain,
+    aiPrivacyService,
     validateSender: () => true,
     sessions: new Map(),
     terminalWorkerManager,

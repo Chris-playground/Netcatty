@@ -100,6 +100,7 @@ function createSftpHandlerApi(ctx) {
 
       try {
         const manager = getWorkerManager();
+        options.beforeExecute?.();
         pendingOpenPromise = manager.request("netcatty:sftp:openForSession", {
           sessionId: params.sessionId,
           encodingStateKey,
@@ -122,6 +123,7 @@ function createSftpHandlerApi(ctx) {
         const workerPayload = options.buildWorkerPayload
           ? options.buildWorkerPayload(workerParams, sftpId)
           : { ...workerParams, sftpId, timeoutMs };
+        options.beforeExecute?.();
         const value = await requestWorkerSftp(workerChannel, workerPayload, { timeoutMs, operationName });
         if (cancellationError) throw cancellationError;
         return value;
@@ -202,6 +204,7 @@ function createSftpHandlerApi(ctx) {
           }, timeoutMs);
         }
     
+        options.beforeExecute?.();
         const opened = await sftpBridge.openSftpForSession(null, {
           sessionId: params.sessionId,
           encodingStateKey,
@@ -223,7 +226,10 @@ function createSftpHandlerApi(ctx) {
           abortSignal: abortController.signal,
           timeoutMs,
         };
-        const value = await Promise.resolve().then(() => action(payload));
+        const value = await Promise.resolve().then(() => {
+          options.beforeExecute?.();
+          return action(payload);
+        });
         if (timeoutError) {
           throw timeoutError;
         }
@@ -254,37 +260,37 @@ function createSftpHandlerApi(ctx) {
       }
     }
     
-    async function handleSftpList(params) {
+    async function handleSftpList(params, executionContext = {}) {
       const entries = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.listSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP list", workerChannel: "netcatty:sftp:list" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP list", workerChannel: "netcatty:sftp:list" },
       );
       return { ok: true, entries };
     }
     
-    async function handleSftpRead(params) {
+    async function handleSftpRead(params, executionContext = {}) {
       if (!params?.path) throw new Error("path is required");
       const content = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.readSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP read", workerChannel: "netcatty:sftp:read" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP read", workerChannel: "netcatty:sftp:read" },
       );
       return { ok: true, path: params.path, content };
     }
     
-    async function handleSftpWrite(params) {
+    async function handleSftpWrite(params, executionContext = {}) {
       if (!params?.path) throw new Error("path is required");
       if (typeof params?.content !== "string") throw new Error("content is required");
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.writeSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP write", workerChannel: "netcatty:sftp:write" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP write", workerChannel: "netcatty:sftp:write" },
       );
       return { ok: true, path: params.path };
     }
     
-    async function handleSftpDownload(params) {
+    async function handleSftpDownload(params, executionContext = {}) {
       if (!params?.remotePath || !params?.localPath) {
         throw new Error("remotePath and localPath are required");
       }
@@ -333,6 +339,7 @@ function createSftpHandlerApi(ctx) {
               })
             : sftpBridge.downloadSftpToLocal(null, payload),
           {
+            ...executionContext,
             timeoutMs: commandTimeoutMs,
             operationName: "SFTP download",
             workerChannel: transferBridge ? "netcatty:transfer:start" : "netcatty:sftp:downloadToLocal",
@@ -372,7 +379,7 @@ function createSftpHandlerApi(ctx) {
       }
     }
     
-    async function handleSftpUpload(params) {
+    async function handleSftpUpload(params, executionContext = {}) {
       if (!params?.remotePath || !params?.localPath) {
         throw new Error("remotePath and localPath are required");
       }
@@ -421,6 +428,7 @@ function createSftpHandlerApi(ctx) {
               })
             : sftpBridge.uploadLocalToSftp(null, payload),
           {
+            ...executionContext,
             timeoutMs: commandTimeoutMs,
             operationName: "SFTP upload",
             workerChannel: transferBridge ? "netcatty:transfer:start" : "netcatty:sftp:uploadLocal",
@@ -460,63 +468,63 @@ function createSftpHandlerApi(ctx) {
       }
     }
     
-    async function handleSftpMkdir(params) {
+    async function handleSftpMkdir(params, executionContext = {}) {
       if (!params?.path) throw new Error("path is required");
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.mkdirSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP mkdir", workerChannel: "netcatty:sftp:mkdir" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP mkdir", workerChannel: "netcatty:sftp:mkdir" },
       );
       return { ok: true, path: params.path };
     }
     
-    async function handleSftpDelete(params) {
+    async function handleSftpDelete(params, executionContext = {}) {
       if (!params?.path) throw new Error("path is required");
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.deleteSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP delete", workerChannel: "netcatty:sftp:delete" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP delete", workerChannel: "netcatty:sftp:delete" },
       );
       return { ok: true, path: params.path };
     }
     
-    async function handleSftpRename(params) {
+    async function handleSftpRename(params, executionContext = {}) {
       if (!params?.oldPath || !params?.newPath) {
         throw new Error("oldPath and newPath are required");
       }
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.renameSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP rename", workerChannel: "netcatty:sftp:rename" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP rename", workerChannel: "netcatty:sftp:rename" },
       );
       return { ok: true, oldPath: params.oldPath, newPath: params.newPath };
     }
     
-    async function handleSftpStat(params) {
+    async function handleSftpStat(params, executionContext = {}) {
       if (!params?.path) throw new Error("path is required");
       const stat = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.statSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP stat", workerChannel: "netcatty:sftp:stat" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP stat", workerChannel: "netcatty:sftp:stat" },
       );
       return { ok: true, stat };
     }
     
-    async function handleSftpChmod(params) {
+    async function handleSftpChmod(params, executionContext = {}) {
       if (!params?.path || !params?.mode) throw new Error("path and mode are required");
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.chmodSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP chmod", workerChannel: "netcatty:sftp:chmod" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP chmod", workerChannel: "netcatty:sftp:chmod" },
       );
       return { ok: true, path: params.path, mode: params.mode };
     }
     
-    async function handleSftpHome(params) {
+    async function handleSftpHome(params, executionContext = {}) {
       const result = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.getSftpHomeDir(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP home", workerChannel: "netcatty:sftp:homeDir" },
+        { ...executionContext, timeoutMs: commandTimeoutMs, operationName: "SFTP home", workerChannel: "netcatty:sftp:homeDir" },
       );
       if (!result?.success) {
         throw new Error(result?.error || "Could not determine home directory");

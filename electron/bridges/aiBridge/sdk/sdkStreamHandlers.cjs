@@ -1002,6 +1002,9 @@ function registerSdkStreamHandlers(ctx) {
           const commonTurnContext = {
             requestId,
             chatSessionId,
+            // Drivers recheck after their own asynchronous startup, at the
+            // final Netcatty-owned prompt handoff (including disabled turns).
+            assertSessionValid: () => privacyService.checkSession(chatSessionId),
             ...promptPlacement,
             cwd: cwd || process.cwd(),
             model: model || undefined,
