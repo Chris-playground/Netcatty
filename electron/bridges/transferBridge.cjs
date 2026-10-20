@@ -3765,6 +3765,15 @@ function watchSftpChannelDeath(sftp, onDeath) {
     sftpChannelDeathWaiters.set(sftp, entry);
   }
   entry.waiters.add(onDeath);
+  // end/close is not replayed. OPEN can finish, the channel can die, and only
+  // then does WRITE/READ subscribe — readable is already false and the callback
+  // never comes. Fail this waiter after returning so the caller can unwatch.
+  if (sftp.readable === false || sftp.destroyed === true) {
+    queueMicrotask(() => {
+      if (!entry.waiters.has(onDeath)) return;
+      onDeath(sftpChannelClosedError());
+    });
+  }
   return () => {
     const current = sftpChannelDeathWaiters.get(sftp);
     if (!current) return;

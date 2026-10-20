@@ -1253,3 +1253,90 @@ test("resetting the borrowed SSH socket mid-upload fails the transfer (#3310)", 
   server.resetConnections();
   await assertBorrowedUploadFails(transferPromise, transferEvents, isSettled);
 });
+
+test("upload fails when the SFTP channel ended before WRITE subscribed (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try { await sftpBridge.closeSftp(null, { sftpId }); } catch { /* ignore */ }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-ended-before-write" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(() => answerOtpPrompts(browseSender));
+  const browse = await browseOpen;
+  assert.ok(browse.sftpId);
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, { ...options });
+  const sftp = sftpClients.get(transfer.sftpId)?.sftp;
+  assert.equal(typeof sftp?.open, "function");
+  const origOpen = sftp.open.bind(sftp);
+  const origWrite = sftp.write.bind(sftp);
+  // OPEN has already succeeded. The channel then ends before WRITE installs
+  // its close listener, and ssh2 will not replay end/close or answer WRITE.
+  sftp.open = (filePath, flags, cb) => origOpen(filePath, flags, (err, handle) => {
+    if (!err && (flags === "w" || flags === "r+")) {
+      sftp.readable = false;
+      sftp.destroyed = true;
+    }
+    cb(err, handle);
+  });
+  sftp.write = function writeWithoutCallback(...args) {
+    if (sftp.readable === false || sftp.destroyed === true) return undefined;
+    return origWrite(...args);
+  };
+
+  const tempRoot = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("otp-ended-before-write")}-`);
+  t.after(() => {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+  const localFile = path.join(tempRoot, "upload.txt");
+  const payload = Buffer.from("ended before write subscribe\n");
+  fs.writeFileSync(localFile, payload);
+  const transferEvents = [];
+  let settled = false;
+  const transferPromise = transferBridge.startTransfer(
+    {
+      sender: {
+        send(channelName, eventPayload) {
+          transferEvents.push({ channel: channelName, payload: eventPayload });
+        },
+      },
+    },
+    {
+      transferId: "otp-ended-before-write",
+      sourcePath: localFile,
+      targetPath: "/home/otpuser/otp-ended-before-write.txt",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: transfer.sftpId,
+      targetEncoding: "utf-8",
+      totalBytes: payload.length,
+    },
+  ).then((result) => {
+    settled = true;
+    return result;
+  });
+  pendingOpens.push(transferPromise.catch(() => {}));
+  await assertBorrowedUploadFails(transferPromise, transferEvents, () => settled);
+});
