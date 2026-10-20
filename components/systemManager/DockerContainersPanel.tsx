@@ -269,8 +269,8 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
   }, [stats]);
 
   const getContainerInspectKey = useCallback((container: DockerContainerInfo) => (
-    `${sessionId}:${container.id}`
-  ), [sessionId]);
+    `${sessionId}:${runtime}:${container.id}`
+  ), [runtime, sessionId]);
   const fetchContainerInspect = useCallback(async (container: DockerContainerInfo) => {
     const result = await backend.dockerInspect({
       sessionId,

@@ -157,8 +157,8 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
   const displayList = useStableListOrder(filtered, dockerImageRowKey, query, compareImages);
 
   const getImageInspectKey = useCallback((image: DockerImageInfo) => (
-    `${sessionId}:${dockerImageRowKey(image)}`
-  ), [sessionId]);
+    `${sessionId}:${runtime}:${dockerImageRowKey(image)}`
+  ), [runtime, sessionId]);
   const fetchImageInspect = useCallback(async (image: DockerImageInfo) => {
     const result = await backend.dockerImageInspect({
       sessionId,

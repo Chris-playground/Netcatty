@@ -148,6 +148,14 @@ test("parseKubeconfigContexts returns names and namespaces without user material
   assert.equal(JSON.stringify(parsed).includes("secret-token"), false);
 });
 
+test("parseNamespaceList skips a bracketed banner before the JSON object", () => {
+  const names = parseNamespaceList([
+    "[WARN] connection is using an insecure certificate",
+    '{"items":[{"metadata":{"name":"default"}}]}',
+  ].join("\n"));
+  assert.deepEqual(names, ["default"]);
+});
+
 test("parseNamespaceList reads metadata names and ignores kubectl warnings before the JSON", () => {
   const stdout = "Warning: old client\n" + JSON.stringify({
     items: [

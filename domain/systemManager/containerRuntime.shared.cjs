@@ -270,15 +270,16 @@ function buildKubectlDescribeCommand(context, namespace, pod, shell) {
 
 function parseJsonValue(text) {
   const raw = String(text || "");
-  const objectAt = raw.indexOf("{");
-  const arrayAt = raw.indexOf("[");
-  let start = -1;
-  if (objectAt >= 0 && arrayAt >= 0) start = Math.min(objectAt, arrayAt);
-  else start = Math.max(objectAt, arrayAt);
-  if (start < 0) {
-    throw new Error("Invalid JSON");
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (ch !== "{" && ch !== "[") continue;
+    try {
+      return JSON.parse(raw.slice(i));
+    } catch {
+      // A bracketed banner such as [WARN] is not the JSON document.
+    }
   }
-  return JSON.parse(raw.slice(start));
+  throw new Error("Invalid JSON");
 }
 
 function parseKubeconfigContexts(jsonText) {
