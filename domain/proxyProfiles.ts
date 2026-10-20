@@ -228,13 +228,18 @@ export function removeProxyProfileReferences(
   data: {
     hosts: Host[];
     groupConfigs: GroupConfig[];
+    defaultProxyProfileId?: string;
   },
 ): {
   hosts: Host[];
   groupConfigs: GroupConfig[];
+  defaultProxyProfileId?: string;
 } {
   return {
     hosts: data.hosts.map((host) => clearProxyProfileId(host, proxyProfileId)),
     groupConfigs: data.groupConfigs.map((config) => clearProxyProfileId(config, proxyProfileId)),
+    defaultProxyProfileId: data.defaultProxyProfileId === proxyProfileId
+      ? undefined
+      : data.defaultProxyProfileId,
   };
 }
