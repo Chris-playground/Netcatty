@@ -11,6 +11,7 @@ import {
   firstContainerRuntime,
   isKubectlForbiddenError,
   pickContainerSource,
+  rememberedContainerSource,
   sourcesFromCapabilities,
 } from '../../../domain/systemManager/containerRuntime';
 import type { SessionCapabilities } from '../../../domain/systemManager/types';
@@ -39,7 +40,7 @@ export function useContainerRuntimeSelection({
   const detectedKey = detected.join('|');
   const [source, setSource] = useState<ContainerSourceId | null>(() => {
     const remembered = readContainerRuntimePreference(hostKey);
-    return pickContainerSource(detected, null, remembered?.source ?? null);
+    return pickContainerSource(detected, null, rememberedContainerSource(remembered, detected));
   });
   const [contextName, setContextName] = useState<string | null>(() => (
     readContainerRuntimePreference(hostKey)?.context ?? null
@@ -58,7 +59,7 @@ export function useContainerRuntimeSelection({
   useEffect(() => {
     skipPersist.current = true;
     const remembered = readContainerRuntimePreference(hostKey);
-    setSource(pickContainerSource(detected, null, remembered?.source ?? null));
+    setSource(pickContainerSource(detected, null, rememberedContainerSource(remembered, detected)));
     setContextName(remembered?.context ?? null);
     setNamespaceName(remembered?.namespace ?? null);
     setContexts([]);
@@ -70,10 +71,11 @@ export function useContainerRuntimeSelection({
   }, [hostKey]);
 
   useEffect(() => {
+    const available = sourcesFromCapabilities(capabilities);
     setSource((current) => pickContainerSource(
-      sourcesFromCapabilities(capabilities),
+      available,
       current,
-      readContainerRuntimePreference(hostKey)?.source ?? null,
+      rememberedContainerSource(readContainerRuntimePreference(hostKey), available),
     ));
   }, [capabilities, detectedKey, hostKey]);
 

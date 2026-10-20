@@ -46,6 +46,10 @@ export function pickContainerSource(
   current: ContainerSourceId | null | undefined,
   remembered: ContainerSourceId | null | undefined,
 ): ContainerSourceId | null;
+export function rememberedContainerSource(
+  preference: { source?: string; engine?: string } | null | undefined,
+  detected: readonly ContainerSourceId[] | null | undefined,
+): ContainerSourceId | null;
 export function firstContainerRuntime(
   detected: readonly ContainerSourceId[] | null | undefined,
 ): ContainerRuntimeId | null;

@@ -20,6 +20,7 @@ export {
   isKubectlForbiddenError,
   pickContainerSource,
   podStatusMessageKey,
+  rememberedContainerSource,
   sourcesFromCapabilities,
 } from "./containerRuntime.shared.cjs";
 

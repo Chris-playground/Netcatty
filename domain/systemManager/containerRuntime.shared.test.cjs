@@ -20,6 +20,7 @@ const {
   parseNamespaceList,
   parseRuntimeProbe,
   pickContainerSource,
+  rememberedContainerSource,
   sourcesFromCapabilities,
   isKubectlForbiddenError,
   isKubectlUnreachableError,
@@ -70,6 +71,22 @@ test("pickContainerSource remembers the last choice per host and falls back when
     "kubernetes",
   );
   assert.equal(pickContainerSource(["nerdctl"], null, "docker"), "nerdctl");
+  assert.equal(
+    rememberedContainerSource({ source: "kubernetes", engine: "podman" }, ["docker", "podman"]),
+    "podman",
+  );
+  assert.equal(
+    rememberedContainerSource({ source: "kubernetes", engine: "podman" }, ["docker", "podman", "kubernetes"]),
+    "kubernetes",
+  );
+  assert.equal(
+    pickContainerSource(
+      ["docker", "podman"],
+      "kubernetes",
+      rememberedContainerSource({ source: "kubernetes", engine: "podman" }, ["docker", "podman"]),
+    ),
+    "podman",
+  );
   assert.equal(firstContainerRuntime(["kubernetes", "podman"]), "podman");
   assert.equal(firstContainerRuntime(["kubernetes"]), null);
 });

@@ -61,6 +61,16 @@ function pickContainerSource(detected, current, remembered) {
   return available[0] || null;
 }
 
+function rememberedContainerSource(preference, detected) {
+  const source = preference?.source;
+  if (!isContainerSource(source)) return null;
+  const available = Array.isArray(detected) ? detected : [];
+  if (source === "kubernetes" && !available.includes("kubernetes") && CONTAINER_RUNTIMES.includes(preference?.engine)) {
+    return preference.engine;
+  }
+  return source;
+}
+
 function firstContainerRuntime(detected) {
   return CONTAINER_RUNTIMES.find((id) => Array.isArray(detected) && detected.includes(id)) || null;
 }
@@ -491,6 +501,7 @@ module.exports = {
   parseRuntimeProbe,
   sourcesFromCapabilities,
   pickContainerSource,
+  rememberedContainerSource,
   firstContainerRuntime,
   isRuntimeSocketPermissionError,
   sanitizeContainerId,
