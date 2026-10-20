@@ -1139,6 +1139,7 @@ Vaults 标签保持扁平，不使用这块背景。
 
   // Quick Switcher
   'qs.search.placeholder': '搜索主机或标签页',
+  'qs.quickConnectTo': '快速连接到 {target}',
   'qs.jumpTo': '跳转到',
   'qs.localTerminal': '本地终端',
   'qs.localShells': '本地 Shell',

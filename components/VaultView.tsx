@@ -44,6 +44,7 @@ import React, {
   useState,
 } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
+import { registerQuickConnectOpener } from "../application/quickConnectBridge";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useStoredNumber } from "../application/state/useStoredNumber";
@@ -560,6 +561,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [quickConnectWarnings, setQuickConnectWarnings] = useState<string[]>(
     [],
   );
+
+  useEffect(() => registerQuickConnectOpener(({ target, warnings }) => {
+    setQuickConnectTarget(target);
+    setQuickConnectWarnings(warnings);
+    setIsQuickConnectOpen(true);
+  }), []);
 
   // Protocol select state (for hosts with multiple protocols)
   const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(

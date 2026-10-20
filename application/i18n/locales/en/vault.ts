@@ -668,6 +668,7 @@ export const enVaultMessages: Messages = {
 
   // Quick Switcher
   'qs.search.placeholder': 'Search hosts or tabs',
+  'qs.quickConnectTo': 'Quick connect to {target}',
   'qs.jumpTo': 'Jump To',
   'qs.localTerminal': 'Local Terminal',
   'qs.localShells': 'Local Shells',
