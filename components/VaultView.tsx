@@ -1799,7 +1799,8 @@ export const vaultViewAreEqual = (
     // Only these terminal connection settings are forwarded to
     // PortForwarding inside the vault, so compare them directly. Other
     // terminal settings (fonts, themes, etc.) don't affect this subtree
-    // and we don't want to re-render for them.
+    // and we don't want to re-render for them. onConnect is also omitted:
+    // temporary-connection toggles are read from a ref at connect time.
     prev.terminalSettings?.verifyHostKeys ===
       next.terminalSettings?.verifyHostKeys &&
     prev.terminalSettings?.keepaliveInterval ===

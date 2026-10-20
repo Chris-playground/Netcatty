@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   prepareConnectionHost,
+  temporaryConnectionPrepareOptions,
 } from "./legacyAlgorithms.ts";
 import { normalizeTerminalSettings } from "./models/terminal.ts";
 import type { Host } from "./models.ts";
@@ -166,6 +167,34 @@ test("an unsaved quick connect host receives temporary connection defaults", () 
   assert.equal(prepared.deviceType, "network");
   assert.equal(saved.deviceType, undefined);
   assert.equal(saved.legacyAlgorithms, undefined);
+});
+
+test("temporary connection toggles are read from the settings object at connect time", () => {
+  const settings = {
+    temporaryConnectionsAllowLegacyAlgorithms: false,
+    temporaryConnectionsNetworkDeviceMode: false,
+  };
+  const temporary = host({
+    id: "ephemeral-live",
+    ephemeral: true,
+    hostname: "10.9.9.9",
+  });
+  const connect = () => prepareConnectionHost(
+    temporary,
+    temporaryConnectionPrepareOptions(settings),
+  );
+
+  assert.equal(connect(), temporary);
+
+  settings.temporaryConnectionsNetworkDeviceMode = true;
+  settings.temporaryConnectionsAllowLegacyAlgorithms = true;
+  const enabled = connect();
+  assert.equal(enabled.deviceType, "network");
+  assert.equal(enabled.legacyAlgorithms, true);
+
+  settings.temporaryConnectionsNetworkDeviceMode = false;
+  settings.temporaryConnectionsAllowLegacyAlgorithms = false;
+  assert.equal(connect(), temporary);
 });
 
 test("temporary connection network device mode defaults to off", () => {

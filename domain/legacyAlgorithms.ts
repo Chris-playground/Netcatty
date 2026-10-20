@@ -61,6 +61,21 @@ function readPrepareConnectionHostOptions(
   return options ?? {};
 }
 
+/** Read the two temporary-connection toggles from the settings object given now. */
+export function temporaryConnectionPrepareOptions(
+  settings: {
+    temporaryConnectionsAllowLegacyAlgorithms?: boolean;
+    temporaryConnectionsNetworkDeviceMode?: boolean;
+  } | null | undefined,
+): PrepareConnectionHostOptions {
+  return {
+    temporaryConnectionsAllowLegacyAlgorithms:
+      settings?.temporaryConnectionsAllowLegacyAlgorithms,
+    temporaryConnectionsNetworkDeviceMode:
+      settings?.temporaryConnectionsNetworkDeviceMode,
+  };
+}
+
 /**
  * Stamp temporary-connection defaults onto unsaved temporary SSH hosts.
  * Saved hosts, and ephemeral clones of saved hosts, are returned unchanged so
