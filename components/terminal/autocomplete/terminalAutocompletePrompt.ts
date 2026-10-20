@@ -283,6 +283,9 @@ export function getCommandToRecordOnEnter(
  * Keystrokes that remove the text a snippet acceptance replaces.
  * Line-start keeps the shell kill-line (Ctrl+U, or backspaces on Windows).
  * Mid-line and program read-prompts delete only the word being typed.
+ * POSIX word delete sends DEL, the tty erase character. Ctrl-H is literal
+ * input to canonical `read` when erase is ^?, while readline still deletes
+ * on DEL. Windows line editing keeps backspace.
  * Script snippets run automation and do not replace the line, so they keep
  * the full-line clear.
  */
@@ -300,7 +303,10 @@ export function computeSnippetAcceptClearSequence(options: {
     && currentWord.length > 0
     && line.endsWith(currentWord)
     && (wordIndex > 0 || isProgramInputPromptText(options.promptText));
-  if (replaceWord) return "\b".repeat(Array.from(currentWord).length);
+  if (replaceWord) {
+    const eraseChar = isWindowsShellLineInput(options.os, options.promptText) ? "\b" : "\x7f";
+    return eraseChar.repeat(Array.from(currentWord).length);
+  }
 
   return isWindowsShellLineInput(options.os, options.promptText)
     ? "\b".repeat(line.length)

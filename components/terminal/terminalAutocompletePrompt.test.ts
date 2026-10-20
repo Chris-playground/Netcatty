@@ -292,13 +292,14 @@ test("computeAutocompleteAcceptWrite refuses line replacement when disabled", ()
 });
 
 test("snippet accept deletes only the mid-line word (#3622)", () => {
+  // POSIX erase is DEL (0x7f). Ctrl-H is literal under canonical `read`.
   assert.equal(
     computeSnippetAcceptClearSequence({
       line: "git pull use",
       os: "linux",
       promptText: "user@host:~$ ",
     }),
-    "\b\b\b",
+    "\x7f\x7f\x7f",
   );
   assert.equal(
     computeSnippetAcceptClearSequence({
@@ -324,18 +325,25 @@ test("snippet accept deletes only the mid-line word (#3622)", () => {
     }),
     "\b".repeat("deploy".length),
   );
+  const emailClear = computeSnippetAcceptClearSequence({
+    line: "use",
+    os: "linux",
+    promptText: "Email: ",
+  });
+  assert.equal(emailClear, "\x7f".repeat(3));
+  assert.deepEqual([...emailClear].map((ch) => ch.charCodeAt(0)), [0x7f, 0x7f, 0x7f]);
   assert.equal(
     computeSnippetAcceptClearSequence({
-      line: "use",
+      line: "foo use",
       os: "linux",
       promptText: "Email: ",
     }),
-    "\b\b\b",
+    "\x7f\x7f\x7f",
   );
   assert.equal(
     computeSnippetAcceptClearSequence({
-      line: "hello use",
-      os: "linux",
+      line: "use",
+      os: "windows",
       promptText: "Email: ",
     }),
     "\b\b\b",
@@ -346,7 +354,7 @@ test("snippet accept deletes only the mid-line word (#3622)", () => {
       os: "linux",
       promptText: "user@host:~$ ",
     }),
-    "\b",
+    "\x7f",
   );
 });
 
@@ -385,7 +393,7 @@ test("script snippet accept still clears the whole line (#3622)", () => {
       promptText: "user@host:~$ ",
       snippetKind: "snippet",
     }),
-    "\b\b",
+    "\x7f\x7f",
   );
 });
 
