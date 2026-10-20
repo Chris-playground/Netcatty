@@ -999,7 +999,7 @@ export const zhTWTerminalMessages: Messages = {
   'keyboard.interactive.verificationCode': '驗證碼',
   'keyboard.interactive.enterCode': '輸入驗證碼',
   'keyboard.interactive.enterResponse': '輸入回應',
-  'keyboard.interactive.submit': '提交',
+  'keyboard.interactive.submit': '送出',
   'keyboard.interactive.verifying': '驗證中...',
   'keyboard.interactive.savePassword': '儲存密碼',
   'keyboard.interactive.fillTotp': '填入驗證碼',

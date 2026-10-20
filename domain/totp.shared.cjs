@@ -3,6 +3,7 @@
 /* global Buffer, URL, URLSearchParams */
 
 const crypto = require("node:crypto");
+const { NON_TOTP_PROMPT } = require("./totpPrompt.shared.cjs");
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const ALGORITHMS = new Set(["SHA1", "SHA256", "SHA512"]);
@@ -13,8 +14,8 @@ const BUILTIN_TOTP_PROMPTS = [
   /^Verification code:\s*$/,
 ];
 // SMS, email, RADIUS, menus, and confirmations must never be auto-answered,
-// even when a host regex would otherwise match.
-const NON_TOTP_PROMPT = /SMS|EMAIL|RADIUS|PASSKEY|MFA_CUSTOM|短信|邮件|郵件|Option>|\[Y\/n\]/i;
+// even when a host regex would otherwise match. The pattern lives in
+// totpPrompt.shared.cjs so the auth dialog can use the same list.
 const MAX_PROMPT_PATTERN_LENGTH = 200;
 const MAX_PROMPT_SUBJECT_LENGTH = 1024;
 let compileBoundedPattern = null;
@@ -274,6 +275,7 @@ function bgraToRgba(bitmap, width, height) {
 }
 
 module.exports = {
+  NON_TOTP_PROMPT,
   decodeBase32,
   encodeBase32,
   generateTotp,

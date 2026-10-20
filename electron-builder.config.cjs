@@ -76,6 +76,7 @@ module.exports = {
         // sshAuthHelper.cjs requires this at load. TypeScript under domain/
         // is excluded below, so the shared TOTP runtime must be listed.
         'domain/totp.shared.cjs',
+        'domain/totpPrompt.shared.cjs',
         'lib/**/*.cjs',
         'lib/**/*.json',
         'skills/**/*',

@@ -5,6 +5,7 @@
  */
 import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { NON_TOTP_PROMPT } from "../domain/totpPrompt.shared.mjs";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Button } from "./ui/button";
 import {
@@ -134,13 +135,19 @@ const OTP_PROMPT = /otp|one[-\s]?time|totp|verification|passcode|authenticator|\
 
 export type TotpFillPlacement = "preferred" | "available" | "hidden";
 
+function lastPromptLine(prompt: string | undefined): string {
+  const lines = String(prompt || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.at(-1) || "";
+}
+
 /** Where a TOTP fill action may appear. Password prompts never receive the code. */
 export function totpFillPlacement(prompt: KeyboardInteractivePrompt): TotpFillPlacement {
-  const text = prompt.prompt || "";
-  if (OTP_PROMPT.test(text)) return "preferred";
-  if (isAPasswordPrompt(prompt)) return "hidden";
-  const label = keyboardInteractiveFieldLabel(text, "").toLowerCase();
-  if (/\b(password|passwd|passphrase)\b/.test(label)) return "hidden";
+  const rawLast = lastPromptLine(prompt.prompt);
+  const label = keyboardInteractiveFieldLabel(prompt.prompt, "");
+  if (!label || NON_TOTP_PROMPT.test(rawLast) || NON_TOTP_PROMPT.test(label)) return "hidden";
+  if (OTP_PROMPT.test(label)) return "preferred";
+  if (isAPasswordPrompt({ prompt: label, echo: prompt.echo })) return "hidden";
+  if (/\b(password|passwd|passphrase)\b/i.test(label)) return "hidden";
   return "available";
 }
 
@@ -298,45 +305,45 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
 
             return (
               <div key={index} className="space-y-2">
-                <Label htmlFor={`ki-prompt-${index}`}>
-                  {promptLabel}
-                </Label>
-                <div className="flex items-center gap-2">
-                  <div className={fillPlacement === "preferred" ? "relative min-w-0 flex-1 rounded-md ring-1 ring-primary/40" : "relative min-w-0 flex-1"}>
-                    <Input
-                      id={`ki-prompt-${index}`}
-                      type={isPassword && !showPassword ? "password" : "text"}
-                      value={responses[index] || ""}
-                      onChange={(e) => handleResponseChange(index, e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder=""
-                      className={isPassword ? "pr-10" : undefined}
-                      autoFocus={preferredFillIndex >= 0 ? index === preferredFillIndex : index === 0}
-                      disabled={isSubmitting}
-                    />
-                    {isPassword && (
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50 p-1"
-                        onClick={() => toggleShowPassword(index)}
-                        disabled={isSubmitting}
-                      >
-                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    )}
-                  </div>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor={`ki-prompt-${index}`}>
+                    {promptLabel}
+                  </Label>
                   {fillPlacement !== "hidden" && (
                     <Button
                       type="button"
-                      variant={fillPlacement === "preferred" ? "default" : "secondary"}
+                      variant="secondary"
                       size="sm"
-                      className="shrink-0"
+                      className="h-7 shrink-0 px-2 font-normal focus:bg-secondary focus:text-secondary-foreground focus-visible:bg-secondary focus-visible:text-secondary-foreground"
                       data-totp-fill={fillPlacement}
                       onClick={() => { void handleFillTotp(index); }}
                       disabled={isSubmitting}
                     >
                       {t("keyboard.interactive.fillTotp")}
                     </Button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Input
+                    id={`ki-prompt-${index}`}
+                    type={isPassword && !showPassword ? "password" : "text"}
+                    value={responses[index] || ""}
+                    onChange={(e) => handleResponseChange(index, e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder=""
+                    className={isPassword ? "pr-10" : undefined}
+                    autoFocus={preferredFillIndex >= 0 ? index === preferredFillIndex : index === 0}
+                    disabled={isSubmitting}
+                  />
+                  {isPassword && (
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50 p-1"
+                      onClick={() => toggleShowPassword(index)}
+                      disabled={isSubmitting}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   )}
                 </div>
                 {/* Save password checkbox - first-factor password prompts only */}

@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { HostDetailsSettingRow } from "./host-details";
+import { SystemPanelConfirmDialog } from "./systemManager/SystemPanelConfirmDialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
@@ -84,6 +85,15 @@ function validPattern(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function importedAccount(preview: Preview): string {
+  const issuer = preview.issuer?.trim() || "";
+  const label = preview.label?.trim() || "";
+  if (issuer && label && !label.toLowerCase().startsWith(issuer.toLowerCase())) {
+    return `${issuer} (${label})`;
+  }
+  return label || issuer;
 }
 
 function useLiveTotp(source: string | undefined, hostId: string): Preview | null {
@@ -164,6 +174,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hostIdRef = useRef(form.id);
   const formRef = useRef(form);
@@ -191,6 +202,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
     setError(null);
     setBusy(false);
     setScanning(false);
+    setConfirmClear(false);
     draftRef.current = "";
     patternRef.current = form.totp?.promptPattern || "";
     autoSubmitRef.current = form.totp?.autoSubmit !== false;
@@ -365,22 +377,18 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   return (
     <>
       <HostDetailsSettingRow
-        label={(
-          <span className="inline-flex items-center gap-2">
-            <span>{t("hostDetails.totp.title")}</span>
-            {rowPreview && (
-              <span
-                className="font-mono text-xs font-normal tabular-nums tracking-widest text-muted-foreground"
-                title={t("hostDetails.totp.countdown", { seconds: rowPreview.secondsRemaining })}
-              >
-                {rowPreview.code}
-              </span>
-            )}
-          </span>
-        )}
+        label={t("hostDetails.totp.title")}
         hint={t("hostDetails.totp.warning")}
       >
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          {rowPreview && (
+            <span
+              className="font-mono text-xs font-normal tabular-nums tracking-widest text-muted-foreground"
+              title={t("hostDetails.totp.countdown", { seconds: rowPreview.secondsRemaining })}
+            >
+              {rowPreview.code}
+            </span>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -390,17 +398,6 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
           >
             {configured ? t("hostDetails.totp.edit") : t("hostDetails.totp.setup")}
           </Button>
-          <Switch
-            checked={configured || setupOpen}
-            onCheckedChange={(checked) => {
-              if (checked) {
-                if (!configured) openSetup();
-                return;
-              }
-              clearTotp();
-            }}
-            aria-label={t("hostDetails.totp.title")}
-          />
         </div>
       </HostDetailsSettingRow>
 
@@ -438,10 +435,24 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-8 focus:bg-secondary focus:text-secondary-foreground focus-visible:bg-secondary focus-visible:text-secondary-foreground"
+                disabled={busy}
+                onClick={() => fileRef.current?.click()}
+              >
                 {t("hostDetails.totp.importQr")}
               </Button>
-              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void scanScreen(); }}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-8 focus:bg-secondary focus:text-secondary-foreground focus-visible:bg-secondary focus-visible:text-secondary-foreground"
+                disabled={busy}
+                onClick={() => { void scanScreen(); }}
+              >
                 {scanning ? t("hostDetails.totp.scanning") : t("hostDetails.totp.scanScreen")}
               </Button>
               <input
@@ -475,12 +486,19 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
               />
             </div>
             {modalPreview && (
-              <p className="text-sm text-muted-foreground">
-                {t("hostDetails.totp.preview")}
-                {" "}
-                <span className="font-mono tracking-widest text-foreground">{modalPreview.code}</span>
-                <span className="ml-2">{t("hostDetails.totp.countdown", { seconds: modalPreview.secondsRemaining })}</span>
-              </p>
+              <div className="space-y-1">
+                {importedAccount(modalPreview) ? (
+                  <p className="text-sm text-foreground">
+                    {t("hostDetails.totp.importedAccount", { account: importedAccount(modalPreview) })}
+                  </p>
+                ) : null}
+                <p className="text-sm text-muted-foreground">
+                  {t("hostDetails.totp.preview")}
+                  {" "}
+                  <span className="font-mono tracking-widest text-foreground">{modalPreview.code}</span>
+                  <span className="ml-2">{t("hostDetails.totp.countdown", { seconds: modalPreview.secondsRemaining })}</span>
+                </p>
+              </div>
             )}
             {error && <p className="text-xs text-destructive">{t(errorKey(error))}</p>}
             <div className="flex items-center justify-between gap-3">
@@ -516,7 +534,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
             {configured ? (
-              <Button type="button" variant="ghost" onClick={clearTotp}>
+              <Button type="button" variant="ghost" onClick={() => setConfirmClear(true)}>
                 {t("hostDetails.totp.clear")}
               </Button>
             ) : <span />}
@@ -531,6 +549,20 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {confirmClear ? (
+        <SystemPanelConfirmDialog
+          open
+          destructive
+          title={t("hostDetails.totp.removeTitle")}
+          message={t("hostDetails.totp.removeMessage")}
+          confirmLabel={t("hostDetails.totp.clear")}
+          onOpenChange={(open) => { if (!open) setConfirmClear(false); }}
+          onConfirm={() => {
+            setConfirmClear(false);
+            clearTotp();
+          }}
+        />
+      ) : null}
     </>
   );
 };

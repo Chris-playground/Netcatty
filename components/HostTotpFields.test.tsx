@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import type { Host } from "../domain/models";
 
@@ -75,6 +76,7 @@ test("host totp setup stays on the shared setting row and opens a dialog", async
     assert.match(markup, /hostDetails\.totp\.setup/);
     assert.doesNotMatch(markup, /rounded-md border border-border\/60 p-3/);
     assert.equal(dom.window.document.querySelector("[role='dialog']"), null);
+    assert.equal(dom.window.document.querySelector("[role='switch']"), null);
 
     const button = [...dom.window.document.querySelectorAll("button")]
       .find((node) => node.textContent?.includes("hostDetails.totp.setup"));
@@ -83,6 +85,14 @@ test("host totp setup stays on the shared setting row and opens a dialog", async
     assert.ok(dom.window.document.body.textContent?.includes("hostDetails.totp.modalTitle"));
     assert.ok(dom.window.document.body.innerHTML.includes("hostDetails.totp.secretPlaceholder"));
     assert.equal(latest.totp, undefined);
+    const fields = readFileSync(new URL("./HostTotpFields.tsx", import.meta.url), "utf8");
+    assert.match(fields, /label=\{t\("hostDetails\.totp\.title"\)\}/);
+    assert.match(fields, /setConfirmClear\(true\)/);
+    assert.match(fields, /variant="secondary"/);
+    const sections = readFileSync(new URL("./HostDetailsConnectionSections.tsx", import.meta.url), "utf8");
+    const passwordAt = sections.indexOf("hostDetails.password.placeholder");
+    const totpAt = sections.indexOf("<HostTotpFields");
+    assert.ok(passwordAt > 0 && totpAt > passwordAt);
   } finally {
     await act(async () => { root.unmount(); });
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -227,13 +227,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 />
               </HostDetailsSettingRow>
             )}
-            <HostTotpFields
-              t={t}
-              form={form}
-              setForm={setForm}
-              effectiveProtocol={effectiveProtocol}
-              flushRef={totpFlushRef}
-            />
             {selectedIdentity ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border/70 bg-secondary/60">
                 <User size={16} className="text-muted-foreground" />
@@ -748,6 +741,13 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                   </div>
                 </div>
               )}
+            <HostTotpFields
+              t={t}
+              form={form}
+              setForm={setForm}
+              effectiveProtocol={effectiveProtocol}
+              flushRef={totpFlushRef}
+            />
           </div>
         </HostDetailsSection>
 

@@ -59,9 +59,15 @@ test("build.files includes the shared TOTP runtime required by SSH bridges", () 
     config.files.includes("domain/totp.shared.cjs"),
     "packaged SSH bridges require domain/totp.shared.cjs at load",
   );
+  assert.ok(
+    config.files.includes("domain/totpPrompt.shared.cjs"),
+    "the shared TOTP runtime requires the prompt exclusion list",
+  );
   const totp = require("../domain/totp.shared.cjs");
+  const prompts = require("../domain/totpPrompt.shared.cjs");
   assert.equal(typeof totp.generateTotp, "function");
   assert.equal(typeof totp.planTotpAutoSubmit, "function");
+  assert.equal(totp.NON_TOTP_PROMPT, prompts.NON_TOTP_PROMPT);
 });
 
 test("unpacked Tool CLI includes capability runtime dependencies", () => {
