@@ -5,6 +5,10 @@
  * Supports: GitHub Gist, Google Drive, Microsoft OneDrive, WebDAV, S3 Compatible
  */
 
+import {
+  DEFAULT_SHIFT_ENTER_NEWLINE_TEXT,
+  isLegacyDefaultShiftEnterNewlineText,
+} from './models/terminal';
 import type { ShrinkFinding } from './syncGuards';
 import type {
   ConvergentFieldConflict,
@@ -331,6 +335,12 @@ export interface SyncPayload {
      * old default, not an explicit opt-in.
      */
     autoCloseOnExitDefaultMigrated?: boolean;
+    /**
+     * Present once the sender has run the Shift+Enter default migration.
+     * Legacy payloads omit it; a materialized `\\n` (or a raw newline) in
+     * those payloads is the old default, not an explicit choice.
+     */
+    shiftEnterNewlineDefaultMigrated?: boolean;
     terminalSidePanelAutoOpen?: boolean;
     terminalSidePanelAutoOpenTab?: import('./terminalSidePanelAutoOpen').TerminalSidePanelAutoOpenTab;
     localShellSidePanelAutoOpen?: boolean;
@@ -419,6 +429,32 @@ export function reconcileInboundAutoCloseOnExit(
 ): unknown {
   if (autoCloseOnExit === true && payloadRecordsMigratedChoice !== true) return false;
   return autoCloseOnExit;
+}
+
+/**
+ * Pre-migration snapshots stored the old Shift+Enter default and do not
+ * carry `shiftEnterNewlineDefaultMigrated`. Rewrite that legacy value to
+ * ESC+CR. A payload that records the migration keeps an explicit `\\n`.
+ */
+export function reconcileInboundShiftEnterNewlineText(
+  shiftEnterNewlineText: unknown,
+  payloadRecordsMigratedChoice: unknown,
+): unknown {
+  if (
+    isLegacyDefaultShiftEnterNewlineText(shiftEnterNewlineText)
+    && payloadRecordsMigratedChoice !== true
+  ) {
+    return DEFAULT_SHIFT_ENTER_NEWLINE_TEXT;
+  }
+  return shiftEnterNewlineText;
+}
+
+/** True when this side both migrated and explicitly kept the old newline. */
+export function payloadKeepsLegacyShiftEnterNewline(
+  settings: SyncPayload['settings'] | undefined,
+): boolean {
+  return settings?.shiftEnterNewlineDefaultMigrated === true
+    && isLegacyDefaultShiftEnterNewlineText(settings.terminalSettings?.shiftEnterNewlineText);
 }
 
 /** True when this side both migrated and explicitly enabled auto-close. */

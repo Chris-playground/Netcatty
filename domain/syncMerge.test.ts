@@ -697,3 +697,44 @@ test("mergeSyncPayloads keeps an explicit auto-close opt-in from a migrated peer
   assert.equal(merged?.autoCloseOnExitDefaultMigrated, true);
   assert.equal(merged?.terminalSettings?.autoCloseOnExit, true);
 });
+
+test("mergeSyncPayloads does not restore the legacy Shift+Enter newline from an unmigrated peer", () => {
+  const merged = mergeSyncPayloads(
+    null,
+    payload({
+      settings: {
+        shiftEnterNewlineDefaultMigrated: true,
+        terminalSettings: { shiftEnterNewlineText: "\\e\\r", scrollback: 3000 },
+      },
+    }),
+    payload({
+      settings: {
+        terminalSettings: { shiftEnterNewlineText: "\\n", scrollback: 3000 },
+      },
+    }),
+  ).payload.settings;
+
+  assert.equal(merged?.terminalSettings?.shiftEnterNewlineText, "\\e\\r");
+  assert.equal(merged?.terminalSettings?.scrollback, 3000);
+});
+
+test("mergeSyncPayloads keeps an explicit legacy Shift+Enter newline from a migrated peer", () => {
+  const merged = mergeSyncPayloads(
+    null,
+    payload({
+      settings: {
+        shiftEnterNewlineDefaultMigrated: true,
+        terminalSettings: { shiftEnterNewlineText: "\\e\\r" },
+      },
+    }),
+    payload({
+      settings: {
+        shiftEnterNewlineDefaultMigrated: true,
+        terminalSettings: { shiftEnterNewlineText: "\\n" },
+      },
+    }),
+  ).payload.settings;
+
+  assert.equal(merged?.shiftEnterNewlineDefaultMigrated, true);
+  assert.equal(merged?.terminalSettings?.shiftEnterNewlineText, "\\n");
+});
