@@ -227,6 +227,7 @@ export const zhTwSystemManagerMessages: Messages = {
   'systemManager.k8s.status.ImagePullBackOff': '映像拉取退避',
   'systemManager.k8s.status.ErrImagePull': '拉取映像失敗',
   'systemManager.k8s.status.Error': '錯誤',
+  'systemManager.k8s.status.Evicted': '已驅逐',
   'systemManager.k8s.status.OOMKilled': '記憶體不足',
 
   'systemManager.ports.unavailable': '此主機未偵測到連接埠工具（ss / netstat）。',

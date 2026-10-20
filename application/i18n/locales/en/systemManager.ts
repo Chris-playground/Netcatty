@@ -227,6 +227,7 @@ export const enSystemManagerMessages: Messages = {
   'systemManager.k8s.status.ImagePullBackOff': 'ImagePullBackOff',
   'systemManager.k8s.status.ErrImagePull': 'ErrImagePull',
   'systemManager.k8s.status.Error': 'Error',
+  'systemManager.k8s.status.Evicted': 'Evicted',
   'systemManager.k8s.status.OOMKilled': 'OOMKilled',
 
   'systemManager.ports.unavailable': 'No listening-port tools (ss / netstat) detected on this host.',

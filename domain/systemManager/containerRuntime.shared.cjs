@@ -269,6 +269,7 @@ const POD_STATUS_MESSAGE_KEYS = {
   Unknown: "systemManager.k8s.status.Unknown",
   CrashLoopBackOff: "systemManager.k8s.status.CrashLoopBackOff",
   ContainerCreating: "systemManager.k8s.status.ContainerCreating",
+  Evicted: "systemManager.k8s.status.Evicted",
   Terminating: "systemManager.k8s.status.Terminating",
   ImagePullBackOff: "systemManager.k8s.status.ImagePullBackOff",
   ErrImagePull: "systemManager.k8s.status.ErrImagePull",
@@ -434,6 +435,8 @@ function podDisplayStatus(pod) {
     const reason = status?.state?.waiting?.reason;
     if (reason) return String(reason);
   }
+  const podReason = typeof pod?.status?.reason === "string" ? pod.status.reason.trim() : "";
+  if (podReason) return podReason;
   for (const status of statuses) {
     const reason = status?.state?.terminated?.reason;
     if (reason && reason !== "Completed") return String(reason);

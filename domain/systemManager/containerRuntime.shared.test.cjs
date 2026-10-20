@@ -295,6 +295,22 @@ test("parseKubectlPodList reports status, restarts, age, and containers", () => 
       },
     }],
   }), now);
+  const evicted = parseKubectlPodList(JSON.stringify({
+    items: [{
+      metadata: { name: "api", namespace: "default", creationTimestamp: "2026-10-20T00:08:30Z" },
+      spec: { containers: [{ name: "app" }] },
+      status: {
+        phase: "Failed",
+        reason: "Evicted",
+        message: "The node was low on resource: memory.",
+        containerStatuses: [
+          { name: "app", restartCount: 0, state: { terminated: { reason: "Error", exitCode: 137 } } },
+        ],
+      },
+    }],
+  }), now);
+  assert.equal(evicted[0].status, "Evicted");
+
   assert.equal(terminating[0].status, "Terminating");
   assert.deepEqual(terminating[0].containers, ["app", "debugger", "old-debug"]);
   assert.deepEqual(terminating[0].shellContainers, ["app", "debugger"]);
@@ -465,5 +481,6 @@ test("runtime failures map to localized message keys and pod badges use known st
   assert.equal(runtimeFailureMessage("other"), null);
   assert.equal(podStatusMessageKey("Running"), "systemManager.k8s.status.Running");
   assert.equal(podStatusMessageKey("CrashLoopBackOff"), "systemManager.k8s.status.CrashLoopBackOff");
+  assert.equal(podStatusMessageKey("Evicted"), "systemManager.k8s.status.Evicted");
   assert.equal(podStatusMessageKey("Init:0/1"), null);
 });

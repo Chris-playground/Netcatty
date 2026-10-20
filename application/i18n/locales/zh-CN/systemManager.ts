@@ -227,6 +227,7 @@ export const zhCnSystemManagerMessages: Messages = {
   'systemManager.k8s.status.ImagePullBackOff': '镜像拉取退避',
   'systemManager.k8s.status.ErrImagePull': '拉取镜像失败',
   'systemManager.k8s.status.Error': '错误',
+  'systemManager.k8s.status.Evicted': '已驱逐',
   'systemManager.k8s.status.OOMKilled': '内存不足',
 
   'systemManager.ports.unavailable': '此主机未检测到端口工具（ss / netstat）。',
