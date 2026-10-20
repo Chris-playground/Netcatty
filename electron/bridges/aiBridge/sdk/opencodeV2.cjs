@@ -299,7 +299,6 @@ function sanitizeOpenCodeV2Detail(message) {
   if (!raw || /[\r\n]/.test(raw) || raw.length > 240) return "";
   if (/server password|authorization\s*[:=]|bearer\s+\S+|basic\s+[a-z0-9+/=]{8,}/i.test(raw)) return "";
   if (/<html|<!doctype|node:internal|\bat\s+\S+:\d+:\d+\b/i.test(raw)) return "";
-  if (OPENCODE_V2_TRANSPORT_MESSAGE.test(raw)) return "";
   return raw;
 }
 
@@ -324,9 +323,7 @@ function isOpenCodeTransportError(error) {
 }
 
 function formatOpenCodeV2SessionError(error) {
-  const message = error?.message || error?.data?.message || "";
-  if (isOpenCodeTransportError({ message: String(message) })) return "ai.opencode.v2.sessionFailed";
-  const safe = sanitizeOpenCodeV2Detail(message);
+  const safe = sanitizeOpenCodeV2Detail(error?.message || error?.data?.message || "");
   return safe || "ai.opencode.v2.sessionFailed";
 }
 

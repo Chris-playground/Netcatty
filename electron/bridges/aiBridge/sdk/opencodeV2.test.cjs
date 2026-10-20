@@ -403,46 +403,6 @@ test("translateOpenCodeV2Event streams text, tools, and a safe session failure",
   assert.equal(JSON.stringify(events).includes("hunter2"), false);
 });
 
-test("session.execution.failed hides undici transport text", () => {
-  const events = [];
-  translateOpenCodeV2Event({
-    type: "session.execution.failed",
-    data: { sessionID: "ses_1", error: { message: "fetch failed" } },
-  }, { emitError: (message) => events.push(message) }, { sessionID: "ses_1" });
-  translateOpenCodeV2Event({
-    type: "session.execution.failed",
-    data: { sessionID: "ses_1", error: { message: "terminated" } },
-  }, { emitError: (message) => events.push(message) }, { sessionID: "ses_1" });
-  assert.deepEqual(events, ["ai.opencode.v2.sessionFailed", "ai.opencode.v2.sessionFailed"]);
-});
-
-test("tool and HTTP failures do not show undici transport text", async () => {
-  const events = [];
-  translateOpenCodeV2Event({
-    type: "session.tool.failed",
-    data: { sessionID: "ses_1", id: "call_1", name: "bash", error: { message: "terminated" } },
-  }, {
-    toolCall: () => {},
-    toolResult: (_id, output) => events.push(output),
-  }, { sessionID: "ses_1" });
-  assert.deepEqual(events, ["OpenCode tool failed"]);
-
-  const client = createOpenCodeV2Client({
-    baseUrl: "http://127.0.0.1:4096",
-    username: "opencode",
-    password: "s3cret",
-    fetchImpl: async () => new Response(JSON.stringify({ message: "other side closed" }), {
-      status: 502,
-      headers: { "content-type": "application/json" },
-    }),
-  });
-  await assert.rejects(client.info(), (error) => {
-    assert.equal(error.message, "ai.opencode.v2.unavailable");
-    assert.equal(String(error).includes("other side closed"), false);
-    return true;
-  });
-});
-
 test("runOpenCodeV2Turn authenticates, keeps the user prompt unchanged, and streams the session", async () => {
   const requests = [];
   const encoder = new TextEncoder();
