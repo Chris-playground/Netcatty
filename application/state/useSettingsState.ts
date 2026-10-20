@@ -827,16 +827,19 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     [setGlobalDefaultProxyProfileId],
   );
 
+  // Peer session windows set enableSettingsSync false, which skips IPC sync.
+  // This setting still has to follow localStorage or an already-open session
+  // window keeps the proxy id it read at mount.
   useEffect(() => {
-    if (!enableSettingsSync) return;
     const onStorage = (event: StorageEvent) => {
       if (event.key !== STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE) return;
       const next = normalizeGlobalDefaultProxyProfileId(event.newValue);
+      publishActiveGlobalDefaultProxyProfileId(next);
       setGlobalDefaultProxyProfileIdState((prev) => (prev === next ? prev : next));
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [enableSettingsSync]);
+  }, []);
 
   const setSftpTransferConcurrency = useCallback((value: number) => {
     const clamped = Math.max(1, Math.min(16, Math.round(value)));
