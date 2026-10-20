@@ -34,6 +34,8 @@ export interface KeyboardInteractiveRequest {
   savedPassword?: string | null;
   /** When false, hide save-password UI (second-factor / EDR challenges). Default true. */
   allowSavePassword?: boolean;
+  /** otpauth URI from the connection attempt that opened this dialog. */
+  totpUri?: string;
 }
 
 type KeyboardInteractiveServerPromptInput = Pick<

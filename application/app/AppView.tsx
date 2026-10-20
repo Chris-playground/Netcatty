@@ -377,9 +377,7 @@ function AppViewInner({ domains }: AppViewProps) {
   }, [appendHostToWorkspace, hosts, resolveWorkspaceAppendHost, workspaces]);
 
   const pendingKeyboardRequest = keyboardInteractiveQueue[0] || null;
-  const pendingTotpUri = pendingKeyboardRequest?.hostId
-    ? hosts.find((host) => host.id === pendingKeyboardRequest.hostId)?.totp?.uri
-    : undefined;
+  const pendingTotpUri = pendingKeyboardRequest?.totpUri;
   const handleFillTotp = useCallback(async () => {
     if (!pendingTotpUri) return null;
     const result = await netcattyBridge.get()?.previewTotp?.({ uri: pendingTotpUri });

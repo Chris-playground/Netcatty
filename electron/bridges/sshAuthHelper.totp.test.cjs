@@ -65,6 +65,22 @@ test("TOTP auto-submit runs once per connection attempt, then falls back to the 
   assert.equal(retry, null);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].channel, "netcatty:keyboard-interactive");
+  assert.equal(sent[0].payload.totpUri, TOTP.uri);
+  drainPendingRequests(sent);
+});
+
+test("keyboard-interactive dialog omits an encrypted TOTP placeholder", () => {
+  const { sender, sent } = createSender();
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-enc",
+    hostname: "jumpserver.example",
+    totp: { uri: "enc:v1:placeholder" },
+    now: () => 15_000,
+  });
+  assert.equal(invoke(handler, "[OTP Code]: "), null);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.totpUri, undefined);
   drainPendingRequests(sent);
 });
 
@@ -80,6 +96,7 @@ test("a non-matching prompt does not consume the one TOTP auto-submit", () => {
 
   assert.equal(invoke(handler, "\n1. OTP\n2. SMS\nOption> ", "Please Select MFA Option"), null);
   assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.totpUri, TOTP.uri);
   drainPendingRequests(sent);
 
   const code = invoke(handler, "[OTP Code]: ", "Please Enter MFA Code.");

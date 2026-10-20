@@ -2535,6 +2535,9 @@ function createKeyboardInteractiveHandler(options) {
     console.log(`${logPrefix} Showing modal for ${promptsData.length} prompts`);
     try { onPromptShown?.(); } catch (err) { console.warn(`${logPrefix} onPromptShown callback threw`, err); }
 
+    const totpUri = typeof totp?.uri === "string" && totp.uri && !totp.uri.startsWith("enc:v1:")
+      ? totp.uri
+      : "";
     safeSend(sender, "netcatty:keyboard-interactive", {
       requestId,
       sessionId,
@@ -2546,6 +2549,7 @@ function createKeyboardInteractiveHandler(options) {
       savedPassword: savedPasswordForModal,
       allowSavePassword,
       scope,
+      ...(totpUri ? { totpUri } : {}),
       ...(Number.isFinite(bootEpoch) ? { bootEpoch: Number(bootEpoch) } : {}),
     });
   };
