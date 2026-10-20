@@ -51,8 +51,8 @@ export function isRuntimeSocketPermissionError(
   result: { stderr?: string; stdout?: string; error?: string } | null | undefined,
 ): boolean;
 export function sanitizeContainerId(id: string): string;
-export function buildContainerExecShellCommand(runtime: unknown, containerId: string): string;
-export function buildContainerLogsCommand(runtime: unknown, containerId: string): string;
+export function buildContainerExecShellCommand(runtime: unknown, containerId: string, shell?: string): string;
+export function buildContainerLogsCommand(runtime: unknown, containerId: string, shell?: string): string;
 export function buildKubectlContextsCommand(): string;
 export function buildKubectlNamespacesCommand(context: string): string | null;
 export function buildKubectlPodsCommand(context: string, namespace: string): string | null;

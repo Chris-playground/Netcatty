@@ -296,6 +296,18 @@ test("kubectl popup commands skip the POSIX wrapper on Windows shells", () => {
   );
 });
 
+test("container popup commands inspect in the host shell on Windows", () => {
+  const powershellLogs = buildContainerLogsCommand("podman", "abc123", "powershell");
+  assert.equal(powershellLogs.startsWith("sh -c "), false);
+  assert.match(powershellLogs, /^podman inspect abc123 >\$null;/);
+  assert.match(powershellLogs, /podman logs -f --tail 200 abc123/);
+
+  const cmdShell = buildContainerExecShellCommand("nerdctl", "abc123", "cmd");
+  assert.equal(cmdShell.startsWith("sh -c "), false);
+  assert.match(cmdShell, /^nerdctl inspect abc123 >nul && nerdctl exec -it abc123/);
+  assert.match(cmdShell, /sh -c "command -v bash/);
+});
+
 test("isKubectlForbiddenError matches namespace list denial", () => {
   assert.equal(
     isKubectlForbiddenError('Error from server (Forbidden): namespaces is forbidden: User "view" cannot list resource "namespaces"'),

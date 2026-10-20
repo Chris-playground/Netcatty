@@ -109,9 +109,23 @@ function sanitizeContainerId(id) {
   return String(id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
 }
 
-function buildContainerCommandWithSudoFallback(runtime, containerId, cliArgs) {
+function containerInteractiveArgs(containerId, shell) {
+  if (shell === "cmd") {
+    return `exec -it ${containerId} sh -c "command -v bash >/dev/null 2>&1 && exec bash || exec sh"`;
+  }
+  return `exec -it ${containerId} sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'`;
+}
+
+function buildContainerCommandWithSudoFallback(runtime, containerId, cliArgs, shell) {
+  const popupShell = normalizePopupShell(shell);
   const bin = runtimeBinary(runtime);
   const plainCommand = `${bin} ${cliArgs}`;
+  if (popupShell === "powershell") {
+    return `${bin} inspect ${containerId} >$null; if ($LASTEXITCODE -eq 0) { ${plainCommand} } else { exit $LASTEXITCODE }`;
+  }
+  if (popupShell === "cmd") {
+    return `${bin} inspect ${containerId} >nul && ${plainCommand}`;
+  }
   const sudoCommand = `sudo ${plainCommand}`;
   const script = [
     CLEAR_STARTUP_OUTPUT,
@@ -127,20 +141,21 @@ function buildContainerCommandWithSudoFallback(runtime, containerId, cliArgs) {
   return `sh -c ${shQuote(script)}`;
 }
 
-function buildContainerExecShellCommand(runtime, containerId) {
+function buildContainerExecShellCommand(runtime, containerId, shell) {
   const safeId = sanitizeContainerId(containerId);
   if (!safeId) return 'echo "Invalid container id"';
   return buildContainerCommandWithSudoFallback(
     runtime,
     safeId,
-    `exec -it ${safeId} sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'`,
+    containerInteractiveArgs(safeId, normalizePopupShell(shell)),
+    shell,
   );
 }
 
-function buildContainerLogsCommand(runtime, containerId) {
+function buildContainerLogsCommand(runtime, containerId, shell) {
   const safeId = sanitizeContainerId(containerId);
   if (!safeId) return 'echo "Invalid container id"';
-  return buildContainerCommandWithSudoFallback(runtime, safeId, `logs -f --tail 200 ${safeId}`);
+  return buildContainerCommandWithSudoFallback(runtime, safeId, `logs -f --tail 200 ${safeId}`, shell);
 }
 
 function hasControlChar(text) {

@@ -167,16 +167,26 @@ export const DockerManagerTab = memo(function DockerManagerTab({
         return;
       }
       setScopeError(null);
-      setContexts(result.contexts);
-      setContextName((current) => {
-        if (current && result.contexts?.some((item) => item.name === current)) return current;
-        return result.contexts?.find((item) => item.current)?.name ?? result.contexts?.[0]?.name ?? null;
-      });
+      const available = result.contexts;
+      const kept = contextName && available.some((item) => item.name === contextName)
+        ? contextName
+        : null;
+      const next = kept
+        ?? available.find((item) => item.current)?.name
+        ?? available[0]?.name
+        ?? null;
+      setContexts(available);
+      setContextName(next);
+      if (!kept) {
+        const configured = available.find((item) => item.name === next)?.namespace || 'default';
+        setNamespaceName(next ? configured : null);
+        setNamespaces([]);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [backend, sessionId, source, scopeNonce, stableT]);
+  }, [backend, contextName, sessionId, source, scopeNonce, stableT]);
 
   useEffect(() => {
     if (source !== 'kubernetes' || !contextName) return undefined;

@@ -365,7 +365,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
       backend,
       parentSession,
       `docker: ${container.name || id}`,
-      buildContainerExecShellCommand(runtime, id),
+      buildContainerExecShellCommand(runtime, id, parentSession.shellType),
       { icon: await buildContainerPopupIcon(container.image) },
     );
     if (!result.success) {
@@ -392,7 +392,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
       backend,
       parentSession,
       `logs: ${container.name || id}`,
-      buildContainerLogsCommand(runtime, id),
+      buildContainerLogsCommand(runtime, id, parentSession.shellType),
       { icon: await buildContainerPopupIcon(container.image) },
     );
     if (!result.success) {
