@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
@@ -701,4 +702,139 @@ test("connectClient keeps the default timeout when the status probe returns an R
   assert.equal(getAttempts(), 1);
   client.close();
   await sleep(20);
+});
+
+// A socket whose write callback fails the way a peer that exits mid-write does.
+function createWriteFailureSocket(failOnMethod) {
+  const socket = new EventEmitter();
+  socket.destroyed = false;
+  socket.writable = true;
+  socket.setEncoding = () => {};
+  socket.end = () => {
+    socket.destroyed = true;
+    socket.writable = false;
+  };
+  socket.write = (payload, callback) => {
+    let message = null;
+    try {
+      message = JSON.parse(String(payload).trim());
+    } catch {
+      message = null;
+    }
+    if (message?.method === failOnMethod) {
+      const err = new Error("write EPIPE");
+      err.code = "EPIPE";
+      if (typeof callback === "function") process.nextTick(() => callback(err));
+      return false;
+    }
+    if (message?.id != null) {
+      const result = message.method === "auth/verify" ? { ok: true } : {};
+      process.nextTick(() => {
+        socket.emit("data", `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`);
+      });
+    }
+    if (typeof callback === "function") process.nextTick(() => callback());
+    return true;
+  };
+  return socket;
+}
+
+function failFirstWrite(t, failOnMethod) {
+  const original = net.createConnection;
+  let attempts = 0;
+  net.createConnection = (options, connectListener) => {
+    attempts += 1;
+    if (attempts === 1) {
+      const socket = createWriteFailureSocket(failOnMethod);
+      process.nextTick(() => connectListener());
+      return socket;
+    }
+    return original(options, connectListener);
+  };
+  t.after(() => {
+    net.createConnection = original;
+  });
+  return () => attempts;
+}
+
+test("connectClient retries when auth/verify fails to write and discovery changes", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = failFirstWrite(t, "auth/verify");
+
+  const { server, port } = await startFakeBridge();
+  t.after(() => {
+    server.close();
+  });
+  countDiscoveryReads(t, discoveryPath, (reads) => {
+    const record = reads === 1
+      ? { port, token: "token", pid: 1 }
+      : { port, token: "token", pid: 2 };
+    return `${JSON.stringify(record)}\n`;
+  });
+
+  const client = await connectClient();
+  assert.equal(client.discovery.pid, 2);
+  assert.equal(getAttempts(), 2);
+  await client.call("netcatty/getStatus", {});
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient retries when the status probe fails to write and discovery changes", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = failFirstWrite(t, "netcatty/getStatus");
+
+  const { server, port } = await startFakeBridge();
+  t.after(() => {
+    server.close();
+  });
+  countDiscoveryReads(t, discoveryPath, (reads) => {
+    const record = reads === 1
+      ? { port, token: "token", pid: 1 }
+      : { port, token: "token", pid: 2 };
+    return `${JSON.stringify(record)}\n`;
+  });
+
+  const client = await connectClient();
+  assert.equal(client.discovery.pid, 2);
+  assert.equal(getAttempts(), 2);
+  await client.call("netcatty/getStatus", {});
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient surfaces the original write error when discovery identity is unchanged", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = failFirstWrite(t, "auth/verify");
+  const getReads = countDiscoveryReads(t, discoveryPath);
+
+  const { server, port } = await startFakeBridge();
+  t.after(() => {
+    server.close();
+  });
+  writeDiscoveryFile(discoveryPath, port, "token", 5);
+
+  await assert.rejects(
+    connectClient(),
+    (err) => err?.code === "WRITE_FAILED"
+      && err.message === "Failed to send Netcatty RPC \"auth/verify\": write EPIPE",
+  );
+
+  assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 3);
 });
