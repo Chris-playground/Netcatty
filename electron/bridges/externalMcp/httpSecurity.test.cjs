@@ -121,5 +121,17 @@ describe("external MCP HTTP security", () => {
       hostHeader: "8.8.8.8:47391",
       originHeader: undefined,
     }).status, 421);
+    assert.equal(validateRequestHeaders({
+      listenAddress: "::1",
+      port: 47391,
+      hostHeader: "[::1]:47391",
+      originHeader: "http://[::1]:6274",
+    }).ok, true);
+    assert.equal(validateRequestHeaders({
+      listenAddress: "::",
+      port: 47391,
+      hostHeader: "[2001:db8::1]:47391",
+      originHeader: "http://[2001:db8::1]:6274",
+    }).ok, true);
   });
 });

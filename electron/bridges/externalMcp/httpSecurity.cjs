@@ -14,13 +14,19 @@ function isWildcardBind(address) {
   return address === "0.0.0.0" || address === "::";
 }
 
+function unbracketHostname(hostname) {
+  const host = String(hostname || "");
+  if (host.startsWith("[") && host.endsWith("]") && host.length > 2) return host.slice(1, -1);
+  return host;
+}
+
 function isLoopbackHost(hostname) {
-  const host = String(hostname || "").toLowerCase();
+  const host = unbracketHostname(hostname).toLowerCase();
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 function isIpLiteral(hostname) {
-  return net.isIP(String(hostname || "")) !== 0;
+  return net.isIP(unbracketHostname(hostname)) !== 0;
 }
 
 function normalizeHttpPort(value) {
@@ -106,9 +112,10 @@ function parseHostHeader(hostHeader) {
 }
 
 function isAllowedHostname(hostname, listenAddress) {
-  if (isLoopbackHost(hostname)) return true;
-  if (isWildcardBind(listenAddress)) return isIpLiteral(hostname);
-  return String(hostname || "").toLowerCase() === String(listenAddress || "").toLowerCase();
+  const host = unbracketHostname(hostname);
+  if (isLoopbackHost(host)) return true;
+  if (isWildcardBind(listenAddress)) return isIpLiteral(host);
+  return host.toLowerCase() === String(listenAddress || "").toLowerCase();
 }
 
 function invalidHost() {
