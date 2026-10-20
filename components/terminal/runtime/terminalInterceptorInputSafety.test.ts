@@ -115,9 +115,18 @@ test("renderer flow control acknowledges host ingress rather than transformed di
 });
 
 test("explicit plugin sensitivity is not treated as the heuristic prompt latch", () => {
+  const effectsSource = readFileSync(new URL("../useTerminalEffects.ts", import.meta.url), "utf8");
   assert.match(
     terminalSource,
     /passwordPromptActiveRef\.current = meta\.pluginPipelineSensitiveInput;[\s\S]*?passwordPromptActiveRef\.source = meta\.pluginPipelineSensitiveInput \? "explicit" : "heuristic";/,
+  );
+  assert.match(
+    terminalSource,
+    /passwordPromptActiveRef\.current = payload\.passwordPromptActive;[\s\S]*?if \(payload\.passwordPromptActive\) passwordPromptActiveRef\.source = "explicit";/,
+  );
+  assert.match(
+    effectsSource,
+    /passwordPromptActiveRef\.current = snap\.passwordPromptActive;[\s\S]*?if \(snap\.passwordPromptActive\) passwordPromptActiveRef\.source = "explicit";/,
   );
   assert.match(
     terminalSource,

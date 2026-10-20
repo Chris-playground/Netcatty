@@ -1696,6 +1696,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
         if (typeof payload.passwordPromptActive === "boolean") {
           passwordPromptActiveRef.current = payload.passwordPromptActive;
+          // The snapshot boolean has no source. A restored true latch stays
+          // explicit so Email:/Username: cannot bypass a plugin-marked field.
+          if (payload.passwordPromptActive) passwordPromptActiveRef.source = "explicit";
         }
         if (payload.cwd !== undefined) {
           const cwd = terminalCwdTracker.setRendererCwd(payload.cwd, "snapshot");

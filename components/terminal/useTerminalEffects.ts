@@ -705,6 +705,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             }
             if (typeof snap.passwordPromptActive === "boolean") {
               passwordPromptActiveRef.current = snap.passwordPromptActive;
+              // Same conservative restore as the home apply-snapshot path.
+              if (snap.passwordPromptActive) passwordPromptActiveRef.source = "explicit";
             }
             if (snap.cwd !== undefined) {
               const cwd = terminalCwdTracker.setRendererCwd(snap.cwd, "snapshot");
