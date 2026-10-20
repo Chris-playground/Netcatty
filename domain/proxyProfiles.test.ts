@@ -83,22 +83,6 @@ test("removeProxyProfileReferences clears hosts and group configs that use a del
   assert.equal(result.groupConfigs[1].proxyProfileId, "proxy-2");
 });
 
-test("removeProxyProfileReferences clears a global default that points at the deleted profile", () => {
-  const cleared = removeProxyProfileReferences("proxy-1", {
-    hosts: [],
-    groupConfigs: [],
-    defaultProxyProfileId: "proxy-1",
-  });
-  const kept = removeProxyProfileReferences("proxy-1", {
-    hosts: [],
-    groupConfigs: [],
-    defaultProxyProfileId: "proxy-2",
-  });
-
-  assert.equal(cleared.defaultProxyProfileId, undefined);
-  assert.equal(kept.defaultProxyProfileId, "proxy-2");
-});
-
 test("normalizeManualProxyConfig clears empty proxy drafts", () => {
   assert.equal(
     normalizeManualProxyConfig({ type: "http", host: "", port: 8080 }),

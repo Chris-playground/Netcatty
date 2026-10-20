@@ -162,9 +162,8 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     resolveTransferSourceSessionId,
   ]);
 
-  // Pre-resolve group defaults so SFTP connections inherit group config.
-  // Pass the subscribed global default so this memo matches terminal, port
-  // forwarding, and the other call-time resolvers.
+  // Memoized on vault props, so this subscription is what refreshes the list
+  // after the global default changes.
   const globalDefaultProxyProfileId = useActiveGlobalDefaultProxyProfileId();
   const effectiveHosts = useMemo(() => {
     const validProxyProfileIds = new Set(proxyProfiles.map((profile) => profile.id));

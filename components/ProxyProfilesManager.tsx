@@ -395,16 +395,14 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    const activeDefaultProxyProfileId = getActiveGlobalDefaultProxyProfileId();
+    if (getActiveGlobalDefaultProxyProfileId() === deleteTarget.id) {
+      clearActiveGlobalDefaultProxyProfile();
+    }
     const cleaned = removeProxyProfileReferences(deleteTarget.id, {
       hosts,
       groupConfigs,
-      defaultProxyProfileId: activeDefaultProxyProfileId,
     });
     onUpdateProxyProfiles(proxyProfiles.filter((profile) => profile.id !== deleteTarget.id));
-    if (cleaned.defaultProxyProfileId !== activeDefaultProxyProfileId) {
-      clearActiveGlobalDefaultProxyProfile();
-    }
     onUpdateHosts(cleaned.hosts);
     onUpdateGroupConfigs(cleaned.groupConfigs);
     if (draft?.id === deleteTarget.id) {
