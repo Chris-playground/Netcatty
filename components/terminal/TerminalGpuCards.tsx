@@ -40,24 +40,29 @@ export const TerminalGpuCards: React.FC<TerminalGpuCardsProps> = ({
   const { t } = useI18n();
   const aggregateMemory = formatGpuMemoryGib(gpuMemUsed, gpuMemTotal);
 
+  const columns = Math.min(4, gpus.length);
+
   return (
-    <div className="text-xs space-y-2 max-w-[380px]">
+    <div className={cn("text-xs space-y-2 w-max max-w-[26rem]", gpus.length === 1 && "min-w-[160px]")}>
       <div className="font-medium text-sm mb-2">{t("terminal.serverStats.gpuDevices")}</div>
       {gpus.length > 0 ? (
         <div
           className="grid gap-1.5 max-h-[260px] overflow-y-auto pr-1 overscroll-contain"
-          style={{ gridTemplateColumns: `repeat(${Math.min(4, gpus.length)}, 1fr)` }}
+          style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
         >
           {gpus.map((device) => {
             const usage = device.utilization;
             const memory = formatGpuMemoryGib(device.memoryUsed, device.memoryTotal);
             return (
-              <div key={device.index} className="flex flex-col items-center gap-1 min-w-[48px] max-w-[88px] overflow-hidden">
+              <div key={device.index} className="flex w-full min-w-0 flex-col items-center gap-1">
                 <div className="text-[10px] text-muted-foreground">
                   {t("terminal.serverStats.gpuIndex", { index: device.index })}
                 </div>
                 {device.name ? (
-                  <div className="w-full text-[10px] text-muted-foreground truncate text-center" title={device.name}>
+                  <div
+                    className="line-clamp-2 w-full break-words text-center text-[10px] leading-tight text-muted-foreground"
+                    title={device.name}
+                  >
                     {device.name}
                   </div>
                 ) : null}

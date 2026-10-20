@@ -38,7 +38,10 @@ test("one GPU uses the same per-core bar, colors, and spacing", () => {
   assert.match(markup, /73%/);
   assert.match(markup, /1\.0\/8\.0G/);
   assert.match(markup, /grid gap-1\.5 max-h-\[260px\] overflow-y-auto/);
-  assert.match(markup, /min-w-\[48px\]/);
+  assert.match(markup, /min-w-\[160px\]/);
+  assert.match(markup, /line-clamp-2/);
+  assert.match(markup, /title="NVIDIA GeForce RTX 4090"/);
+  assert.doesNotMatch(markup, /max-w-\[88px\]/);
   assert.match(markup, /h-1\.5 bg-muted rounded-full overflow-hidden/);
   assert.match(markup, /bg-amber-500/);
   assert.match(markup, /text-amber-400/);
@@ -50,7 +53,10 @@ test("eight GPUs stay in four scrolling columns", () => {
 
   assert.match(markup, /repeat\(4, 1fr\)/);
   assert.match(markup, /max-h-\[260px\] overflow-y-auto/);
-  assert.match(markup, /max-w-\[380px\]/);
+  assert.match(markup, /max-w-\[26rem\]/);
+  assert.match(markup, /line-clamp-2/);
+  assert.match(markup, /title="NVIDIA A0"/);
+  assert.doesNotMatch(markup, /max-w-\[88px\]/);
   for (let index = 0; index < 8; index += 1) {
     assert.match(markup, new RegExp(`GPU ${index}`));
   }
