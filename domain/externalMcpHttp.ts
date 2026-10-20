@@ -28,7 +28,7 @@ export function buildCodexHttpToml(url: string): string {
 }
 
 export function buildCodexHttpEnvLine(token: string): string {
-  return `${EXTERNAL_MCP_HTTP_BEARER_ENV}=${token}`;
+  return `export ${EXTERNAL_MCP_HTTP_BEARER_ENV}=${shellQuote(token)}`;
 }
 
 export function buildClaudeHttpAddCommand(url: string, token: string): string {

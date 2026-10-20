@@ -37,7 +37,11 @@ test("HTTP snippets use Codex env bearer form, Claude http transport, and generi
   assert.match(toml, /\[mcp_servers\.netcatty-http\]/);
   assert.match(toml, /url = "http:\/\/127\.0\.0\.1:47391\/mcp"/);
   assert.match(toml, /bearer_token_env_var = "NETCATTY_MCP_BEARER_TOKEN"/);
-  assert.equal(buildCodexHttpEnvLine(token), "NETCATTY_MCP_BEARER_TOKEN=abc123");
+  assert.equal(buildCodexHttpEnvLine(token), "export NETCATTY_MCP_BEARER_TOKEN='abc123'");
+  assert.equal(
+    buildCodexHttpEnvLine("a'b"),
+    "export NETCATTY_MCP_BEARER_TOKEN='a'\\''b'",
+  );
   assert.equal(
     buildClaudeHttpAddCommand(url, token),
     "claude mcp add --transport http netcatty-http 'http://127.0.0.1:47391/mcp' --header 'Authorization: Bearer abc123'",

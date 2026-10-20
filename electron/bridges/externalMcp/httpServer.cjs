@@ -40,6 +40,27 @@ class ExternalMcpHttpClient extends EventEmitter {
   }
 }
 
+function trackConnections(server) {
+  const owned = new Set();
+  server.on("connection", (socket) => {
+    owned.add(socket);
+    socket.on("close", () => owned.delete(socket));
+  });
+  return owned;
+}
+
+function closeHttpServer(server, owned) {
+  return new Promise((resolve) => {
+    // requestTimeout is disabled so a half-open POST does not get cut off
+    // during a long tool call. close() waits for those sockets, so destroy
+    // them before awaiting the callback or disable/reconfigure hangs.
+    server.close(() => resolve());
+    if (!owned) return;
+    for (const socket of owned) socket.destroy();
+    owned.clear();
+  });
+}
+
 function jsonRpcError(message, code = -32000) {
   return { jsonrpc: "2.0", error: { code, message }, id: null };
 }
@@ -121,7 +142,7 @@ function createExternalMcpHttpServer(deps = {}) {
   let listenAddress = DEFAULT_EXTERNAL_MCP_HTTP_HOST;
   let listenPort = null;
   let sessions = new Map();
-  let sockets = new Set();
+  let activeSockets = new Set();
   let startChain = Promise.resolve();
   let generation = 0;
 
@@ -370,10 +391,7 @@ function createExternalMcpHttpServer(deps = {}) {
     });
     server.requestTimeout = 0;
     server.timeout = 0;
-    server.on("connection", (socket) => {
-      sockets.add(socket);
-      socket.on("close", () => sockets.delete(socket));
-    });
+    const ownedSockets = trackConnections(server);
     try {
       await new Promise((resolve, reject) => {
         const fail = (error) => {
@@ -389,14 +407,15 @@ function createExternalMcpHttpServer(deps = {}) {
         server.listen(port, listenAddress);
       });
     } catch (error) {
-      await new Promise((resolve) => server.close(() => resolve()));
+      await closeHttpServer(server, ownedSockets);
       throw error;
     }
     if (nextGeneration !== generation) {
-      await new Promise((resolve) => server.close(() => resolve()));
+      await closeHttpServer(server, ownedSockets);
       return getState();
     }
     httpServer = server;
+    activeSockets = ownedSockets;
     const address = server.address();
     listenPort = address && typeof address === "object" ? address.port : port;
     return getState();
@@ -404,16 +423,14 @@ function createExternalMcpHttpServer(deps = {}) {
 
   async function stopUnlocked(expectedGeneration) {
     const server = httpServer;
+    const ownedSockets = activeSockets;
     httpServer = null;
+    activeSockets = new Set();
     listenPort = null;
     await closeSessions();
     if (server) {
-      await new Promise((resolve) => server.close(() => resolve()));
+      await closeHttpServer(server, ownedSockets);
     }
-    for (const socket of sockets) {
-      socket.destroy();
-    }
-    sockets = new Set();
     if (expectedGeneration != null && expectedGeneration !== generation) return;
   }
 

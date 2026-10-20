@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("node:http");
+const net = require("node:net");
 const { describe, it, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 
@@ -148,6 +149,26 @@ describe("external MCP streamable HTTP server", () => {
       }),
       (error) => error.code === "ECONNREFUSED",
     );
+    assert.equal(active.server.getState().listening, false);
+    active = null;
+  });
+
+  it("stop finishes while a client holds an incomplete request", async () => {
+    active = await startServer();
+    const socket = net.connect(active.port, "127.0.0.1");
+    await new Promise((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    socket.write(`POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:${active.port}\r\nContent-Length: 100\r\n\r\n`);
+    let hung = false;
+    const timer = setTimeout(() => {
+      hung = true;
+    }, 2000);
+    await active.server.stop();
+    clearTimeout(timer);
+    socket.destroy();
+    assert.equal(hung, false);
     assert.equal(active.server.getState().listening, false);
     active = null;
   });
