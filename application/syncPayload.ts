@@ -28,12 +28,10 @@ import {
   SYNC_STORAGE_KEYS,
   hasSyncPayloadEntityData,
   reconcileInboundAutoCloseOnExit,
-  reconcileInboundShiftEnterNewlineText,
   retainLocalHostLastConnectedAt,
   sanitizeHostsForSync,
   type SyncPayload,
 } from '../domain/sync';
-import { isLegacyDefaultShiftEnterNewlineText } from '../domain/models';
 import { migrateLegacyCommandBlocklist } from '../domain/commandBlocklist';
 import { migrateHostsFromLegacyLineTimestamps } from '../domain/host';
 import { toPersistedPortForwardingRules } from '../domain/portForwardingPersistence';
@@ -77,7 +75,6 @@ import {
 import { isValidHslToken } from './state/settingsStateDefaults';
 import {
   STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED,
-  STORAGE_KEY_TERM_SHIFT_ENTER_NEWLINE_MIGRATED,
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
@@ -529,9 +526,6 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (localStorageAdapter.readBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED)) {
     settings.autoCloseOnExitDefaultMigrated = true;
   }
-  if (localStorageAdapter.readBoolean(STORAGE_KEY_TERM_SHIFT_ENTER_NEWLINE_MIGRATED)) {
-    settings.shiftEnterNewlineDefaultMigrated = true;
-  }
 
   // Custom terminal themes
   const customThemesRaw = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_THEMES);
@@ -838,23 +832,6 @@ async function applySyncableSettings(
       )
     ) {
       localStorageAdapter.writeBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED, true);
-    }
-    if ('shiftEnterNewlineText' in settings.terminalSettings) {
-      merged.shiftEnterNewlineText = reconcileInboundShiftEnterNewlineText(
-        settings.terminalSettings.shiftEnterNewlineText,
-        settings.shiftEnterNewlineDefaultMigrated,
-      );
-    }
-    // Same one-time marker as auto-close: a legacy newline is the old default,
-    // and a migrated peer's explicit choice must stick past the next launch.
-    if (
-      settings.shiftEnterNewlineDefaultMigrated === true
-      || (
-        isLegacyDefaultShiftEnterNewlineText(settings.terminalSettings.shiftEnterNewlineText)
-        && settings.shiftEnterNewlineDefaultMigrated !== true
-      )
-    ) {
-      localStorageAdapter.writeBoolean(STORAGE_KEY_TERM_SHIFT_ENTER_NEWLINE_MIGRATED, true);
     }
     localStorageAdapter.writeString(STORAGE_KEY_TERM_SETTINGS, JSON.stringify(merged));
   }

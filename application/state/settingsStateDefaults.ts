@@ -103,7 +103,8 @@ export function migrateMaterializedAutoCloseOnExitDefault(): void {
  * that change materialized `\\n` into saved settings, so upgraders kept a
  * bare newline and TUI CLIs still submitted. Rewrite only that old default
  * (escaped or raw) to ESC+CR, then persist the marker. A later explicit `\\n`
- * is left alone. Custom text is never rewritten.
+ * is left alone. Custom text is never rewritten. Sync and import do not
+ * read this marker; an old `\\n` from another device stays as stored.
  */
 export function migrateMaterializedShiftEnterNewlineDefault(): void {
   if (localStorageAdapter.readBoolean(STORAGE_KEY_TERM_SHIFT_ENTER_NEWLINE_MIGRATED)) return;

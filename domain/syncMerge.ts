@@ -29,11 +29,6 @@
 
 import { carryForwardSyncDeletions, getDeletedEntityIds } from './syncReliability';
 import {
-  DEFAULT_SHIFT_ENTER_NEWLINE_TEXT,
-  isLegacyDefaultShiftEnterNewlineText,
-} from './models/terminal';
-import {
-  payloadKeepsLegacyShiftEnterNewline,
   payloadOptsIntoAutoClose,
   sanitizeHostsForSync,
   type CloudSyncPayloadEntityKey,
@@ -770,24 +765,14 @@ function mergeSettings(
     terminalSettings
     && typeof terminalSettings === 'object'
     && !Array.isArray(terminalSettings)
+    && (terminalSettings as Record<string, unknown>).autoCloseOnExit === true
+    && !payloadOptsIntoAutoClose(local)
+    && !payloadOptsIntoAutoClose(remote)
   ) {
-    const record = terminalSettings as Record<string, unknown>;
-    let next = record;
-    if (
-      record.autoCloseOnExit === true
-      && !payloadOptsIntoAutoClose(local)
-      && !payloadOptsIntoAutoClose(remote)
-    ) {
-      next = { ...next, autoCloseOnExit: false };
-    }
-    if (
-      isLegacyDefaultShiftEnterNewlineText(next.shiftEnterNewlineText)
-      && !payloadKeepsLegacyShiftEnterNewline(local)
-      && !payloadKeepsLegacyShiftEnterNewline(remote)
-    ) {
-      next = { ...next, shiftEnterNewlineText: DEFAULT_SHIFT_ENTER_NEWLINE_TEXT };
-    }
-    if (next !== record) merged.terminalSettings = next;
+    merged.terminalSettings = {
+      ...(terminalSettings as Record<string, unknown>),
+      autoCloseOnExit: false,
+    };
   }
 
   return Object.keys(merged).length > 0 ? (merged as SettingsObj) : undefined;
