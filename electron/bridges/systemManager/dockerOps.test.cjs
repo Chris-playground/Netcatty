@@ -303,3 +303,44 @@ test("listImages reads Podman's JSON array and Docker's JSON lines", async () =>
   assert.equal(dockerResult.images[0].name, "nginx:latest");
   assert.equal(dockerResult.images[0].size, "10MB");
 });
+
+test("getStats reads Podman's JSON array and Docker's JSON lines", async () => {
+  const podman = createDockerOpsApi({
+    execOnSession: async () => ({
+      success: true,
+      stdout: JSON.stringify([{
+        id: "abc123def456",
+        name: "web",
+        cpu_percent: "1.50%",
+        mem_usage: "2MB / 1GB",
+        mem_percent: "0.20%",
+        net_io: "1kB / 2kB",
+        block_io: "3kB / 4kB",
+        pids: "4",
+      }]),
+      stderr: "",
+      code: 0,
+    }),
+  });
+  const podmanResult = await podman.getStats(null, { sessionId: "s1", ids: ["abc123def456"], runtime: "podman" });
+  assert.equal(podmanResult.success, true);
+  assert.equal(podmanResult.stats.length, 1);
+  assert.equal(podmanResult.stats[0].id, "abc123def456");
+  assert.equal(podmanResult.stats[0].name, "web");
+  assert.equal(podmanResult.stats[0].cpuPercent, 1.5);
+  assert.equal(podmanResult.stats[0].memUsage, "2MB / 1GB");
+  assert.equal(podmanResult.stats[0].pids, 4);
+
+  const docker = createDockerOpsApi({
+    execOnSession: async () => ({
+      success: true,
+      stdout: '{"ID":"fff111","Name":"db","CPUPerc":"0.25%","MemUsage":"1MiB / 2GiB","MemPerc":"0.01%","NetIO":"0B / 0B","BlockIO":"0B / 0B","PIDs":"2"}\n',
+      stderr: "",
+      code: 0,
+    }),
+  });
+  const dockerResult = await docker.getStats(null, { sessionId: "s1", runtime: "docker" });
+  assert.equal(dockerResult.stats[0].id, "fff111");
+  assert.equal(dockerResult.stats[0].cpuPercent, 0.25);
+  assert.equal(dockerResult.stats[0].memUsage, "1MiB / 2GiB");
+});

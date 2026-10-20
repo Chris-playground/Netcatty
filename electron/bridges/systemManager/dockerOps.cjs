@@ -79,28 +79,35 @@ function parseDockerContainers(stdout) {
   })).filter((container) => container.id || container.name);
 }
 
+function parsePercent(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return parseFloat(String(value || "0").replace("%", "")) || 0;
+}
+
 function parseDockerStats(stdout) {
-  const stats = [];
-  for (const line of (stdout || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const row = JSON.parse(trimmed);
-      stats.push({
-        id: row.ID || row.Container || "",
-        name: row.Name || "",
-        cpuPercent: parseFloat(String(row.CPUPerc || "0").replace("%", "")) || 0,
-        memUsage: row.MemUsage || "",
-        memPercent: parseFloat(String(row.MemPerc || "0").replace("%", "")) || 0,
-        netIO: row.NetIO || "",
-        blockIO: row.BlockIO || "",
-        pids: Number(row.PIDs || row.Pids || 0) || 0,
-      });
-    } catch {
-      // skip
-    }
-  }
-  return stats;
+  return parseJsonRecords(stdout).map((row) => {
+    const memUsage = typeof row.MemUsage === "number" && typeof row.MemLimit === "number"
+      ? `${formatImageSize(row.MemUsage)} / ${formatImageSize(row.MemLimit)}`
+      : String(row.MemUsage || row.mem_usage || "");
+    const netIO = row.NetIO || row.net_io
+      || (typeof row.NetInput === "number" && typeof row.NetOutput === "number"
+        ? `${formatImageSize(row.NetInput)} / ${formatImageSize(row.NetOutput)}`
+        : "");
+    const blockIO = row.BlockIO || row.block_io
+      || (typeof row.BlockInput === "number" && typeof row.BlockOutput === "number"
+        ? `${formatImageSize(row.BlockInput)} / ${formatImageSize(row.BlockOutput)}`
+        : "");
+    return {
+      id: String(row.ID || row.Id || row.id || row.ContainerID || row.Container || ""),
+      name: String(row.Name || row.name || ""),
+      cpuPercent: parsePercent(row.CPUPerc ?? row.cpu_percent ?? row.CPU),
+      memUsage,
+      memPercent: parsePercent(row.MemPerc ?? row.mem_percent),
+      netIO: String(netIO),
+      blockIO: String(blockIO),
+      pids: Number(row.PIDs || row.Pids || row.pids || 0) || 0,
+    };
+  }).filter((stat) => stat.id || stat.name);
 }
 
 function splitImageName(name) {
