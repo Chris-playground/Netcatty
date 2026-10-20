@@ -1432,6 +1432,11 @@ test("a channel close with no WRITE reply still fails the borrowed upload (#3310
   }
   server.killSftpChannels();
   await assertBorrowedUploadFails(transferPromise, transferEvents, isSettled);
+  assert.equal(
+    kiHandler.getRequests().size,
+    0,
+    "channel death must not open a keyboard-interactive reconnect",
+  );
 });
 
 test("resetting the borrowed SSH socket mid-upload fails the transfer (#3310)", { timeout: 20000 }, async (t) => {
