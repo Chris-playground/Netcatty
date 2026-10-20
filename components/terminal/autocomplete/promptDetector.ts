@@ -33,23 +33,46 @@ export function isNonPromptLine(lineText: string): boolean {
 
 const PROGRAM_INPUT_LABEL = /^(?=[\p{L}\p{N}])[\p{L}\p{N} ._'()-]{1,60}$/u;
 
-/**
- * A program waiting for ordinary input (`read -p 'Email: '`).
- * Password, passphrase, PIN, and secret prompts stay closed.
- */
-export function isProgramInputPromptText(promptText: string): boolean {
-  if (!promptText || promptText.length > 80) return false;
-  if (isSensitiveTerminalChallenge(promptText)) return false;
-  if (/\b(?:secret|passphrase|password|pin)\b/iu.test(promptText)) return false;
+/** Identity prompts this feature targets. A custom PS1 like `dev: ` is not one. */
+const ORDINARY_INPUT_LABEL =
+  /^(?:e-?mail(?: address)?|user(?: ?name| ?id)?|login(?: name)?|(?:full )?name|account(?: name)?|\u90ae\u7bb1|\u7535\u5b50\u90ae\u7bb1|\u7535\u5b50\u90ae\u4ef6|\u7528\u6237\u540d|\u7528\u6237|\u59d3\u540d|\u8d26\u53f7|\u5e10\u6237|\u8d26\u6237|\u767b\u5f55\u540d)$/u;
+
+function colonLabelText(promptText: string): string | null {
+  if (!promptText || promptText.length > 80) return null;
+  if (isSensitiveTerminalChallenge(promptText)) return null;
+  if (/\b(?:secret|passphrase|password|pin)\b/iu.test(promptText)) return null;
 
   const trimmedEnd = promptText.trimEnd();
   const marker = trimmedEnd.at(-1);
-  if (marker !== ":" && marker !== "\uFF1A") return false;
+  if (marker !== ":" && marker !== "\uFF1A") return null;
 
   const label = trimmedEnd.slice(0, -1).trim();
-  if (!PROGRAM_INPUT_LABEL.test(label)) return false;
-  if (startsWithCommonShellCommand(label)) return false;
-  return true;
+  if (!PROGRAM_INPUT_LABEL.test(label)) return null;
+  if (startsWithCommonShellCommand(label)) return null;
+  return label;
+}
+
+/** Colon label shape, including a custom shell PS1 (`dev: `). */
+function isColonLabelPromptText(promptText: string): boolean {
+  return colonLabelText(promptText) !== null;
+}
+
+/**
+ * A program waiting for ordinary input (`read -p 'Email: '`).
+ * Password, passphrase, PIN, and secret prompts stay closed.
+ * Only the identity-label allowlist matches, so `PS1='dev: '` stays a shell prompt.
+ */
+export function isProgramInputPromptText(promptText: string): boolean {
+  const label = colonLabelText(promptText);
+  if (!label) return false;
+  const normalized = label
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/^(?:please\s+)?(?:enter|input|type)\s+(?:your\s+)?/u, "")
+    .replace(/^your\s+/u, "")
+    .replace(/^(?:\u8bf7\u8f93\u5165|\u8bf7|\u8f93\u5165)/u, "")
+    .trim();
+  return ORDINARY_INPUT_LABEL.test(normalized);
 }
 
 function isSpecificShellPromptCandidate(
@@ -863,7 +886,7 @@ function findProgramInputPromptBoundary(lineText: string): number {
     const next = i + 1 < lineText.length ? lineText[i + 1] : null;
     if (next !== null && next !== " ") continue;
     const boundary = next === " " ? i + 2 : i + 1;
-    if (!isProgramInputPromptText(lineText.slice(0, boundary))) continue;
+    if (!isColonLabelPromptText(lineText.slice(0, boundary))) continue;
     last = boundary;
   }
   return last;

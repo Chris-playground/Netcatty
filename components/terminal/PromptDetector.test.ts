@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { detectPrompt, getAlignedPrompt } from "./autocomplete/promptDetector.ts";
+import { detectPrompt, getAlignedPrompt, isProgramInputPromptText } from "./autocomplete/promptDetector.ts";
 import { resolveAutocompleteQueryInput } from "./autocomplete/terminalAutocompletePrompt.ts";
 import { getSnippetSuggestions } from "./autocomplete/snippetCompleter.ts";
 import { stringCellWidth } from "./autocomplete/terminalStringCellWidth.ts";
@@ -847,6 +847,27 @@ test("program input prompts expose snippet text and stay out of shell history (#
   assert.equal(shellPrompt.prompt.promptText, "user@host:~$ ");
   assert.equal(shellPrompt.prompt.userInput, "git pull use");
   assert.equal(shellPrompt.alignedTyped, "git pull use");
+});
+
+test("a colon shell prompt is not a program input prompt (#3622)", () => {
+  for (const prompt of ["dev: ", "development: ", "PS1: "]) {
+    assert.equal(isProgramInputPromptText(prompt), false, prompt);
+    const line = `${prompt}ls`;
+    const term = createFakeTerm(line, line.length);
+    const aligned = getAlignedPrompt(term as never, "ls", true);
+    assert.equal(aligned.prompt.isAtPrompt, true, prompt);
+    assert.equal(aligned.prompt.promptText, prompt, prompt);
+    assert.equal(aligned.prompt.userInput, "ls", prompt);
+    assert.equal(
+      getCommandToRecordOnEnter(aligned.prompt, aligned.alignedTyped, "ls", true),
+      "ls",
+      prompt,
+    );
+  }
+
+  assert.equal(isProgramInputPromptText("Email: "), true);
+  assert.equal(isProgramInputPromptText("Enter your username: "), true);
+  assert.equal(isProgramInputPromptText("用户名: "), true);
 });
 
 test("password, passphrase, PIN, and secret prompts stay uncompletable (#3622)", () => {
