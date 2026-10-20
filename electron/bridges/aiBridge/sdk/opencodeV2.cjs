@@ -838,7 +838,10 @@ function delayForCatalogSettle(ms, signal) {
   });
 }
 
-async function listSettledOpenCodeV2Catalog(client, signal, directory) {
+async function listSettledOpenCodeV2Catalog(client, signal, directory, limits = {}) {
+  const maxMs = limits.maxMs ?? OPENCODE_V2_CATALOG_SETTLE_MAX_MS;
+  const quietMs = limits.quietMs ?? OPENCODE_V2_CATALOG_SETTLE_QUIET_MS;
+  const pollMs = limits.pollMs ?? OPENCODE_V2_CATALOG_SETTLE_POLL_MS;
   if (typeof client.openEventStream !== "function") return client.listCatalog(signal, directory);
   const streamAbort = new AbortController();
   const stopStream = () => streamAbort.abort(signal?.reason);
@@ -870,17 +873,22 @@ async function listSettledOpenCodeV2Catalog(client, signal, directory) {
     let seen = updates.count;
     let current = await client.listCatalog(signal, directory);
     let quietAt = updates.count === seen ? Date.now() : null;
-    while (Date.now() - started < OPENCODE_V2_CATALOG_SETTLE_MAX_MS) {
+    let refetchedAfterDeadline = false;
+    while (true) {
       if (updates.count !== seen) {
+        // A slow read can consume the whole budget. Still fetch the snapshot
+        // that the in-flight update announced before publishing.
+        if (Date.now() - started >= maxMs && refetchedAfterDeadline) return current;
+        if (Date.now() - started >= maxMs) refetchedAfterDeadline = true;
         seen = updates.count;
         current = await client.listCatalog(signal, directory);
         quietAt = updates.count === seen ? Date.now() : null;
         continue;
       }
-      if (quietAt != null && Date.now() - quietAt >= OPENCODE_V2_CATALOG_SETTLE_QUIET_MS) return current;
-      await delayForCatalogSettle(OPENCODE_V2_CATALOG_SETTLE_POLL_MS, signal);
+      if (Date.now() - started >= maxMs) return current;
+      if (quietAt != null && Date.now() - quietAt >= quietMs) return current;
+      await delayForCatalogSettle(pollMs, signal);
     }
-    return current;
   } finally {
     stopStream();
     signal?.removeEventListener("abort", stopStream);
@@ -905,7 +913,7 @@ async function listOpenCodeV2Models(args = {}) {
       opened = acquired.server;
     }
     if (signal?.aborted) return emptyCatalog();
-    return await listSettledOpenCodeV2Catalog(opened.client, signal, args.cwd);
+    return await listSettledOpenCodeV2Catalog(opened.client, signal, args.cwd, args.catalogSettle);
   } catch (error) {
     if (signal?.aborted || error?.name === "AbortError") return emptyCatalog();
     throw toUserFacingOpenCodeV2Error(error);

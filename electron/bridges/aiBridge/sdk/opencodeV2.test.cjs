@@ -660,6 +660,44 @@ test("listOpenCodeV2Models refetches when model.updated arrives during the first
   assert.deepEqual(result.models.map((model) => model.id), ["opencode/big-pickle", "custom/coder"]);
 });
 
+test("listOpenCodeV2Models refetches when the settlement budget elapses during the first read", async () => {
+  let releaseFirst;
+  const firstCatalog = new Promise((resolve) => { releaseFirst = resolve; });
+  let calls = 0;
+  const result = await listOpenCodeV2Models({
+    catalogSettle: { maxMs: 30, quietMs: 5000, pollMs: 10 },
+    openCodeV2Factory: async () => ({
+      client: {
+        async listCatalog() {
+          calls += 1;
+          if (calls === 1) {
+            await firstCatalog;
+            return { currentModelId: null, models: [{ id: "opencode/big-pickle", name: "builtin" }] };
+          }
+          return {
+            currentModelId: "custom/coder",
+            models: [
+              { id: "opencode/big-pickle", name: "builtin" },
+              { id: "custom/coder", name: "Coder" },
+            ],
+          };
+        },
+        async openEventStream() {
+          return (async function* updateAfterDeadline() {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            yield { type: "provider.updated", data: {} };
+            releaseFirst();
+            await new Promise(() => {});
+          })();
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+  assert.ok(calls >= 2);
+  assert.equal(result.currentModelId, "custom/coder");
+});
+
 test("listOpenCodeModels uses the 2.x catalog when the binary is 2.x", async () => {
   const models = await listOpenCodeModels({
     versionProbe: async () => parseOpenCodeVersionOutput("v2.1.0"),
