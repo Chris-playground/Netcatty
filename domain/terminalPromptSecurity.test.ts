@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   appendTerminalPromptSecurityTail,
+  foldTerminalPromptSecurityOutput,
   isConfirmedTerminalShellPrompt,
   isSensitiveTerminalChallenge,
   isUntrustedTerminalInputPrompt,
@@ -122,16 +123,23 @@ test('ordinary shell commands ending with a colon are not untrusted input prompt
   assert.equal(isUntrustedTerminalInputPrompt('Password: '), true);
 });
 
-test('bash PS2 continuation prompt stays a confirmed shell prompt (#3796)', () => {
+test('bash PS2 is trusted only while a heredoc continuation is open (#3796)', () => {
   // CentOS-7-style bash has no bracketed paste, so a heredoc paste echoes the
   // default PS2 "> " after each line. That must keep broadcast on.
-  assert.equal(isConfirmedTerminalShellPrompt('>'), true);
-  assert.equal(isConfirmedTerminalShellPrompt('> '), true);
-  assert.equal(isUntrustedTerminalInputPrompt('>'), false);
-  assert.equal(isUntrustedTerminalInputPrompt('> '), false);
   const heredocEcho = '[root@h ~]# cat >> f << EOF\r\n> ';
   assert.equal(isConfirmedTerminalShellPrompt(heredocEcho), true);
   assert.equal(isUntrustedTerminalInputPrompt(heredocEcho), false);
+  const heredocBody = '[root@h ~]# cat >> f << EOF\r\n> echo madvise > /sys/kernel/mm/transparent_hugepage/enabled\r\n> ';
+  assert.equal(isConfirmedTerminalShellPrompt(heredocBody), true);
+  assert.equal(isUntrustedTerminalInputPrompt(heredocBody), false);
+  // No preceding command, or an echo-disabled prompt labelled ">", fails closed.
+  assert.equal(isConfirmedTerminalShellPrompt('>'), false);
+  assert.equal(isConfirmedTerminalShellPrompt('> '), false);
+  assert.equal(isUntrustedTerminalInputPrompt('>'), true);
+  assert.equal(isUntrustedTerminalInputPrompt('> '), true);
+  const secretPrompt = "[root@h ~]# read -s -p '> ' secret\r\n> ";
+  assert.equal(isConfirmedTerminalShellPrompt(secretPrompt), false);
+  assert.equal(isUntrustedTerminalInputPrompt(secretPrompt), true);
   // The echoed terminator line is ordinary output, not a prompt latch.
   assert.equal(isConfirmedTerminalShellPrompt('> EOF'), false);
   assert.equal(isUntrustedTerminalInputPrompt('> EOF'), false);
@@ -144,6 +152,30 @@ test('bash PS2 continuation prompt stays a confirmed shell prompt (#3796)', () =
   assert.equal(isConfirmedTerminalShellPrompt('Password:'), false);
   assert.equal(isUntrustedTerminalInputPrompt('heredoc>'), true);
   assert.equal(isConfirmedTerminalShellPrompt('heredoc>'), false);
+});
+
+test('prompt observation keeps the heredoc opener and drops it after the shell returns (#3796)', () => {
+  let state = { origin: '', current: '' };
+  state = foldTerminalPromptSecurityOutput(state, '[root@h ~]# cat >> f << EOF\r\n');
+  state = foldTerminalPromptSecurityOutput(state, '> echo madvise > /sys/kernel/mm/transparent_hugepage/enabled\r\n');
+  state = foldTerminalPromptSecurityOutput(state, '> ');
+  assert.equal(isConfirmedTerminalShellPrompt(state.promptText), true);
+  assert.equal(isUntrustedTerminalInputPrompt(state.promptText), false);
+
+  state = foldTerminalPromptSecurityOutput(state, "\r\n[root@h ~]# ");
+  state = foldTerminalPromptSecurityOutput(state, '\r\n> ');
+  assert.equal(isConfirmedTerminalShellPrompt(state.promptText), false);
+  assert.equal(isUntrustedTerminalInputPrompt(state.promptText), true);
+
+  state = { origin: '', current: '' };
+  state = foldTerminalPromptSecurityOutput(state, "[root@h ~]# read -s -p '> ' secret\r\n");
+  state = foldTerminalPromptSecurityOutput(state, '> ');
+  assert.equal(isConfirmedTerminalShellPrompt(state.promptText), false);
+  assert.equal(isUntrustedTerminalInputPrompt(state.promptText), true);
+
+  state = foldTerminalPromptSecurityOutput({ origin: '', current: '' }, '> ');
+  assert.equal(isUntrustedTerminalInputPrompt(state.promptText), true);
+  assert.equal(isConfirmedTerminalShellPrompt(state.promptText), false);
 });
 
 test('vim ex command-line is not an untrusted input prompt (#3422)', () => {
@@ -171,9 +203,11 @@ test('renderer and main-process prompt classifiers stay aligned', () => {
     ['Challenge # 1:', undefined, true],
     ['router> show ip:', { allowHostStyleGreaterThan: true }, false],
     ['router> show ip:', undefined, true],
-    ['>', undefined, false],
-    ['> ', undefined, false],
+    ['>', undefined, true],
+    ['> ', undefined, true],
     ['[root@h ~]# cat >> f << EOF\r\n> ', undefined, false],
+    ['[root@h ~]# cat >> f << EOF\r\n> echo madvise > /sys/kernel/mm/transparent_hugepage/enabled\r\n> ', undefined, false],
+    ["[root@h ~]# read -s -p '> ' secret\r\n> ", undefined, true],
     ['Custom>', undefined, true],
     ['Token>', undefined, true],
     ['Password:', undefined, true],
