@@ -295,6 +295,59 @@ test("a non-space after the cursor is separated with one space", () => {
   assert.equal(already.pasted[0], ` ${command}`);
 });
 
+test("a wrapped draft separates the command from the previous row", () => {
+  const command = "tar -xvzf '/tmp/backup.tar.gz' -C '/tmp'";
+  const full = " ".repeat(79);
+
+  const glued = fixture();
+  glued.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: `${full}o`, wrapped: false },
+    { text: " ", wrapped: true },
+  ]);
+  glued.setCursor(2, 0);
+  const gluedLink = glued.linksAt(1)?.[0];
+  assert.ok(gluedLink);
+  gluedLink.activate(ctrl, gluedLink.text);
+  assert.equal(glued.pasted[0], ` ${command}`);
+
+  const spaced = fixture();
+  spaced.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: `${full} `, wrapped: false },
+    { text: " ", wrapped: true },
+  ]);
+  spaced.setCursor(2, 0);
+  const spacedLink = spaced.linksAt(1)?.[0];
+  assert.ok(spacedLink);
+  spacedLink.activate(ctrl, spacedLink.text);
+  assert.equal(spaced.pasted[0], command);
+
+  const separate = fixture();
+  separate.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: `${full}o`, wrapped: false },
+    { text: " ", wrapped: false },
+  ]);
+  separate.setCursor(2, 0);
+  const separateLink = separate.linksAt(1)?.[0];
+  assert.ok(separateLink);
+  separateLink.activate(ctrl, separateLink.text);
+  assert.equal(separate.pasted[0], command);
+
+  const continued = fixture();
+  continued.setLines([
+    { text: "/tmp/backup.tar.gz", wrapped: false },
+    { text: "e".repeat(80), wrapped: false },
+    { text: "x", wrapped: true },
+  ]);
+  continued.setCursor(1, 80);
+  const continuedLink = continued.linksAt(1)?.[0];
+  assert.ok(continuedLink);
+  continuedLink.activate(ctrl, continuedLink.text);
+  assert.equal(continued.pasted[0], ` ${command} `);
+});
+
 test("a name that starts on the next wrapped row is not anchored on the previous row", () => {
   const f = fixture();
   f.setLines([

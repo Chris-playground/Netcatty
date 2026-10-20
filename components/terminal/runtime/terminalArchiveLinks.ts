@@ -106,11 +106,25 @@ function modifierMatches(event: MouseEvent, modifier: LinkModifier): boolean {
 
 function neighborNeedsSpace(term: Terminal, direction: -1 | 1): boolean {
   const buffer = term.buffer.active;
-  const line = buffer.getLine(buffer.baseY + buffer.cursorY);
+  let lineIndex = buffer.baseY + buffer.cursorY;
+  let line = buffer.getLine(lineIndex);
   if (!line || typeof line.getCell !== "function") return false;
   let index = buffer.cursorX + (direction < 0 ? -1 : 0);
-  for (let steps = 0; steps < term.cols; steps += 1) {
-    if (index < 0 || index >= term.cols) return false;
+  for (let steps = 0; steps < term.cols + 1; steps += 1) {
+    if (index < 0 || index >= term.cols) {
+      if (direction < 0) {
+        if (!line.isWrapped) return false;
+        lineIndex -= 1;
+      } else {
+        lineIndex += 1;
+        const next = buffer.getLine(lineIndex);
+        if (!next?.isWrapped) return false;
+      }
+      line = buffer.getLine(lineIndex);
+      if (!line || typeof line.getCell !== "function") return false;
+      index = direction < 0 ? term.cols - 1 : 0;
+      continue;
+    }
     const cell = line.getCell(index);
     if (!cell) return false;
     if (cell.getWidth() === 0) {
