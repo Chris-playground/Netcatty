@@ -12,10 +12,13 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Minimal NDJSON bridge stand-in: answers auth/verify (and anything else)
-// with an empty success result, which is all connectClient needs.
-function startFakeBridge() {
-  return new Promise((resolve) => {
+const STALE_AUTH_MESSAGE = "Authentication required. Send auth/verify with valid token first.";
+
+// Minimal NDJSON bridge stand-in. acceptToken rejects every other token the
+// way the live host does (RPC -32001, then close). authResult "not-ok"
+// returns `{ ok: false }` instead, which connectClient maps to AUTH_FAILED.
+function startFakeBridge({ port = 0, acceptToken = null, authResult = "ok" } = {}) {
+  return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
       let buffer = "";
       socket.setEncoding("utf8");
@@ -33,12 +36,30 @@ function startFakeBridge() {
             continue;
           }
           if (message?.id == null) continue;
-          const result = message.method === "auth/verify" ? { ok: true } : {};
-          socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`);
+          if (message.method === "auth/verify") {
+            const presented = message.params?.token;
+            const accepted = acceptToken == null || presented === acceptToken;
+            if (!accepted && authResult === "not-ok") {
+              socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: false } })}\n`);
+              continue;
+            }
+            if (!accepted) {
+              socket.write(`${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32001, message: STALE_AUTH_MESSAGE },
+              })}\n`);
+              return;
+            }
+            socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } })}\n`);
+            continue;
+          }
+          socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`);
         }
       });
     });
-    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }));
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve({ server, port: server.address().port }));
   });
 }
 
@@ -55,8 +76,8 @@ function getDeadPort() {
   });
 }
 
-function writeDiscoveryFile(discoveryPath, port, token) {
-  fs.writeFileSync(discoveryPath, `${JSON.stringify({ port, token, pid: 424242 })}\n`);
+function writeDiscoveryFile(discoveryPath, port, token, pid = 424242) {
+  fs.writeFileSync(discoveryPath, `${JSON.stringify({ port, token, pid })}\n`);
 }
 
 function setupDiscoveryEnv(t, discoveryPath) {
@@ -82,6 +103,31 @@ function countConnectAttempts(t) {
     net.createConnection = original;
   });
   return () => attempts;
+}
+
+function countDiscoveryReads(t, discoveryPath, onRead) {
+  const original = fs.readFileSync;
+  let reads = 0;
+  fs.readFileSync = function (filePath, ...args) {
+    if (filePath === discoveryPath) {
+      reads += 1;
+      if (onRead) {
+        const stub = onRead(reads);
+        if (stub !== undefined) return stub;
+      }
+    }
+    return original.call(this, filePath, ...args);
+  };
+  t.after(() => {
+    fs.readFileSync = original;
+  });
+  return () => reads;
+}
+
+function isOriginalConnectError(err) {
+  return err?.code === "CONNECT_FAILED"
+    && typeof err?.message === "string"
+    && err.message.startsWith("Failed to connect to Netcatty TCP bridge: ");
 }
 
 test("connectClient retries with a refreshed discovery file after a stale-port failure", async (t) => {
@@ -119,7 +165,7 @@ test("connectClient retries with a refreshed discovery file after a stale-port f
   await sleep(20);
 });
 
-test("connectClient stops retrying and surfaces the original error when the port is unchanged", async (t) => {
+test("connectClient stops retrying and surfaces the original error when discovery identity is unchanged", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
   const discoveryPath = path.join(dir, "discovery.json");
   t.after(() => {
@@ -127,23 +173,23 @@ test("connectClient stops retrying and surfaces the original error when the port
   });
   setupDiscoveryEnv(t, discoveryPath);
   const getAttempts = countConnectAttempts(t);
+  const getReads = countDiscoveryReads(t, discoveryPath);
 
   const deadPort = await getDeadPort();
   writeDiscoveryFile(discoveryPath, deadPort, "test-token");
 
-  await assert.rejects(
-    connectClient(),
-    (err) => err?.code === "CONNECT_FAILED"
-      && typeof err?.message === "string"
-      && err.message.startsWith("Failed to connect to Netcatty TCP bridge: "),
-  );
+  const startedAt = Date.now();
+  await assert.rejects(connectClient(), isOriginalConnectError);
+  const elapsed = Date.now() - startedAt;
 
-  // The re-read always yields the same port, so the retry loop must not
-  // hammer the dead port with extra TCP attempts.
+  // Same port, token, and pid: re-read once, then stop before the 900ms delay
+  // instead of hammering the dead port.
   assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 2);
+  assert.ok(elapsed < 1000, `unchanged identity should stop before the second delay, elapsed ${elapsed}ms`);
 });
 
-test("connectClient surfaces the original error when the discovery file disappears mid-retry", async (t) => {
+test("connectClient keeps polling when discovery disappears and surfaces the original connect error", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
   const discoveryPath = path.join(dir, "discovery.json");
   t.after(() => {
@@ -151,6 +197,7 @@ test("connectClient surfaces the original error when the discovery file disappea
   });
   setupDiscoveryEnv(t, discoveryPath);
   const getAttempts = countConnectAttempts(t);
+  const getReads = countDiscoveryReads(t, discoveryPath);
 
   const deadPort = await getDeadPort();
   writeDiscoveryFile(discoveryPath, deadPort, "test-token");
@@ -160,13 +207,208 @@ test("connectClient surfaces the original error when the discovery file disappea
     fs.rmSync(discoveryPath, { force: true });
   })();
 
-  await assert.rejects(
-    connectClient(),
-    (err) => err?.code === "CONNECT_FAILED"
-      && typeof err?.message === "string"
-      && err.message.startsWith("Failed to connect to Netcatty TCP bridge: "),
-  );
+  const startedAt = Date.now();
+  await assert.rejects(connectClient(), isOriginalConnectError);
+  const elapsed = Date.now() - startedAt;
   await refresh;
 
+  // Missing file is transient: both bounded delays are consumed, and the
+  // original connect error is what the caller sees.
   assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 3);
+  assert.ok(elapsed >= 1100, `missing discovery should consume both delays, elapsed ${elapsed}ms`);
+});
+
+test("connectClient connects after a transient missing discovery file is rewritten", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+
+  const deadPort = await getDeadPort();
+  const { server, port: bridgePort } = await startFakeBridge();
+  t.after(() => {
+    server.close();
+  });
+  writeDiscoveryFile(discoveryPath, deadPort, "stale-token", 1);
+  const getReads = countDiscoveryReads(t, discoveryPath, (reads) => {
+    if (reads === 2) {
+      const err = new Error("ENOENT: no such file or directory");
+      err.code = "ENOENT";
+      throw err;
+    }
+    if (reads >= 3) {
+      return `${JSON.stringify({ port: bridgePort, token: "fresh-token", pid: 2 })}\n`;
+    }
+    return undefined;
+  });
+
+  const client = await connectClient();
+  assert.equal(client.discovery.port, bridgePort);
+  assert.equal(client.discovery.token, "fresh-token");
+  assert.equal(client.discovery.pid, 2);
+  assert.equal(getAttempts(), 2);
+  assert.equal(getReads(), 3);
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient treats unparseable discovery as transient and keeps the original connect error", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+
+  const deadPort = await getDeadPort();
+  writeDiscoveryFile(discoveryPath, deadPort, "test-token");
+  const getReads = countDiscoveryReads(t, discoveryPath, (reads) => (
+    reads > 1 ? "{not json" : undefined
+  ));
+
+  const startedAt = Date.now();
+  await assert.rejects(connectClient(), isOriginalConnectError);
+  const elapsed = Date.now() - startedAt;
+
+  assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 3);
+  assert.ok(elapsed >= 1100, `invalid discovery should consume both delays, elapsed ${elapsed}ms`);
+});
+
+test("connectClient retries when a restarted bridge reuses the port with a new token and pid", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+
+  const { server, port } = await startFakeBridge({ acceptToken: "fresh-token" });
+  t.after(() => {
+    server.close();
+  });
+  const getReads = countDiscoveryReads(t, discoveryPath, (reads) => {
+    const record = reads === 1
+      ? { port, token: "stale-token", pid: 1 }
+      : { port, token: "fresh-token", pid: 2 };
+    return `${JSON.stringify(record)}\n`;
+  });
+
+  // The replacement bridge already owns the same ephemeral port. The first
+  // TCP attempt still fails because the CLI is holding the pre-restart record.
+  const originalConnect = net.createConnection;
+  let attempts = 0;
+  net.createConnection = (...args) => {
+    attempts += 1;
+    if (attempts === 1) {
+      const socket = new net.Socket();
+      process.nextTick(() => {
+        const err = new Error("connect ECONNREFUSED 127.0.0.1");
+        err.code = "ECONNREFUSED";
+        socket.emit("error", err);
+      });
+      return socket;
+    }
+    return originalConnect(...args);
+  };
+  t.after(() => {
+    net.createConnection = originalConnect;
+  });
+
+  const client = await connectClient();
+  assert.equal(client.discovery.port, port);
+  assert.equal(client.discovery.token, "fresh-token");
+  assert.equal(client.discovery.pid, 2);
+  assert.equal(attempts, 2);
+  assert.equal(getReads(), 2);
+  await client.call("netcatty/getStatus", {});
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient refreshes discovery after a stale-token auth rejection on a reused port", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+
+  const { server, port } = await startFakeBridge({ acceptToken: "fresh-token" });
+  t.after(() => {
+    server.close();
+  });
+  const getReads = countDiscoveryReads(t, discoveryPath, (reads) => {
+    const record = reads === 1
+      ? { port, token: "stale-token", pid: 11 }
+      : { port, token: "fresh-token", pid: 22 };
+    return `${JSON.stringify(record)}\n`;
+  });
+
+  const client = await connectClient();
+  assert.equal(client.discovery.port, port);
+  assert.equal(client.discovery.token, "fresh-token");
+  assert.equal(client.discovery.pid, 22);
+  assert.equal(getAttempts(), 2);
+  assert.equal(getReads(), 2);
+  await client.call("netcatty/getStatus", {});
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient surfaces the original auth error when a stale token's discovery identity is unchanged", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+  const getReads = countDiscoveryReads(t, discoveryPath);
+
+  const { server, port } = await startFakeBridge({ acceptToken: "fresh-token", authResult: "not-ok" });
+  t.after(() => {
+    server.close();
+  });
+  writeDiscoveryFile(discoveryPath, port, "stale-token", 11);
+
+  await assert.rejects(
+    connectClient(),
+    (err) => err?.code === "AUTH_FAILED"
+      && err.message === "Failed to authenticate to Netcatty TCP bridge.",
+  );
+
+  assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 2);
+});
+
+test("connectClient surfaces the bridge auth error when the stale token's discovery identity is unchanged", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+  const getReads = countDiscoveryReads(t, discoveryPath);
+
+  const { server, port } = await startFakeBridge({ acceptToken: "fresh-token" });
+  t.after(() => {
+    server.close();
+  });
+  writeDiscoveryFile(discoveryPath, port, "stale-token", 11);
+
+  await assert.rejects(
+    connectClient(),
+    (err) => err?.code === "RPC_ERROR" && err.message === STALE_AUTH_MESSAGE,
+  );
+
+  assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 2);
 });
