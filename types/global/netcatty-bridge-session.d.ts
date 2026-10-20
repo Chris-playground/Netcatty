@@ -218,6 +218,7 @@ declare global {
       authMethod?: import("../../domain/models").HostAuthMethod;
       requiresMfa?: boolean;
       password?: string;
+      totp?: NetcattyTotpConfig;
       privateKey?: string;
       certificate?: string;
       publicKey?: string;

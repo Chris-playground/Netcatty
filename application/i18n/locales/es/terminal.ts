@@ -879,6 +879,7 @@ export const esTerminalMessages: Messages = {
   'keyboard.interactive.submit': 'Enviar',
   'keyboard.interactive.verifying': 'Verificando...',
   'keyboard.interactive.savePassword': 'Guardar contraseña',
+  'keyboard.interactive.fillTotp': 'Rellenar código actual',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'Frase de contraseña de la clave SSH',

@@ -1001,6 +1001,7 @@ export const zhTWTerminalMessages: Messages = {
   'keyboard.interactive.submit': '提交',
   'keyboard.interactive.verifying': '驗證中...',
   'keyboard.interactive.savePassword': '儲存密碼',
+  'keyboard.interactive.fillTotp': '填入目前驗證碼',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'SSH 金鑰密碼',

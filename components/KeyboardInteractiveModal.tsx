@@ -107,12 +107,25 @@ interface KeyboardInteractiveModalProps {
   request: KeyboardInteractiveRequest | null;
   onSubmit: (requestId: string, responses: string[], savePassword?: string) => boolean | Promise<boolean>;
   onCancel: (requestId: string) => boolean | Promise<boolean>;
+  canFillTotp?: boolean;
+  onFillTotp?: () => Promise<string | null> | string | null;
+}
+
+function totpResponseIndex(prompts: KeyboardInteractivePrompt[]): number {
+  const otpLike = /otp|verification|mfa auth|驗證碼|验证码/i;
+  const match = prompts.findIndex((prompt) => otpLike.test(prompt.prompt || ""));
+  if (match >= 0) return match;
+  if (prompts.length === 1) return 0;
+  const nonPassword = prompts.findIndex((prompt) => !isAPasswordPrompt(prompt));
+  return nonPassword >= 0 ? nonPassword : 0;
 }
 
 export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> = ({
   request,
   onSubmit,
   onCancel,
+  canFillTotp = false,
+  onFillTotp,
 }) => {
   const { t } = useI18n();
   const [responses, setResponses] = useState<string[]>([]);
@@ -184,6 +197,13 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
       setIsSubmitting(false);
     }
   }, [request, onCancel, isSubmitting]);
+
+  const handleFillTotp = useCallback(async () => {
+    if (!request || isSubmitting || !onFillTotp) return;
+    const code = await onFillTotp();
+    if (!code) return;
+    handleResponseChange(totpResponseIndex(request.prompts), code);
+  }, [request, isSubmitting, onFillTotp, handleResponseChange]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -288,6 +308,17 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
               </div>
             );
           })}
+          {canFillTotp && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => { void handleFillTotp(); }}
+              disabled={isSubmitting}
+            >
+              {t("keyboard.interactive.fillTotp")}
+            </Button>
+          )}
 </div>
 
         <div className="flex items-center justify-between pt-2">

@@ -2,6 +2,7 @@ import React from "react";
 import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRound, MapPin, Plus, Shapes, Shield, Trash2, User, X } from "lucide-react";
 import type { Host } from "../types";
 import { applyHostAuthMethodSelection } from "../domain/sshAuth";
+import { HostTotpFields } from "./HostTotpFields";
 import { HostIconPicker } from "./HostIconPicker";
 import { Button } from "./ui/button";
 import { Combobox } from "./ui/combobox";
@@ -225,6 +226,12 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 />
               </HostDetailsSettingRow>
             )}
+            <HostTotpFields
+              t={t}
+              form={form}
+              setForm={setForm}
+              effectiveProtocol={effectiveProtocol}
+            />
             {selectedIdentity ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border/70 bg-secondary/60">
                 <User size={16} className="text-muted-foreground" />

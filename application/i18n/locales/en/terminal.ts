@@ -917,6 +917,7 @@ export const enTerminalMessages: Messages = {
   'keyboard.interactive.submit': 'Submit',
   'keyboard.interactive.verifying': 'Verifying...',
   'keyboard.interactive.savePassword': 'Save password',
+  'keyboard.interactive.fillTotp': 'Fill current code',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'SSH Key Passphrase',

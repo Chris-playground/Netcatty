@@ -2817,6 +2817,7 @@ function createStartSessionApi(ctx) {
             hostId: options.hostId,
             hostname: options.hostname,
             password: options.password,
+            totp: options.totp,
             logPrefix,
             // A test has no terminal session registered in the renderer's
             // session list, so the terminal-scoped keyboard-interactive queue
@@ -2827,8 +2828,9 @@ function createStartSessionApi(ctx) {
             bootEpoch: options.bootEpoch,
             getAuthBanner: () => authBanner,
             shouldSkipAutoFill: () => shouldSkipKiPasswordAutoFill(authPhase),
-            onAutoFill: () => sendProgress(
-              totalHops, totalHops, options.hostname, 'auth-attempt', 'using saved password',
+            onAutoFill: (kind) => sendProgress(
+              totalHops, totalHops, options.hostname, 'auth-attempt',
+              kind === 'totp' ? 'using authenticator code' : 'using saved password',
             ),
             onPromptShown: () => sendProgress(
               totalHops, totalHops, options.hostname, 'auth-attempt', 'waiting for user input...',

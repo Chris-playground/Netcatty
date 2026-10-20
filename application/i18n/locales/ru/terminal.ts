@@ -924,6 +924,7 @@ export const ruTerminalMessages: Messages = {
   'keyboard.interactive.submit': 'Отправить',
   'keyboard.interactive.verifying': 'Проверка...',
   'keyboard.interactive.savePassword': 'Сохранить пароль',
+  'keyboard.interactive.fillTotp': 'Подставить текущий код',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'Парольная фраза SSH-ключа',

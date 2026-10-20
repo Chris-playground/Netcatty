@@ -12,6 +12,7 @@ const { exec } = childProcess;
 const { utils: sshUtils } = require("ssh2");
 const systemSshAgent = require("./systemSshAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
+const { planTotpAutoSubmit } = require("../../domain/totp.shared.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
 const {
   normalizePrivateKeyForSsh2,
@@ -2382,12 +2383,18 @@ function createKeyboardInteractiveHandler(options) {
     onPromptShown,
     onUserResponded,
     getAuthBanner,
+    totp,
+    now = () => Date.now(),
+    schedule = (fn, ms) => setTimeout(fn, ms),
   } = options;
   // ssh2 may re-invoke the keyboard-interactive event on auth failure with a
   // fresh challenge. If our first auto-fill attempt was wrong, falling back
   // to the modal on the retry lets the user correct it — and prevents a
   // tight loop where we keep submitting the same wrong password.
   let autoFilledOnce = false;
+  // TOTP is independent of the password fast-path: a PAM password prompt and
+  // a later verification-code prompt share this handler. Submit at most once.
+  let totpAutoSubmitted = false;
 
   return (name, instructions, instructionsLang, prompts, finish) => {
     console.log(`${logPrefix} ${hostname} keyboard-interactive auth requested`, {
@@ -2444,6 +2451,41 @@ function createKeyboardInteractiveHandler(options) {
       try { onAutoFill?.(); } catch (err) { console.warn(`${logPrefix} onAutoFill callback threw`, err); }
       finish([password]);
       return;
+    }
+
+    if (!totpAutoSubmitted && totp?.uri) {
+      let totpPlan = { action: "skip" };
+      try {
+        totpPlan = planTotpAutoSubmit({
+          uri: totp.uri,
+          prompts,
+          name,
+          instructions,
+          promptPattern: totp.promptPattern,
+          autoSubmit: totp.autoSubmit,
+          timestamp: now(),
+        });
+      } catch {
+        console.warn(`${logPrefix} TOTP auto-submit check failed`);
+        totpPlan = { action: "fail" };
+      }
+      if (totpPlan.action === "fail") {
+        totpAutoSubmitted = true;
+      } else if (totpPlan.action === "submit") {
+        totpAutoSubmitted = true;
+        const submitCode = () => {
+          console.log(`${logPrefix} Auto-submitting TOTP for a matching keyboard-interactive prompt`);
+          try { onAutoFill?.("totp"); } catch (err) { console.warn(`${logPrefix} onAutoFill callback threw`, err); }
+          try { finish([totpPlan.code]); } catch { console.warn(`${logPrefix} TOTP finish threw`); }
+        };
+        if (totpPlan.delayMs > 0) {
+          const timer = schedule(submitCode, totpPlan.delayMs);
+          timer?.unref?.();
+        } else {
+          submitCode();
+        }
+        return;
+      }
     }
 
     // Forward prompts to user via IPC
