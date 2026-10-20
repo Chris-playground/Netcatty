@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const runtimeSource = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+const autocompleteHookSource = readFileSync(
+  new URL("../autocomplete/useTerminalAutocomplete.ts", import.meta.url),
+  "utf8",
+);
 const attachmentSource = readFileSync(new URL("./terminalSessionAttachment.ts", import.meta.url), "utf8");
 const terminalSource = readFileSync(new URL("../../Terminal.tsx", import.meta.url), "utf8");
 const terminalLayerSource = readFileSync(new URL("../../TerminalLayer.tsx", import.meta.url), "utf8");
@@ -107,6 +111,21 @@ test("renderer flow control acknowledges host ingress rather than transformed di
   assert.match(
     terminalSource,
     /beginHibernatedSessionListeners[\s\S]*?\(chunk, meta\) =>[\s\S]*?observeTerminalInputPrompt\(chunk, meta\)[\s\S]*?Number\.isFinite\(meta\?\.pluginPipelineIngressBytes\)[\s\S]*?ackTerminalSessionFlow\(terminalBackend, backendId, pluginPipelineIngressBytes\)/u,
+  );
+});
+
+test("explicit plugin sensitivity is not treated as the heuristic prompt latch", () => {
+  assert.match(
+    terminalSource,
+    /passwordPromptActiveRef\.current = meta\.pluginPipelineSensitiveInput;[\s\S]*?passwordPromptActiveRef\.source = meta\.pluginPipelineSensitiveInput \? "explicit" : "heuristic";/,
+  );
+  assert.match(
+    terminalSource,
+    /passwordPromptActiveRef\.current = true;[\s\S]*?passwordPromptActiveRef\.source = "heuristic";/,
+  );
+  assert.match(
+    autocompleteHookSource,
+    /sensitiveSource: sensitiveInputActiveRef\?\.source,/,
   );
 });
 

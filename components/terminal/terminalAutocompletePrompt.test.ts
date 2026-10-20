@@ -95,6 +95,35 @@ test("shouldBlockAutocompleteForSensitivePrompt lets safe program prompts past t
   );
 });
 
+test("shouldBlockAutocompleteForSensitivePrompt keeps explicit plugin sensitivity closed for trusted labels", () => {
+  // pluginPipelineSensitiveInput (and any other authoritative latch) must not
+  // use the Email:/Username: bypass. A heuristic-only latch still may.
+  assert.equal(
+    shouldBlockAutocompleteForSensitivePrompt({
+      sensitiveInputActive: true,
+      sensitiveSource: "explicit",
+      promptText: "Email:",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBlockAutocompleteForSensitivePrompt({
+      sensitiveInputActive: true,
+      sensitiveSource: "explicit",
+      promptText: "Username:",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBlockAutocompleteForSensitivePrompt({
+      sensitiveInputActive: true,
+      sensitiveSource: "heuristic",
+      promptText: "Email:",
+    }),
+    false,
+  );
+});
+
 test("shouldBlockAutocompleteForSensitivePrompt keeps the latch for unknown and secret labels", () => {
   for (const promptText of [
     "API key:",

@@ -162,13 +162,29 @@ function isTrustedOrdinaryInputPromptText(promptText: string): boolean {
 }
 
 /**
+ * Why `sensitiveInputActive` is latched.
+ *
+ * `heuristic` is the untrusted-prompt detector (`Email:`, unknown `Label:`).
+ * `explicit` is authoritative metadata such as `pluginPipelineSensitiveInput`.
+ * Omitted means heuristic, so existing callers keep the trusted-label bypass.
+ */
+export type SensitiveAutocompleteLatchSource = "heuristic" | "explicit";
+
+export type SensitiveInputActiveRef = {
+  current: boolean;
+  source?: SensitiveAutocompleteLatchSource;
+};
+
+/**
  * Whether fetchSuggestions must refuse to query/render for an already-known
  * sensitive line (host latch or auth-challenge prompt text).
  *
- * The host latch is set for every untrusted input boundary, including safe
- * program prompts such as `Email:`. Only a small allowlist of plain identity
- * labels may bypass that latch so snippet candidates can render. Unknown
- * labels, and anything password/token/key/PIN/OTP-like, stay closed.
+ * The heuristic latch is set for every untrusted input boundary, including
+ * safe program prompts such as `Email:`. Only a small allowlist of plain
+ * identity labels may bypass that latch so snippet candidates can render.
+ * An explicit latch (plugin pipeline or other authoritative sensitive
+ * metadata) stays closed for those labels too. Unknown labels, and anything
+ * password/token/key/PIN/OTP-like, stay closed.
  *
  * This is *not* a substitute for the empty-echo / `allowExternalProviders:
  * false` wait in useTerminalAutocomplete: `read -s -p '$ '` still looks like
@@ -178,9 +194,12 @@ function isTrustedOrdinaryInputPromptText(promptText: string): boolean {
 export function shouldBlockAutocompleteForSensitivePrompt(options: {
   sensitiveInputActive: boolean;
   promptText: string;
+  sensitiveSource?: SensitiveAutocompleteLatchSource;
 }): boolean {
+  const explicitLatch = options.sensitiveInputActive && options.sensitiveSource === "explicit";
   if (
     options.sensitiveInputActive
+    && !explicitLatch
     && isTrustedOrdinaryInputPromptText(options.promptText)
   ) {
     return false;

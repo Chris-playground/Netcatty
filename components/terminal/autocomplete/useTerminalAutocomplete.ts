@@ -46,6 +46,7 @@ import {
   limitSuggestionsForPrompt,
   resolveAutocompleteQueryInput,
   shouldBlockAutocompleteForSensitivePrompt,
+  type SensitiveInputActiveRef,
 } from "./terminalAutocompletePrompt";
 import { sliceStringByCellColumns } from "./terminalStringCellWidth";
 import { isTerminalAlternateScreenActive } from "../terminalHibernateRuntime";
@@ -236,7 +237,7 @@ interface UseTerminalAutocompleteOptions {
    * Host-owned password/auth prompt latch. When true, suppress autocomplete
    * even if the PS1 still looks like a normal shell (e.g. `read -s -p '$ '`).
    */
-  sensitiveInputActiveRef?: RefObject<boolean>;
+  sensitiveInputActiveRef?: SensitiveInputActiveRef;
   /** Host-owned completion Provider adapter; defaults to Netcatty's built-in Provider. */
   provideCompletions?: (
     input: string,
@@ -878,6 +879,7 @@ export function useTerminalAutocomplete(
     if (
       shouldBlockAutocompleteForSensitivePrompt({
         sensitiveInputActive: sensitiveInputActiveRef?.current === true,
+        sensitiveSource: sensitiveInputActiveRef?.source,
         promptText: prompt.promptText,
       })
     ) {
