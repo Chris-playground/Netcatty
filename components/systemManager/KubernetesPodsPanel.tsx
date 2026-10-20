@@ -187,7 +187,7 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
     if (action === 'describe') {
       void openCommand(
         `describe: ${pod.name}`,
-        buildKubectlDescribeCommand(contextName, namespaceName, pod.name),
+        buildKubectlDescribeCommand(contextName, namespaceName, pod.name, parentSession.shellType),
       );
       return;
     }
@@ -200,15 +200,15 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
     if (action === 'shell') {
       void openCommand(
         `pod: ${pod.name}`,
-        buildKubectlExecShellCommand(contextName, namespaceName, pod.name, chosen),
+        buildKubectlExecShellCommand(contextName, namespaceName, pod.name, chosen, parentSession.shellType),
       );
       return;
     }
     void openCommand(
       `logs: ${pod.name}`,
-      buildKubectlLogsCommand(contextName, namespaceName, pod.name, chosen),
+      buildKubectlLogsCommand(contextName, namespaceName, pod.name, chosen, parentSession.shellType),
     );
-  }, [contextName, namespaceName, openCommand]);
+  }, [contextName, namespaceName, openCommand, parentSession.shellType]);
 
   const deletePod = useCallback(async (name: string) => {
     if (!contextName || !namespaceName) return;

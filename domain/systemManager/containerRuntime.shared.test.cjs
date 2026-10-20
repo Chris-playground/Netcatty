@@ -21,7 +21,8 @@ const {
   parseRuntimeProbe,
   pickContainerSource,
   sourcesFromCapabilities,
-} = require("./containerRuntime.cjs");
+  isKubectlForbiddenError,
+} = require("./containerRuntime.shared.cjs");
 
 test("parseRuntimeProbe reads line-anchored command -v markers", () => {
   const probe = parseRuntimeProbe([
@@ -269,4 +270,36 @@ test("kubectl commands quote remote arguments and reject control characters", ()
   assert.match(described, /kind-kind/);
   assert.match(described, /api/);
   assert.equal(buildKubectlExecShellCommand("kind-kind", "default", "bad\npod"), 'echo "Invalid pod name"');
+});
+
+test("kubectl popup commands skip the POSIX wrapper on Windows shells", () => {
+  for (const shell of ["powershell", "cmd"]) {
+    const exec = buildKubectlExecShellCommand("kind-kind", "default", "api", "sidecar", shell);
+    const logs = buildKubectlLogsCommand("kind-kind", "default", "api", "app", shell);
+    const described = buildKubectlDescribeCommand("kind-kind", "default", "api", shell);
+    assert.equal(exec.startsWith("kubectl "), true, shell);
+    assert.equal(logs.startsWith("kubectl "), true, shell);
+    assert.equal(described.startsWith("kubectl "), true, shell);
+    assert.equal(exec.startsWith("sh -c "), false, shell);
+    assert.match(exec, /exec -it/);
+    assert.match(exec, /sidecar/);
+    assert.match(logs, /logs -f --tail 200/);
+    assert.match(described, /describe pod/);
+  }
+  assert.match(
+    buildKubectlExecShellCommand("kind-kind", "default", "api", "sidecar", "powershell"),
+    /--context 'kind-kind'/,
+  );
+  assert.match(
+    buildKubectlDescribeCommand("kind-kind", "default", "api", "cmd"),
+    /--context "kind-kind"/,
+  );
+});
+
+test("isKubectlForbiddenError matches namespace list denial", () => {
+  assert.equal(
+    isKubectlForbiddenError('Error from server (Forbidden): namespaces is forbidden: User "view" cannot list resource "namespaces"'),
+    true,
+  );
+  assert.equal(isKubectlForbiddenError("Unable to connect to the server"), false);
 });

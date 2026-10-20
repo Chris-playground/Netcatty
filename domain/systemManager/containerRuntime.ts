@@ -4,7 +4,7 @@ export type {
   KubeContextInfo,
   KubectlPodInfo,
   RuntimeProbeFlags,
-} from "../../electron/bridges/systemManager/containerRuntime.cjs";
+} from "./containerRuntime.shared.cjs";
 
 export {
   buildContainerExecShellCommand,
@@ -14,6 +14,7 @@ export {
   buildKubectlLogsCommand,
   firstContainerRuntime,
   isContainerSource,
+  isKubectlForbiddenError,
   pickContainerSource,
   sourcesFromCapabilities,
-} from "../../electron/bridges/systemManager/containerRuntime.cjs";
+} from "./containerRuntime.shared.cjs";

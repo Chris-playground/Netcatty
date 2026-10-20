@@ -14,6 +14,7 @@ import type {
 } from '../../domain/systemManager/containerRuntime';
 import {
   firstContainerRuntime,
+  isKubectlForbiddenError,
   pickContainerSource,
   sourcesFromCapabilities,
 } from '../../domain/systemManager/containerRuntime';
@@ -111,6 +112,8 @@ export const DockerManagerTab = memo(function DockerManagerTab({
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [scopeNonce, setScopeNonce] = useState(0);
   const skipPersist = useRef(true);
+  const namespaceNameRef = useRef(namespaceName);
+  namespaceNameRef.current = namespaceName;
 
   useEffect(() => {
     skipPersist.current = true;
@@ -181,7 +184,16 @@ export const DockerManagerTab = memo(function DockerManagerTab({
     void backend.kubectl({ sessionId, op: 'namespaces', context: contextName }).then((result) => {
       if (cancelled) return;
       if (!result.success || !result.namespaces) {
-        setScopeError(result.error || stableT('systemManager.errors.loadKubernetes'));
+        const message = result.error || stableT('systemManager.errors.loadKubernetes');
+        if (isKubectlForbiddenError(message)) {
+          const configured = contexts.find((item) => item.name === contextName)?.namespace || 'default';
+          const fallback = namespaceNameRef.current || configured;
+          setScopeError(null);
+          setNamespaceName((current) => current || fallback);
+          setNamespaces([fallback]);
+          return;
+        }
+        setScopeError(message);
         return;
       }
       setNamespaces(result.namespaces);

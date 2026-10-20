@@ -57,19 +57,28 @@ export function buildKubectlContextsCommand(): string;
 export function buildKubectlNamespacesCommand(context: string): string | null;
 export function buildKubectlPodsCommand(context: string, namespace: string): string | null;
 export function buildKubectlDeletePodCommand(context: string, namespace: string, pod: string): string | null;
+export type PopupShell = "posix" | "powershell" | "cmd";
+export function isKubectlForbiddenError(message: string | null | undefined): boolean;
 export function buildKubectlExecShellCommand(
   context: string,
   namespace: string,
   pod: string,
   container?: string,
+  shell?: string,
 ): string;
 export function buildKubectlLogsCommand(
   context: string,
   namespace: string,
   pod: string,
   container?: string,
+  shell?: string,
 ): string;
-export function buildKubectlDescribeCommand(context: string, namespace: string, pod: string): string;
+export function buildKubectlDescribeCommand(
+  context: string,
+  namespace: string,
+  pod: string,
+  shell?: string,
+): string;
 export function parseKubeconfigContexts(jsonText: string): { contexts: KubeContextInfo[]; current: string };
 export function parseNamespaceList(jsonText: string): string[];
 export function parseKubectlPodList(jsonText: string, now?: number): KubectlPodInfo[];

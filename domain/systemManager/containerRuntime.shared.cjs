@@ -6,7 +6,7 @@ const SOURCE_ORDER = ["docker", "podman", "nerdctl", "kubernetes"];
 const CLEAR_STARTUP_OUTPUT = "printf '\\033[H\\033[2J\\033[3J';";
 
 function shQuote(str) {
-  return `'${String(str).replace(/'/g, `'\"'\"'`)}'`;
+  return `'${String(str).replace(/'/g, "'\"'\"'")}'`;
 }
 
 function normalizeContainerRuntime(runtime) {
@@ -143,26 +143,50 @@ function buildContainerLogsCommand(runtime, containerId) {
   return buildContainerCommandWithSudoFallback(runtime, safeId, `logs -f --tail 200 ${safeId}`);
 }
 
+function hasControlChar(text) {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code <= 31 || code === 127) return true;
+  }
+  return false;
+}
+
 function isSafeShellArg(value) {
   const text = String(value ?? "");
   if (!text || text.length > 512) return false;
-  return !/[\u0000-\u001f\u007f]/.test(text);
+  return !hasControlChar(text);
 }
 
-function kubectlPrefix(context, namespace) {
+function normalizePopupShell(shell) {
+  return shell === "powershell" || shell === "cmd" ? shell : "posix";
+}
+
+function quoteShellArg(shell, value) {
+  const text = String(value);
+  if (shell === "cmd") return `"${text.replace(/"/g, '""')}"`;
+  if (shell === "powershell") return `'${text.replace(/'/g, "''")}'`;
+  return shQuote(text);
+}
+
+function kubectlPrefix(context, namespace, shell = "posix") {
+  const popupShell = normalizePopupShell(shell);
   if (!isSafeShellArg(context)) return null;
-  const parts = ["kubectl", "--context", shQuote(context)];
+  const parts = ["kubectl", "--context", quoteShellArg(popupShell, context)];
   if (namespace != null && namespace !== "") {
     if (!isSafeShellArg(namespace)) return null;
-    parts.push("-n", shQuote(namespace));
+    parts.push("-n", quoteShellArg(popupShell, namespace));
   }
   return parts.join(" ");
 }
 
-function optionalContainerArg(container) {
+function optionalContainerArg(container, shell = "posix") {
   if (container == null || container === "") return "";
   if (!isSafeShellArg(container)) return null;
-  return ` -c ${shQuote(container)}`;
+  return ` -c ${quoteShellArg(normalizePopupShell(shell), container)}`;
+}
+
+function isKubectlForbiddenError(message) {
+  return /\bforbidden\b/i.test(String(message || ""));
 }
 
 function wrapClearAndExec(command) {
@@ -190,27 +214,43 @@ function buildKubectlDeletePodCommand(context, namespace, pod) {
   return `${prefix} delete pod ${shQuote(pod)} --wait=false`;
 }
 
-function buildKubectlExecShellCommand(context, namespace, pod, container) {
-  const prefix = kubectlPrefix(context, namespace);
-  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
-  const containerArg = optionalContainerArg(container);
-  if (containerArg == null) return 'echo "Invalid container name"';
-  const inner = "sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'";
-  return wrapClearAndExec(`${prefix} exec -it ${shQuote(pod)}${containerArg} -- ${inner}`);
+function containerShellArg(shell) {
+  if (shell === "cmd") {
+    return 'sh -c "command -v bash >/dev/null 2>&1 && exec bash || exec sh"';
+  }
+  return "sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'";
 }
 
-function buildKubectlLogsCommand(context, namespace, pod, container) {
-  const prefix = kubectlPrefix(context, namespace);
-  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
-  const containerArg = optionalContainerArg(container);
-  if (containerArg == null) return 'echo "Invalid container name"';
-  return wrapClearAndExec(`${prefix} logs -f --tail 200 ${shQuote(pod)}${containerArg}`);
+function finishKubectlPopup(shell, command) {
+  return shell === "posix" ? wrapClearAndExec(command) : command;
 }
 
-function buildKubectlDescribeCommand(context, namespace, pod) {
-  const prefix = kubectlPrefix(context, namespace);
+function buildKubectlExecShellCommand(context, namespace, pod, container, shell) {
+  const popupShell = normalizePopupShell(shell);
+  const prefix = kubectlPrefix(context, namespace, popupShell);
   if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
-  return wrapClearAndExec(`${prefix} describe pod ${shQuote(pod)}`);
+  const containerArg = optionalContainerArg(container, popupShell);
+  if (containerArg == null) return 'echo "Invalid container name"';
+  const command = `${prefix} exec -it ${quoteShellArg(popupShell, pod)}${containerArg} -- ${containerShellArg(popupShell)}`;
+  return finishKubectlPopup(popupShell, command);
+}
+
+function buildKubectlLogsCommand(context, namespace, pod, container, shell) {
+  const popupShell = normalizePopupShell(shell);
+  const prefix = kubectlPrefix(context, namespace, popupShell);
+  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  const containerArg = optionalContainerArg(container, popupShell);
+  if (containerArg == null) return 'echo "Invalid container name"';
+  const command = `${prefix} logs -f --tail 200 ${quoteShellArg(popupShell, pod)}${containerArg}`;
+  return finishKubectlPopup(popupShell, command);
+}
+
+function buildKubectlDescribeCommand(context, namespace, pod, shell) {
+  const popupShell = normalizePopupShell(shell);
+  const prefix = kubectlPrefix(context, namespace, popupShell);
+  if (!prefix || !isSafeShellArg(pod)) return 'echo "Invalid pod name"';
+  const command = `${prefix} describe pod ${quoteShellArg(popupShell, pod)}`;
+  return finishKubectlPopup(popupShell, command);
 }
 
 function parseJsonValue(text) {
@@ -353,6 +393,7 @@ module.exports = {
   buildKubectlExecShellCommand,
   buildKubectlLogsCommand,
   buildKubectlDescribeCommand,
+  isKubectlForbiddenError,
   parseKubeconfigContexts,
   parseNamespaceList,
   parseKubectlPodList,

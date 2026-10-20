@@ -38,7 +38,7 @@ const {
   isRuntimeSocketPermissionError,
   normalizeContainerRuntime,
   runtimeBinary,
-} = require("./containerRuntime.cjs");
+} = require("../../../domain/systemManager/containerRuntime.shared.cjs");
 
 function parseDockerContainers(stdout) {
   const containers = [];

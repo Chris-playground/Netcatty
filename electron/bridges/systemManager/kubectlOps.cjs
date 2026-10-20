@@ -8,7 +8,7 @@ const {
   parseKubeconfigContexts,
   parseKubectlPodList,
   parseNamespaceList,
-} = require("./containerRuntime.cjs");
+} = require("../../../domain/systemManager/containerRuntime.shared.cjs");
 
 function isSuccessfulCommandResult(result) {
   return result?.success && (result.code === 0 || result.code === null || result.code === undefined);
