@@ -8,6 +8,7 @@ import {
   Search,
   Terminal,
   TerminalSquare,
+  Zap,
 } from "lucide-react";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
@@ -610,7 +611,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                     onClick={() => handleItemSelect(item)}
                   >
                     <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
-                      <Terminal size={16} />
+                      <Zap size={16} />
                     </div>
                     <span className="min-w-0 truncate text-sm font-medium">{item.title}</span>
                   </div>
