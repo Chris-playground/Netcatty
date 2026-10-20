@@ -538,9 +538,19 @@ export function prepareTerminalDataForUserPasteDisplay(term: object, data: strin
   return data;
 }
 
+const isAlternateScreenBuffer = (term: object): boolean =>
+  (term as { buffer?: { active?: { type?: string } } }).buffer?.active?.type === "alternate";
+
 export function clearPasteResidualAfterTerminalWrite(term: object): string | null {
   const state = pasteDisplayStates.get(term);
   if (!isStateActive(state)) return null;
+  // Vim and other alternate-screen apps often end a paste chunk with the cursor
+  // mid-line. EL would erase the rest of that row, and the app may not redraw it (#3166).
+  // Drop the pending clear so it cannot fire after returning to the normal screen.
+  if (isAlternateScreenBuffer(term)) {
+    state.clearPending = 0;
+    return null;
+  }
   if (state.clearPending <= 0) return null;
   if (typeof (term as Partial<Pick<XTerm, "write">>).write !== "function") return null;
 
