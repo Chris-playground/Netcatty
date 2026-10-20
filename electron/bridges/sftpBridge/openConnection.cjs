@@ -781,42 +781,62 @@ function createOpenConnectionApi(ctx) {
      * a fresh SSH dial would ask for OTP again.
      */
     function findAuthenticatedChannelOwner(endpointKey) {
-      if (!endpointKey || !sftpClients || typeof sftpClients.values !== "function") return null;
-      for (const client of sftpClients.values()) {
-        if (!client || client.__netcattyDisposed || client.__netcattySharedChannelAlias) continue;
+      if (!endpointKey || !sftpClients || typeof sftpClients.entries !== "function") return null;
+      for (const [sftpId, client] of sftpClients.entries()) {
+        if (!sftpId || !client || client.__netcattyDisposed || client.__netcattySharedChannelAlias) continue;
         if (client.__netcattyTransportManaged) continue;
         if (client.__netcattyEndpointKey !== endpointKey) continue;
         if (!client.__netcattySingleChannelSsh && !client.__netcattySudoMode) continue;
         if (!sftpChannelIsLive(client.sftp)) continue;
-        return client;
+        return { sftpId, client };
       }
       return null;
     }
 
     function adoptAuthenticatedSftpChannel(endpoint, connId) {
-      const source = findAuthenticatedChannelOwner(buildEndpointKey(endpoint));
-      if (!source || typeof createSessionBackedSftpClient !== "function") return null;
-      const alias = createSessionBackedSftpClient(connId, source.client, {
-        singleChannelSsh: true,
-      });
-      alias.sftp = source.sftp;
-      alias.__netcattyFileProtocol = source.__netcattyFileProtocol || "sftp";
-      alias.__netcattySudoMode = !!source.__netcattySudoMode;
-      // Keep uploads on this channel. A disposable subsystem would either drop
-      // the single-channel login or bypass sudo elevation.
-      alias.__netcattySingleChannelSsh = true;
-      alias.__netcattySharedChannelAlias = true;
-      alias.__netcattyEndpointKey = source.__netcattyEndpointKey;
-      alias.__netcattyTransportManaged = false;
-      alias.end = async () => {
-        alias.__netcattyDisposed = true;
-        alias.sftp = null;
-      };
-      sftpClients.set(connId, alias);
-      return {
-        sftpId: connId,
-        fileProtocol: alias.__netcattyFileProtocol === "scp" ? "scp" : "sftp",
-      };
+      const found = findAuthenticatedChannelOwner(buildEndpointKey(endpoint));
+      if (!found || typeof createSessionBackedSftpClient !== "function") return null;
+      const { sftpId: ownerId, client: source } = found;
+      let leaseStore = null;
+      let leaseId = null;
+      try {
+        const lease = require("../sftpTransferSessionLease.cjs");
+        leaseStore = lease.sftpTransferSessionLeaseStore;
+        leaseId = lease.channelAliasLeaseId(connId);
+        // Hold the owner until this alias is torn down. closeSftp(owner) then
+        // soft-closes instead of ending the only SFTP channel mid-transfer.
+        if (!leaseStore.acquire(ownerId, leaseId)) return null;
+      } catch {
+        return null;
+      }
+      try {
+        const alias = createSessionBackedSftpClient(connId, source.client, {
+          singleChannelSsh: true,
+        });
+        alias.sftp = source.sftp;
+        alias.__netcattyFileProtocol = source.__netcattyFileProtocol || "sftp";
+        alias.__netcattySudoMode = !!source.__netcattySudoMode;
+        // Keep uploads on this channel. A disposable subsystem would either drop
+        // the single-channel login or bypass sudo elevation.
+        alias.__netcattySingleChannelSsh = true;
+        alias.__netcattySharedChannelAlias = true;
+        alias.__netcattySharedChannelOwnerId = ownerId;
+        alias.__netcattySharedChannelAliasId = connId;
+        alias.__netcattyEndpointKey = source.__netcattyEndpointKey;
+        alias.__netcattyTransportManaged = false;
+        alias.end = async () => {
+          alias.__netcattyDisposed = true;
+          alias.sftp = null;
+        };
+        sftpClients.set(connId, alias);
+        return {
+          sftpId: connId,
+          fileProtocol: alias.__netcattyFileProtocol === "scp" ? "scp" : "sftp",
+        };
+      } catch (err) {
+        try { leaseStore?.release(ownerId, leaseId); } catch { /* ignore */ }
+        throw err;
+      }
     }
 
     /**

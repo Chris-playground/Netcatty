@@ -3398,10 +3398,13 @@ async function readSftpRange(sftp, handle, buffer, position, length, options = {
       let settled = false;
       let timer = null;
       let unwatchAbort = null;
+      let unwatchDeath = () => {};
       const cleanup = () => {
         if (timer) clearTimeout(timer);
         unwatchAbort?.();
         unwatchAbort = null;
+        try { unwatchDeath(); } catch { /* ignore */ }
+        unwatchDeath = () => {};
         signal?.removeEventListener?.("abort", onAbort);
       };
       const finish = (error, count) => {
@@ -3411,6 +3414,7 @@ async function readSftpRange(sftp, handle, buffer, position, length, options = {
         if (error) reject(error);
         else resolve(Number(count) || 0);
       };
+      unwatchDeath = watchSftpChannelDeath(sftp, (error) => finish(error));
       const onAbort = () => {
         const error = new Error("Transfer cancelled");
         error.code = "ABORT_ERR";
@@ -3680,12 +3684,71 @@ async function readLocalRange(fileHandle, buffer, position, length) {
   }
 }
 
+/**
+ * One close/error listener per channel. ssh2 does not invoke pending READ/WRITE
+ * callbacks when the owner connection is destroyed, so each in-flight request
+ * must fail itself or the transfer stays at a partial percent forever.
+ */
+const sftpChannelDeathWaiters = new WeakMap();
+
+function watchSftpChannelDeath(sftp, onDeath) {
+  if (!sftp || typeof sftp.on !== "function") return () => {};
+  let entry = sftpChannelDeathWaiters.get(sftp);
+  if (!entry) {
+    const waiters = new Set();
+    const fail = (error) => {
+      const wrapped = error instanceof Error
+        ? error
+        : new Error(String(error?.message || error || "SFTP channel error"));
+      for (const waiter of [...waiters]) waiter(wrapped);
+    };
+    entry = {
+      waiters,
+      onError: (error) => fail(error || new Error("SFTP channel error")),
+      onClose: () => {
+        const error = new Error("SFTP channel closed");
+        error.code = "ERR_SFTP_CHANNEL_CLOSED";
+        error.sftpChannelClosed = true;
+        error.noTransferFallback = true;
+        fail(error);
+      },
+    };
+    sftp.on("error", entry.onError);
+    sftp.on("close", entry.onClose);
+    sftpChannelDeathWaiters.set(sftp, entry);
+  }
+  entry.waiters.add(onDeath);
+  return () => {
+    const current = sftpChannelDeathWaiters.get(sftp);
+    if (!current) return;
+    current.waiters.delete(onDeath);
+    if (current.waiters.size > 0) return;
+    try { sftp.removeListener("error", current.onError); } catch { /* ignore */ }
+    try { sftp.removeListener("close", current.onClose); } catch { /* ignore */ }
+    if (sftpChannelDeathWaiters.get(sftp) === current) sftpChannelDeathWaiters.delete(sftp);
+  };
+}
+
 function writeSftpRange(sftp, handle, buffer, position, length) {
   return new Promise((resolve, reject) => {
-    sftp.write(handle, buffer, 0, length, position, (error) => {
+    let settled = false;
+    let unwatch = () => {};
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      try { unwatch(); } catch { /* ignore */ }
       if (error) reject(error);
       else resolve();
-    });
+    };
+    unwatch = watchSftpChannelDeath(sftp, finish);
+    try {
+      sftp.write(handle, buffer, 0, length, position, (error) => {
+        if (error) finish(error);
+        else finish();
+      });
+    } catch (error) {
+      finish(error);
+    }
   });
 }
 
@@ -4729,7 +4792,10 @@ async function uploadFileConcurrent(
     // CLOSE request would hang forever with no callback from ssh2.
     if (remoteHandle) {
       const skipClose = disposeChannel && (failed || transfer.cancelled);
-      if (!skipClose) {
+      // A closed channel never answers CLOSE. Skip it; the 2s race is only for
+      // a live shared session. Falling through to another strategy on a dead
+      // channel is handled by noTransferFallback on the close error.
+      if (!skipClose && sftp?.readable !== false) {
         let closeTimeout = null;
         try {
           await Promise.race([

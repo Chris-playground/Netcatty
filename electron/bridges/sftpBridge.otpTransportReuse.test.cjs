@@ -602,6 +602,151 @@ test("single-channel OTP SFTP reuses the authenticated channel instead of hangin
   assert.equal(server.getKeyboardInteractiveRounds(), 2);
 });
 
+test("closing the single-channel owner mid-upload defers teardown and a dead channel fails the borrow (#3310)", { timeout: 20000 }, async (t) => {
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => {
+    pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  });
+
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try {
+        await sftpBridge.closeSftp(null, { sftpId });
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-owner-close" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(
+    () => answerOtpPrompts(browseSender),
+    { message: "owner login must surface the OTP prompt" },
+  );
+  const browse = await browseOpen;
+  const browseClient = sftpClients.get(browse.sftpId);
+  const transfer = await sftpBridge.openSftp({ sender: createSender() }, { ...options });
+  const alias = sftpClients.get(transfer.sftpId);
+  assert.equal(alias?.__netcattySharedChannelAlias, true);
+  assert.equal(alias?.__netcattySharedChannelOwnerId, browse.sftpId);
+
+  const channel = browseClient.sftp;
+  const originalWrite = channel.write;
+  let heldWrites = 0;
+  // SFTP WRITE is (handle, buffer, offset, length, position, cb). Leave the
+  // stream write() used by the SSH channel itself alone so client.end() can
+  // still close the socket.
+  channel.write = function writeHeld(...args) {
+    if (typeof args[5] === "function" && typeof args[4] === "number") {
+      heldWrites += 1;
+      return;
+    }
+    return originalWrite.apply(this, args);
+  };
+  t.after(() => {
+    channel.write = originalWrite;
+  });
+
+  const tempRoot = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("otp-owner-close-upload")}-`);
+  t.after(() => {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+  const localFile = path.join(tempRoot, "upload.txt");
+  const payload = Buffer.from("owner-close mid upload\n");
+  fs.writeFileSync(localFile, payload);
+  const transferEvents = [];
+  let transferSettled = false;
+  const transferPromise = transferBridge.startTransfer(
+    {
+      sender: {
+        send(channelName, eventPayload) {
+          transferEvents.push({ channel: channelName, payload: eventPayload });
+        },
+      },
+    },
+    {
+      transferId: "otp-owner-close-stream-1",
+      sourcePath: localFile,
+      targetPath: "/home/otpuser/owner-close-upload.txt",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: transfer.sftpId,
+      targetEncoding: "utf-8",
+      totalBytes: payload.length,
+    },
+  ).then((result) => {
+    transferSettled = true;
+    return result;
+  });
+  pendingOpens.push(transferPromise.catch(() => {}));
+
+  await waitFor(() => heldWrites > 0, {
+    timeoutMs: 4000,
+    message: "upload must reach a WRITE before the SFTP tab closes",
+  });
+  const closed = await sftpBridge.closeSftp(null, { sftpId: browse.sftpId });
+  assert.equal(closed?.deferred, true, "borrowed upload must keep the owner client open");
+  assert.equal(server.getConnectionCount(), 1, "closing the SFTP tab must not drop the shared SSH connection");
+  assert.equal(sftpClients.has(browse.sftpId), true);
+  assert.equal(transferSettled, false, "the upload is still in flight when the tab closes");
+
+  // The tab close deferred teardown. If the channel dies anyway, the borrow
+  // must surface an error instead of sitting at a partial percent.
+  const ended = browseClient.end().catch(() => {});
+  let hangTimer = null;
+  const result = await Promise.race([
+    transferPromise,
+    new Promise((_, reject) => {
+      hangTimer = setTimeout(() => reject(new Error("borrowed upload hung after the owner channel died")), 4000);
+    }),
+  ]);
+  clearTimeout(hangTimer);
+  let endTimer = null;
+  await Promise.race([
+    ended,
+    new Promise((resolve) => {
+      endTimer = setTimeout(resolve, 1000);
+    }),
+  ]);
+  clearTimeout(endTimer);
+  assert.equal(transferSettled, true);
+  assert.match(result?.error || "", /SFTP channel closed/);
+  assert.ok(
+    transferEvents.some((event) => (
+      event.channel === "netcatty:transfer:error"
+      && /SFTP channel closed/.test(String(event.payload?.error || ""))
+    )),
+    "the transfer error must be visible to the UI",
+  );
+
+  await sftpBridge.closeSftp(null, { sftpId: transfer.sftpId });
+  await waitFor(() => !sftpClients.has(browse.sftpId), {
+    timeoutMs: 2000,
+    message: "the owner client must end after the last borrower releases",
+  });
+});
+
 test("sudo SFTP-page transfer reuses the elevated channel instead of dialing again", async (t) => {
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
   t.after(() => {
