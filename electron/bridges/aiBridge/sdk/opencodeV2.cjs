@@ -262,6 +262,38 @@ function buildOpenCodeV2ConfigContent(v1Config = {}) {
   return content;
 }
 
+function mergeOpenCodeV2ConfigContent(generated, callerText) {
+  let caller = null;
+  if (typeof callerText === "string" && callerText.trim()) {
+    try {
+      const parsed = JSON.parse(callerText);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) caller = parsed;
+    } catch {
+      caller = null;
+    }
+  }
+  if (!caller) return generated;
+  const merged = { ...caller, ...generated };
+  // 1.x keys and the server username must not override the 2.x child env.
+  for (const key of ["permission", "autoupdate", "username"]) {
+    if (!Object.prototype.hasOwnProperty.call(generated, key)) delete merged[key];
+  }
+  if (caller.mcp && typeof caller.mcp === "object" && generated.mcp && typeof generated.mcp === "object") {
+    const callerServers = caller.mcp?.servers && typeof caller.mcp.servers === "object" && !Array.isArray(caller.mcp.servers)
+      ? caller.mcp.servers
+      : {};
+    const generatedServers = generated.mcp.servers && typeof generated.mcp.servers === "object" && !Array.isArray(generated.mcp.servers)
+      ? generated.mcp.servers
+      : {};
+    merged.mcp = {
+      ...caller.mcp,
+      ...generated.mcp,
+      servers: { ...callerServers, ...generatedServers },
+    };
+  }
+  return merged;
+}
+
 function sanitizeOpenCodeV2Detail(message) {
   const raw = String(message || "").trim();
   if (!raw || /[\r\n]/.test(raw) || raw.length > 240) return "";
@@ -291,7 +323,9 @@ function isOpenCodeTransportError(error) {
 }
 
 function formatOpenCodeV2SessionError(error) {
-  const safe = sanitizeOpenCodeV2Detail(error?.message || error?.data?.message || "");
+  const message = error?.message || error?.data?.message || "";
+  if (isOpenCodeTransportError({ message: String(message) })) return "ai.opencode.v2.sessionFailed";
+  const safe = sanitizeOpenCodeV2Detail(message);
   return safe || "ai.opencode.v2.sessionFailed";
 }
 
@@ -732,7 +766,10 @@ async function openOpenCodeV2Server({
   const spec = prepareCommandForSpawn(command, args, { unwrapNativeExe: false });
   const childEnv = {
     ...buildSdkAgentEnv({ shellEnv: env || process.env }),
-    OPENCODE_CONFIG_CONTENT: JSON.stringify(buildOpenCodeV2ConfigContent(config || {})),
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(mergeOpenCodeV2ConfigContent(
+      buildOpenCodeV2ConfigContent(config || {}),
+      env?.OPENCODE_CONFIG_CONTENT,
+    )),
     OPENCODE_SERVER_USERNAME: OPENCODE_V2_USERNAME,
     OPENCODE_SERVER_PASSWORD: injectedPassword,
   };
@@ -778,6 +815,7 @@ function listServerKey(binPath, env) {
     env?.XDG_CONFIG_HOME,
     env?.OPENCODE_CONFIG,
     env?.OPENCODE_CONFIG_DIR,
+    env?.OPENCODE_CONFIG_CONTENT,
     env?.PATH,
   ].map((value) => (value == null ? "" : String(value))).join("\0");
 }
@@ -1111,6 +1149,7 @@ module.exports = {
   OPENCODE_V2_PASSWORD_GRACE_MS,
   buildOpenCodeBasicAuthorization,
   buildOpenCodeV2ConfigContent,
+  mergeOpenCodeV2ConfigContent,
   createOpenCodeServeStartupParser,
   createOpenCodeV2Client,
   detectOpenCodeCliVersion,

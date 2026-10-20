@@ -7,6 +7,7 @@ const { EventEmitter } = require("node:events");
 const {
   buildOpenCodeBasicAuthorization,
   buildOpenCodeV2ConfigContent,
+  mergeOpenCodeV2ConfigContent,
   createOpenCodeServeStartupParser,
   createOpenCodeV2Client,
   detectOpenCodeCliVersion,
@@ -206,6 +207,33 @@ test("2.x config keeps permissions and local MCP without the 1.x startup keys", 
   assert.equal(content.model, "openai/gpt-5");
 });
 
+test("2.x config keeps caller providers and plugins", () => {
+  const generated = buildOpenCodeV2ConfigContent({
+    share: "disabled",
+    autoupdate: false,
+    model: "openai/gpt-5",
+    mcp: { netcatty: { type: "local", command: ["node", "cli.js"], environment: {}, enabled: true } },
+  });
+  const merged = mergeOpenCodeV2ConfigContent(generated, JSON.stringify({
+    username: "other",
+    permission: { edit: "allow" },
+    autoupdate: true,
+    model: "anthropic/claude",
+    providers: { local: { models: { coder: { modelID: "real" } } } },
+    plugins: ["opencode-provider"],
+    mcp: { servers: { extra: { type: "local", command: ["echo"] } } },
+  }));
+  assert.equal(merged.model, "openai/gpt-5");
+  assert.equal(merged.username, undefined);
+  assert.equal(merged.permission, undefined);
+  assert.equal(merged.autoupdate, undefined);
+  assert.deepEqual(merged.providers.local.models.coder, { modelID: "real" });
+  assert.deepEqual(merged.plugins, ["opencode-provider"]);
+  assert.deepEqual(merged.mcp.servers.extra, { type: "local", command: ["echo"] });
+  assert.equal(merged.mcp.servers.netcatty.type, "local");
+  assert.equal(mergeOpenCodeV2ConfigContent(generated, "not json"), generated);
+});
+
 test("mapOpenCodeV2Catalog uses provider and model ids from the 2.x payloads", () => {
   const catalog = mapOpenCodeV2Catalog(
     { data: [
@@ -373,6 +401,19 @@ test("translateOpenCodeV2Event streams text, tools, and a safe session failure",
     ["error", "ai.opencode.v2.sessionFailed"],
   ]);
   assert.equal(JSON.stringify(events).includes("hunter2"), false);
+});
+
+test("session.execution.failed hides undici transport text", () => {
+  const events = [];
+  translateOpenCodeV2Event({
+    type: "session.execution.failed",
+    data: { sessionID: "ses_1", error: { message: "fetch failed" } },
+  }, { emitError: (message) => events.push(message) }, { sessionID: "ses_1" });
+  translateOpenCodeV2Event({
+    type: "session.execution.failed",
+    data: { sessionID: "ses_1", error: { message: "terminated" } },
+  }, { emitError: (message) => events.push(message) }, { sessionID: "ses_1" });
+  assert.deepEqual(events, ["ai.opencode.v2.sessionFailed", "ai.opencode.v2.sessionFailed"]);
 });
 
 test("runOpenCodeV2Turn authenticates, keeps the user prompt unchanged, and streams the session", async () => {
