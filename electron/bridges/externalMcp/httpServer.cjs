@@ -334,6 +334,16 @@ function createExternalMcpHttpServer(deps = {}) {
       await withSession(session, () => (
         requestContext.run({ externalClient }, () => transport.handleRequest(req, res, body))
       ));
+      // The SDK answers 406/415 before onsessioninitialized. That is not a throw,
+      // so the synthetic approval client and MCP server would otherwise stay up.
+      if (!session.sessionId) {
+        detach();
+        try {
+          await server.close?.();
+        } catch {
+          // Ignore close failures after a rejected handshake.
+        }
+      }
     } catch (error) {
       if (session.sessionId) dropSession(session.sessionId);
       else detach();

@@ -13,7 +13,7 @@ const { EXTERNAL_MCP_CHAT_SESSION_ID } = require("../../cli/externalMcpDiscovery
 
 const TOKEN = "test-bearer-token";
 
-function postJson(url, { token, host, origin, body, sessionId }) {
+function postJson(url, { token, host, origin, body, sessionId, accept }) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const payload = JSON.stringify(body);
@@ -22,6 +22,7 @@ function postJson(url, { token, host, origin, body, sessionId }) {
       Accept: "application/json, text/event-stream",
       "Content-Length": Buffer.byteLength(payload),
     };
+    if (accept) headers.Accept = accept;
     if (token) headers.Authorization = `Bearer ${token}`;
     if (host) headers.Host = host;
     if (origin) headers.Origin = origin;
@@ -175,6 +176,34 @@ describe("external MCP streamable HTTP server", () => {
     ]);
     assert.equal(result.status, 401);
     assert.ok(tokenReads >= 2);
+    assert.equal(active.calls.length, 0);
+  });
+
+  it("detaches the approval client when initialize is rejected before a session exists", async () => {
+    const attached = [];
+    active = await startServer({
+      attachExternalClient: (client) => {
+        attached.push(client);
+        return () => client.destroy();
+      },
+    });
+    const rejected = await postJson(active.url, {
+      token: TOKEN,
+      accept: "application/json",
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "reject-test", version: "1.0.0" },
+        },
+      },
+    });
+    assert.equal(rejected.status, 406);
+    assert.equal(attached.length, 1);
+    assert.equal(attached[0].destroyed, true);
     assert.equal(active.calls.length, 0);
   });
 
