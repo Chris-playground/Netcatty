@@ -68,11 +68,18 @@ function readLogicalLine(term: Terminal, oneBasedY: number): LogicalLine | null 
   };
 }
 
-function cellAt(segments: readonly LogicalSegment[], offset: number): BufferCell | null {
+function cellAt(
+  segments: readonly LogicalSegment[],
+  offset: number,
+  bound: "inclusive" | "exclusive",
+): BufferCell | null {
   for (const segment of segments) {
     const local = offset - segment.stringStart;
     if (local < 0) return null;
-    if (local > segment.text.text.length) continue;
+    const length = segment.text.text.length;
+    // A boundary offset is the next row's first cell for a token start, and the
+    // previous row's exclusive end for a match that stops on that row.
+    if (bound === "inclusive" ? local >= length : local > length) continue;
     const cell = segment.text.cellAtStringOffset[local];
     if (!Number.isInteger(cell)) return null;
     return { line: segment.lineNo, cell };
@@ -160,9 +167,9 @@ export function registerTerminalArchiveLinks(options: TerminalArchiveLinkHost): 
       }
       const links: ILink[] = [];
       for (const token of findTerminalArchiveTokens(logical.text)) {
-        const start = cellAt(logical.segments, token.start);
-        const endExclusive = cellAt(logical.segments, token.start + token.length);
-        const last = cellAt(logical.segments, token.start + token.length - 1);
+        const start = cellAt(logical.segments, token.start, "inclusive");
+        const endExclusive = cellAt(logical.segments, token.start + token.length, "exclusive");
+        const last = cellAt(logical.segments, token.start + token.length - 1, "inclusive");
         if (!start || !endExclusive || !last) continue;
         const cwd = cwdFor(token.path, start, last);
         if (cwd === undefined) continue;
@@ -182,8 +189,8 @@ export function registerTerminalArchiveLinks(options: TerminalArchiveLinkHost): 
             if (!sessionAllowsLinks()) return;
             const fresh = readLogicalLine(term, start.line + 1);
             if (!fresh || fresh.text !== capturedText) return;
-            const freshStart = cellAt(fresh.segments, token.start);
-            const freshLast = cellAt(fresh.segments, token.start + token.length - 1);
+            const freshStart = cellAt(fresh.segments, token.start, "inclusive");
+            const freshLast = cellAt(fresh.segments, token.start + token.length - 1, "inclusive");
             if (!freshStart || !freshLast) return;
             const freshCwd = cwdFor(token.path, freshStart, freshLast);
             if (freshCwd === undefined) return;

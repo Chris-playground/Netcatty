@@ -249,6 +249,34 @@ test("a non-space before the cursor is kept and separated with one space", () =>
   assert.equal(spaced.pasted[0], "tar -xvzf '/tmp/backup.tar.gz' -C '/tmp'");
 });
 
+test("a name that starts on the next wrapped row is not anchored on the previous row", () => {
+  const f = fixture();
+  f.setLines([
+    { text: "x ", wrapped: false },
+    { text: "/tmp/a.tar", wrapped: true },
+  ]);
+  const link = f.linksAt(1)?.[0];
+  assert.ok(link);
+  assert.equal(link.text, "/tmp/a.tar");
+  assert.deepEqual(link.range, {
+    start: { x: 1, y: 2 },
+    end: { x: 10, y: 2 },
+  });
+
+  const ended = fixture();
+  ended.setLines([
+    { text: "/a.tar", wrapped: false },
+    { text: " rest", wrapped: true },
+  ]);
+  const endedLink = ended.linksAt(1)?.[0];
+  assert.ok(endedLink);
+  assert.equal(endedLink.text, "/a.tar");
+  assert.deepEqual(endedLink.range, {
+    start: { x: 1, y: 1 },
+    end: { x: 6, y: 1 },
+  });
+});
+
 test("a wrapped logical line is one multi-row link and fills the full path", () => {
   const f = fixture();
   f.setLines([
