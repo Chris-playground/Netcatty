@@ -44,6 +44,7 @@ import {
 } from "./ui/aside-panel";
 import { HostDetailsAdvancedSections } from "./HostDetailsAdvancedSections";
 import { detachEffectiveHostIdentity, HostDetailsConnectionSections } from "./HostDetailsConnectionSections";
+import type { HostTotpFlushResult } from "./HostTotpFields";
 import {
   LINUX_DISTRO_OPTION_IDS,
   parseOptionalPortInput,
@@ -163,6 +164,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   };
   const { checkSshAgent } = useApplicationBackend();
   const baselineSnippetsRef = useRef(snippets);
+  const totpFlushRef = useRef<(() => Promise<HostTotpFlushResult>) | null>(null);
+  const savingHostRef = useRef(false);
   const baselineHydratedRef = useRef(snippets.length > 0);
   const openingQueueIdsRef = useRef<string[]>([]);
   const [form, setForm] = useState<Host>(
@@ -527,7 +530,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     ? pluginConnectionValid && Boolean(sanitizePluginConnection(form.pluginConnection, form.protocol))
     : hasHostname;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (savingHostRef.current) return;
+    savingHostRef.current = true;
+    try {
+    const flushed = await totpFlushRef.current?.();
+    if (flushed && !flushed.ok) return;
     const hostname = form.hostname.trim()
       || (pluginProtocolActive ? form.label.trim() || form.pluginConnection?.providerId || "plugin" : "");
     if (!hostname || !canSaveHost) return;
@@ -608,6 +616,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       authPolicyVersion: 1,
       managedSourceId: finalManagedSourceId,
     };
+    if (flushed?.ok) {
+      if (flushed.totp) cleaned.totp = flushed.totp;
+      else delete cleaned.totp;
+    }
     if (pluginProtocolActive) {
       const pluginConnection = sanitizePluginConnection(cleaned.pluginConnection, cleaned.protocol);
       if (!pluginConnection) return;
@@ -735,6 +747,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       }
     }
     onSave(stripBuiltInConnectionFieldsForPluginHost(cleaned));
+    } finally {
+      savingHostRef.current = false;
+    }
   };
 
   const handleCreateGroup = () => {
@@ -1128,6 +1143,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           t={t}
           form={form}
           setForm={setForm}
+          totpFlushRef={totpFlushRef}
           update={update}
           groupDefaults={effectiveGroupDefaults}
           effectiveAuthMethod={effectiveAuthMethod}

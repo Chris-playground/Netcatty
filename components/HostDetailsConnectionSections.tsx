@@ -102,6 +102,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   distroOptions,
   effectiveFormDistro,
   getDistroOptionLabel,
+  totpFlushRef,
 }) => {
   const selectAuthMethod = (authMethod: "auto" | "password" | "key" | "certificate") => {
     setForm((previous: Host) => applyEffectiveHostAuthMethodSelection(
@@ -231,6 +232,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               form={form}
               setForm={setForm}
               effectiveProtocol={effectiveProtocol}
+              flushRef={totpFlushRef}
             />
             {selectedIdentity ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border/70 bg-secondary/60">

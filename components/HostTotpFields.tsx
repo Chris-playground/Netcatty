@@ -19,11 +19,16 @@ type Preview = {
   period?: number;
 };
 
+export type HostTotpFlushResult =
+  | { ok: true; totp: HostTotpConfig | undefined }
+  | { ok: false };
+
 type HostTotpFieldsProps = {
   t: (key: string, params?: Record<string, string | number>) => string;
   form: Host;
   setForm: (updater: Host | ((host: Host) => Host)) => void;
   effectiveProtocol?: string;
+  flushRef?: React.MutableRefObject<(() => Promise<HostTotpFlushResult>) | null>;
 };
 
 const HIDDEN_PROTOCOLS = new Set(["telnet", "serial"]);
@@ -80,6 +85,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   form,
   setForm,
   effectiveProtocol,
+  flushRef,
 }) => {
   const configured = Boolean(form.totp?.uri);
   const [open, setOpen] = useState(configured);
@@ -92,12 +98,28 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const hostIdRef = useRef(form.id);
+  const draftRef = useRef(draft);
+  const patternRef = useRef(pattern);
+  const openRef = useRef(open);
+  const formRef = useRef(form);
+  const committedRef = useRef<HostTotpConfig | undefined>(form.totp);
+  const pendingRef = useRef<Promise<void> | null>(null);
+  const applyTextRef = useRef<(text: string) => Promise<void>>(async () => {});
+  draftRef.current = draft;
+  patternRef.current = pattern;
+  openRef.current = open;
+  formRef.current = form;
+  committedRef.current = form.totp;
   const [trackedHostId, setTrackedHostId] = useState(form.id);
   if (form.id !== trackedHostId) {
     setTrackedHostId(form.id);
     setOpen(configured);
     setPattern(form.totp?.promptPattern || "");
     setDraft("");
+    draftRef.current = "";
+    patternRef.current = form.totp?.promptPattern || "";
+    openRef.current = configured;
+    committedRef.current = form.totp;
     setError(null);
     setPreview(null);
     setSecondsLeft(null);
@@ -105,6 +127,32 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
     setScanning(false);
   }
   hostIdRef.current = form.id;
+
+  useEffect(() => {
+    if (!flushRef) return undefined;
+    const flush = async (): Promise<HostTotpFlushResult> => {
+      const expectedHostId = hostIdRef.current;
+      const pending = pendingRef.current;
+      if (pending) await pending;
+      if (hostIdRef.current !== expectedHostId) return { ok: false };
+      if (!openRef.current) return { ok: true, totp: undefined };
+      const text = draftRef.current.trim();
+      if (!text) return { ok: true, totp: committedRef.current };
+      const patternValue = validPattern(patternRef.current);
+      if (patternValue == null) {
+        setError("pattern");
+        return { ok: false };
+      }
+      await applyTextRef.current(text);
+      if (hostIdRef.current !== expectedHostId) return { ok: false };
+      if (draftRef.current.trim()) return { ok: false };
+      return { ok: true, totp: committedRef.current };
+    };
+    flushRef.current = flush;
+    return () => {
+      if (flushRef.current === flush) flushRef.current = null;
+    };
+  }, [flushRef]);
 
   useEffect(() => {
     if (configured) setOpen(true);
@@ -152,49 +200,62 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
 
   const remember = (result: Preview & { ok?: boolean }) => {
     if (hostIdRef.current !== form.id) return;
-    const patternValue = validPattern(pattern);
-    setPreview(result);
-    setError(null);
-    setDraft("");
-    writeTotp({
+    const patternValue = validPattern(patternRef.current);
+    const next: HostTotpConfig = {
       uri: result.uri,
       autoSubmit: form.totp?.autoSubmit !== false,
       ...(patternValue ? { promptPattern: patternValue } : {}),
-    });
+    };
+    committedRef.current = next;
+    setPreview(result);
+    setError(null);
+    setDraft("");
+    draftRef.current = "";
+    writeTotp(next);
   };
 
   const applyText = async (text: string) => {
     const expectedHostId = form.id;
+    if (hostIdRef.current !== expectedHostId) return;
     const bridge = netcattyBridge.get();
     if (!bridge?.previewTotp) {
       setError("unavailable");
       return;
     }
     setBusy(true);
-    try {
-      const result = await bridge.previewTotp({ text });
-      if (hostIdRef.current !== expectedHostId) return;
-      if (!result?.ok || !result.uri || !result.code) {
-        setPreview(null);
-        setError(result?.error || "invalid");
-        return;
+    const job = (async () => {
+      try {
+        const result = await bridge.previewTotp({ text });
+        if (hostIdRef.current !== expectedHostId) return;
+        if (!result?.ok || !result.uri || !result.code) {
+          setPreview(null);
+          setError(result?.error || "invalid");
+          return;
+        }
+        remember({
+          uri: result.uri,
+          code: result.code,
+          secondsRemaining: result.secondsRemaining || 30,
+          issuer: result.issuer,
+          label: result.label,
+          algorithm: result.algorithm,
+          digits: result.digits,
+          period: result.period,
+        });
+      } catch {
+        if (hostIdRef.current === expectedHostId) setError("unavailable");
+      } finally {
+        if (hostIdRef.current === expectedHostId) setBusy(false);
       }
-      remember({
-        uri: result.uri,
-        code: result.code,
-        secondsRemaining: result.secondsRemaining || 30,
-        issuer: result.issuer,
-        label: result.label,
-        algorithm: result.algorithm,
-        digits: result.digits,
-        period: result.period,
-      });
-    } catch {
-      if (hostIdRef.current === expectedHostId) setError("unavailable");
+    })();
+    pendingRef.current = job;
+    try {
+      await job;
     } finally {
-      if (hostIdRef.current === expectedHostId) setBusy(false);
+      if (pendingRef.current === job) pendingRef.current = null;
     }
   };
+  applyTextRef.current = applyText;
 
   const scanScreen = async () => {
     const expectedHostId = form.id;
@@ -255,10 +316,13 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
           checked={open}
           onCheckedChange={(checked) => {
             setOpen(checked);
+            openRef.current = checked;
             if (!checked) {
               setPreview(null);
               setError(null);
               setDraft("");
+              draftRef.current = "";
+              committedRef.current = undefined;
               writeTotp(undefined);
             }
           }}
@@ -310,9 +374,11 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
                 const file = event.target.files?.[0];
                 event.target.value = "";
                 if (!file) return;
+                const expectedHostId = form.id;
                 setBusy(true);
                 void decodeQrFile(file)
                   .then((text) => {
+                    if (hostIdRef.current !== expectedHostId) return;
                     if (!text) {
                       setError("not-found");
                       setBusy(false);
@@ -321,6 +387,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
                     return applyText(text);
                   })
                   .catch(() => {
+                    if (hostIdRef.current !== expectedHostId) return;
                     setError("invalid");
                     setBusy(false);
                   });
