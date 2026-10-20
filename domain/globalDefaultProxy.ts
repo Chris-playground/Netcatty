@@ -5,7 +5,14 @@
  */
 let activeId: string | undefined;
 const listeners = new Set<() => void>();
-let persistSetter: ((id: string | undefined) => void) | null = null;
+let registrationSeq = 0;
+// Several settings hooks can be mounted at once (AppLockGate plus a settings
+// tab). Each registration owns its cleanup so unmounting one instance falls
+// back to the setter that is still mounted.
+const persistSetters: Array<{
+  id: number;
+  setter: (id: string | undefined) => void;
+}> = [];
 
 export const normalizeGlobalDefaultProxyProfileId = (
   value: unknown,
@@ -34,13 +41,19 @@ export const subscribeActiveGlobalDefaultProxyProfileId = (
 };
 
 export const registerGlobalDefaultProxyProfileSetter = (
-  setter: ((id: string | undefined) => void) | null,
-): void => {
-  persistSetter = setter;
+  setter: (id: string | undefined) => void,
+): (() => void) => {
+  const id = ++registrationSeq;
+  persistSetters.push({ id, setter });
+  return () => {
+    const index = persistSetters.findIndex((entry) => entry.id === id);
+    if (index >= 0) persistSetters.splice(index, 1);
+  };
 };
 
 /** Clear the saved global default and persist that choice when settings are mounted. */
 export const clearActiveGlobalDefaultProxyProfile = (): void => {
+  const persistSetter = persistSetters[persistSetters.length - 1]?.setter;
   if (persistSetter) {
     persistSetter(undefined);
     return;

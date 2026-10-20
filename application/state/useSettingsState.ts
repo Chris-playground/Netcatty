@@ -822,10 +822,10 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     publishActiveGlobalDefaultProxyProfileId(globalDefaultProxyProfileId);
   }, [globalDefaultProxyProfileId]);
 
-  useEffect(() => {
-    registerGlobalDefaultProxyProfileSetter(setGlobalDefaultProxyProfileId);
-    return () => registerGlobalDefaultProxyProfileSetter(null);
-  }, [setGlobalDefaultProxyProfileId]);
+  useEffect(
+    () => registerGlobalDefaultProxyProfileSetter(setGlobalDefaultProxyProfileId),
+    [setGlobalDefaultProxyProfileId],
+  );
 
   useEffect(() => {
     if (!enableSettingsSync) return;
