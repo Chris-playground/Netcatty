@@ -120,6 +120,8 @@ export function isConfirmedTerminalShellPrompt(
     if (code >= 0xE000 && code <= 0xF8FF) return true;
   }
   if (/[$#%]$/u.test(prompt)) return true;
+  // POSIX sh/bash/ksh default PS2. A bare ">" keeps broadcast on (#3796).
+  if (prompt === '>') return true;
   if (!prompt.endsWith('>')) return false;
   if (/^(?:PS\s+)?[A-Za-z]:[\\/].*>$/u.test(prompt)) return true;
   if (/[@\\/~:]\S*>$/u.test(prompt)) return true;

@@ -122,6 +122,30 @@ test('ordinary shell commands ending with a colon are not untrusted input prompt
   assert.equal(isUntrustedTerminalInputPrompt('Password: '), true);
 });
 
+test('bash PS2 continuation prompt stays a confirmed shell prompt (#3796)', () => {
+  // CentOS-7-style bash has no bracketed paste, so a heredoc paste echoes the
+  // default PS2 "> " after each line. That must keep broadcast on.
+  assert.equal(isConfirmedTerminalShellPrompt('>'), true);
+  assert.equal(isConfirmedTerminalShellPrompt('> '), true);
+  assert.equal(isUntrustedTerminalInputPrompt('>'), false);
+  assert.equal(isUntrustedTerminalInputPrompt('> '), false);
+  const heredocEcho = '[root@h ~]# cat >> f << EOF\r\n> ';
+  assert.equal(isConfirmedTerminalShellPrompt(heredocEcho), true);
+  assert.equal(isUntrustedTerminalInputPrompt(heredocEcho), false);
+  // The echoed terminator line is ordinary output, not a prompt latch.
+  assert.equal(isConfirmedTerminalShellPrompt('> EOF'), false);
+  assert.equal(isUntrustedTerminalInputPrompt('> EOF'), false);
+  // Labelled challenges stay fail-closed. zsh "heredoc>" is out of scope.
+  assert.equal(isUntrustedTerminalInputPrompt('Custom>'), true);
+  assert.equal(isUntrustedTerminalInputPrompt('Token>'), true);
+  assert.equal(isUntrustedTerminalInputPrompt('Password:'), true);
+  assert.equal(isConfirmedTerminalShellPrompt('Custom>'), false);
+  assert.equal(isConfirmedTerminalShellPrompt('Token>'), false);
+  assert.equal(isConfirmedTerminalShellPrompt('Password:'), false);
+  assert.equal(isUntrustedTerminalInputPrompt('heredoc>'), true);
+  assert.equal(isConfirmedTerminalShellPrompt('heredoc>'), false);
+});
+
 test('vim ex command-line is not an untrusted input prompt (#3422)', () => {
   assert.equal(isUntrustedTerminalInputPrompt(':', { alternateScreen: true }), false);
   assert.equal(isUntrustedTerminalInputPrompt(': ', { alternateScreen: true }), false);
@@ -147,6 +171,12 @@ test('renderer and main-process prompt classifiers stay aligned', () => {
     ['Challenge # 1:', undefined, true],
     ['router> show ip:', { allowHostStyleGreaterThan: true }, false],
     ['router> show ip:', undefined, true],
+    ['>', undefined, false],
+    ['> ', undefined, false],
+    ['[root@h ~]# cat >> f << EOF\r\n> ', undefined, false],
+    ['Custom>', undefined, true],
+    ['Token>', undefined, true],
+    ['Password:', undefined, true],
   ];
 
   for (const [prompt, options, expected] of cases) {
