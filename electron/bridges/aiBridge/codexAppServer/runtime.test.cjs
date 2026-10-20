@@ -311,6 +311,56 @@ test("runtime routes native approvals and request_user_input responses", async (
   await run;
 });
 
+test("runtime transforms user answers with authoritative pending chat context after sender validation", () => {
+  const responses = [];
+  const sender = {};
+  const transformedContexts = [];
+  const runtime = new CodexAppServerRuntime({
+    transformUserInputAnswers(answers, context) {
+      transformedContexts.push(context.chatSessionId);
+      return { ...answers, question: { answers: ["protected-answer"] } };
+    },
+  });
+  runtime.pendingInteractions.set("private-answer", {
+    interactionId: "private-answer",
+    kind: "user-input",
+    context: { chatSessionId: "chat-private", sender },
+    connection: { respond: (id, result) => responses.push({ id, result }) },
+    rpcId: 90,
+    params: {},
+  });
+  assert.equal(runtime.respondInteraction("private-answer", {
+    answers: { question: { answers: ["private-input"] } },
+  }, {}), false);
+  assert.equal(transformedContexts.length, 0);
+  assert.equal(runtime.respondInteraction("private-answer", {
+    answers: { question: { answers: ["private-input"] } },
+  }, sender), true);
+  assert.deepEqual(transformedContexts, ["chat-private"]);
+  assert.deepEqual(responses, [{ id: 90, result: { answers: { question: { answers: ["protected-answer"] } } } }]);
+});
+
+test("failed user answer transformation sends no raw reply and leaves interaction pending", () => {
+  const responses = [];
+  const runtime = new CodexAppServerRuntime({
+    transformUserInputAnswers() { throw new Error("Privacy settings changed"); },
+  });
+  runtime.pendingInteractions.set("private-answer", {
+    interactionId: "private-answer",
+    kind: "user-input",
+    context: { chatSessionId: "chat-private" },
+    connection: { respond: (id, result) => responses.push({ id, result }) },
+    rpcId: 91,
+    params: {},
+  });
+  assert.throws(() => runtime.respondInteraction("private-answer", {
+    answers: { question: { answers: ["private-input"] } },
+  }), /Privacy settings changed/);
+  assert.deepEqual(responses, []);
+  assert.equal(runtime.pendingInteractions.has("private-answer"), true);
+  runtime.close();
+});
+
 test("cancelInteractionTimeout re-arms the absolute approval deadline (Catty/MCP style)", async () => {
   let connection;
   let interaction;

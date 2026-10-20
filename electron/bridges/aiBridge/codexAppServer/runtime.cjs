@@ -180,6 +180,7 @@ class CodexAppServerRuntime {
     connectionFactory,
     sendInteractionRequest,
     sendInteractionCleared,
+    transformUserInputAnswers,
     interruptRequestTimeoutMs = INTERRUPT_REQUEST_TIMEOUT_MS,
     interruptGraceMs = INTERRUPT_GRACE_MS,
   } = {}) {
@@ -187,6 +188,7 @@ class CodexAppServerRuntime {
     this.connectionFactory = connectionFactory;
     this.sendInteractionRequest = sendInteractionRequest;
     this.sendInteractionCleared = sendInteractionCleared;
+    this.transformUserInputAnswers = transformUserInputAnswers;
     this.interruptRequestTimeoutMs = interruptRequestTimeoutMs;
     this.interruptGraceMs = interruptGraceMs;
     this.connections = new Map();
@@ -861,7 +863,13 @@ class CodexAppServerRuntime {
   respondInteraction(interactionId, response, sender) {
     const pending = this.pendingInteractions.get(interactionId);
     if (sender && pending?.context?.sender && pending.context.sender !== sender) return false;
-    return this.#resolveInteraction(interactionId, response);
+    const safeResponse = pending?.kind === "user-input" && this.transformUserInputAnswers
+      ? {
+          ...response,
+          answers: this.transformUserInputAnswers(response?.answers || {}, pending.context),
+        }
+      : response;
+    return this.#resolveInteraction(interactionId, safeResponse);
   }
 
   /**

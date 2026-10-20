@@ -239,7 +239,7 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
       if (result == null) {
         return { error: `Handle "${handleId}" was not found for this chat session.` };
       }
-      return { ...result, content: redactSecretsForModel(result.content) };
+      return { ...result, content: redactSecretsForModel(result.content, chatSessionId) };
     }
     case 'harness.workspace.get_info': {
       const scopeCtx = resolveContext();

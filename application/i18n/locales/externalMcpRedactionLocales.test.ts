@@ -7,15 +7,15 @@ import zhCN from './zh-CN.ts';
 import zhTW from './zh-TW.ts';
 
 const KEYS = [
-  'title', 'description', 'enable', 'privateIps', 'privateIps.description',
+  'title', 'description', 'boundary', 'enable', 'privateIps', 'privateIps.description',
   'cidrs', 'cidrs.description', 'patterns', 'patterns.description',
   'connectionScope', 'reconnect', 'apply', 'applying', 'applied', 'failed',
 ];
 
-test('External MCP privacy settings are localized in every supported locale', () => {
+test('Shared AI privacy settings are localized in every supported locale', () => {
   for (const [name, messages] of Object.entries({ en, es, ru, 'zh-CN': zhCN, 'zh-TW': zhTW })) {
     assert.deepEqual(
-      KEYS.filter((key) => !messages[`ai.externalMcp.redaction.${key}`]),
+      KEYS.filter((key) => !messages[`ai.privacy.${key}`]),
       [],
       `${name} is missing privacy settings labels`,
     );

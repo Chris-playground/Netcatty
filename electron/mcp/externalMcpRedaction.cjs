@@ -112,6 +112,7 @@ function createRedactionSession(input) {
   const originals = new Map();
   const tokens = new Map();
   const knownSecrets = new Set();
+  const knownHosts = new Set();
   const counters = { IP: 0, HOST: 0, SECRET: 0 };
   let storedBytes = 0;
   let exhausted = false;
@@ -150,13 +151,45 @@ function createRedactionSession(input) {
       || !privateAddresses.check(address, family);
   }
 
-  function inspectString(value, key, inheritedSecret, budget) {
-    const ranges = [];
-    function add(start, end, namespace = "SECRET", remember = true) {
+  function inspectString(value, key, inheritedSecret, budget, acceptExistingTokens = false) {
+    const source = value;
+    const aliases = [];
+    if (acceptExistingTokens) {
+      value = source.replace(RESERVED_TOKEN, (token, start) => {
+        if (!originals.has(token)) throw new Error(TOKEN_ERROR);
+        if (++budget.ranges > MAX_NODES) throw new Error(VALUE_ERROR);
+        aliases.push({ start, end: start + token.length, token });
+        // Keep offsets and credential context around aliases. In particular,
+        // password=prefix<alias>suffix must mask both unaliased fragments.
+        return "x".repeat(token.length);
+      });
+    }
+    const ranges = [...aliases];
+    function appendRange(start, end, namespace, remember) {
       if (end <= start) return;
       if (++budget.ranges > MAX_NODES) throw new Error(VALUE_ERROR);
       ranges.push({ start, end, namespace });
-      if (namespace === "SECRET" && remember) rememberSecret(value.slice(start, end));
+      if (namespace === "SECRET" && remember) rememberSecret(source.slice(start, end));
+      if (namespace === "HOST") {
+        const host = source.slice(start, end);
+        issue(host, "HOST");
+        knownHosts.add(host);
+      }
+    }
+    function add(start, end, namespace = "SECRET", remember = true) {
+      let low = 0;
+      let high = aliases.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (aliases[mid].end <= start) low = mid + 1;
+        else high = mid;
+      }
+      let cursor = start;
+      for (let index = low; index < aliases.length && aliases[index].start < end; index++) {
+        appendRange(cursor, Math.min(end, aliases[index].start), namespace, remember);
+        cursor = Math.max(cursor, aliases[index].end);
+      }
+      appendRange(cursor, end, namespace, remember);
     }
     function matches(regex, select) {
       for (const match of value.matchAll(regex)) {
@@ -232,7 +265,7 @@ function createRedactionSession(input) {
       const group = match[3] !== undefined ? 3 : match[4] !== undefined ? 4 : 5;
       inspectHost(...match.indices[group]);
     }
-    return { value, ranges };
+    return { value: source, ranges };
   }
 
   function rejectBinary(value) {
@@ -296,22 +329,34 @@ function createRedactionSession(input) {
     const plans = [];
     const budget = { ranges: 0 };
     const preserveRootKeys = options?.preserveRootKeys === true;
+    const acceptExistingTokens = options?.acceptExistingTokens === true;
     // Inspect the entire value first: repeats appearing before a credential's
     // defining field in this response must be masked too.
     walk(value, (text, key, secret) => {
-      plans.push(inspectString(text, key, secret, budget));
+      plans.push(inspectString(text, key, secret, budget, acceptExistingTokens));
       return text;
     }, (entry) => entry, "", false, state(preserveRootKeys));
     const knownPattern = knownSecrets.size
       ? new RegExp([...knownSecrets].sort((a, b) => b.length - a.length).map(escapedLiteral).join("|"), "g")
       : null;
+    const knownHostPattern = knownHosts.size
+      ? new RegExp(`(?<![A-Za-z0-9_.-])(?:${[...knownHosts].sort((a, b) => b.length - a.length)
+        .map(escapedLiteral).join("|")})(?![A-Za-z0-9_.-])`, "g")
+      : null;
     let cursor = 0;
     return walk(value, () => {
       const { value: text, ranges } = plans[cursor++];
-      if (knownPattern) {
-        for (const match of text.matchAll(knownPattern)) {
+      const aliasRanges = ranges.filter((range) => range.token);
+      for (const [pattern, namespace] of [[knownPattern, "SECRET"], [knownHostPattern, "HOST"]]) {
+        if (!pattern) continue;
+        let aliasIndex = 0;
+        for (const match of text.matchAll(pattern)) {
+          const end = match.index + match[0].length;
+          // Previously issued aliases are protocol data, never source secrets.
+          while (aliasIndex < aliasRanges.length && aliasRanges[aliasIndex].end <= match.index) aliasIndex++;
+          if (aliasIndex < aliasRanges.length && aliasRanges[aliasIndex].start < end) continue;
           if (++budget.ranges > MAX_NODES) throw new Error(VALUE_ERROR);
-          ranges.push({ start: match.index, end: match.index + match[0].length, namespace: "SECRET" });
+          ranges.push({ start: match.index, end, namespace });
         }
       }
       ranges.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -327,7 +372,7 @@ function createRedactionSession(input) {
       let position = 0;
       for (const range of merged) {
         result += text.slice(position, range.start)
-          + issue(text.slice(range.start, range.end), range.namespace);
+          + (range.token || issue(text.slice(range.start, range.end), range.namespace));
         position = range.end;
       }
       return result + text.slice(position);

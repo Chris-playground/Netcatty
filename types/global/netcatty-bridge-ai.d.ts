@@ -3,6 +3,9 @@ import type { CodebuddyAdvancedOptions } from '../../infrastructure/ai/types';
 declare global {
   interface NetcattyBridge {
     // AI / external agents
+    aiPrivacyStatus?(): Promise<{ ok: boolean; enabled?: boolean; error?: string }>;
+    aiPrivacyTransform?(request: { chatSessionId: string; operation: 'redact' | 'restore'; value: unknown }): Promise<{ ok: boolean; value?: unknown; error?: string }>;
+    aiPrivacyClearSession?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
     aiSyncProviders?(providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>): Promise<{ ok: boolean }>;
     aiChatStream?(requestId: string, url: string, headers?: Record<string, string>, body?: string, providerId?: string, idleTimeoutMs?: number): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string; aborted?: boolean }>;
     aiChatCancel?(requestId: string): Promise<boolean>;

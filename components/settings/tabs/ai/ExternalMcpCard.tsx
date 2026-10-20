@@ -36,7 +36,6 @@ import { Select, SettingCard, SettingRow, Toggle } from "../../../settings/setti
 import { CopyableCodeBlock } from "./CopyableCodeBlock";
 import { ExternalMcpHttpSection, type ExternalMcpHttpViewStatus } from "./ExternalMcpHttpSection";
 import { getBridge } from "./types";
-import { ExternalMcpRedactionSection } from "./ExternalMcpRedactionSection";
 
 type ExternalMcpClient = "codex" | "claude" | "grok" | "cursor" | "other";
 
@@ -805,8 +804,6 @@ export const ExternalMcpCard: React.FC = () => {
           </div>
         </SettingRow>
       </SettingCard>
-
-      <ExternalMcpRedactionSection />
 
       <ExternalMcpHttpSection
         externalMcpEnabled={enabled}

@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
-import { useExternalMcpRedactionState } from "../../../../application/state/useExternalMcpToggleState";
+import { useAIPrivacyState } from "../../../../application/state/useExternalMcpToggleState";
 import { Button } from "../../../ui/button";
-import { SettingCard, SettingRow, Toggle } from "../../settings-ui";
+import { SettingCard, SettingRow, SettingsSection, Toggle } from "../../settings-ui";
 
-export const ExternalMcpRedactionSection: React.FC = () => {
+export const AIPrivacySection: React.FC = () => {
   const { t } = useI18n();
-  const { settings, error, applying, apply } = useExternalMcpRedactionState();
+  const { settings, error, applying, apply } = useAIPrivacyState();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [privateIps, setPrivateIps] = useState(settings.redactPrivateIps);
   const [cidrs, setCidrs] = useState(settings.cidrs.join("\n"));
@@ -32,40 +32,38 @@ export const ExternalMcpRedactionSection: React.FC = () => {
   };
 
   return (
-    <section className="space-y-2" aria-labelledby="external-mcp-privacy-title">
-      <h3 id="external-mcp-privacy-title" className="text-sm font-semibold text-foreground">
-        {t("ai.externalMcp.redaction.title")}
-      </h3>
-      <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.redaction.description")}</p>
+    <SettingsSection anchorId="ai-privacy" title={t("ai.privacy.title")}>
+      <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.description")}</p>
+      <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.boundary")}</p>
       <SettingCard divided className="rounded-md border-border/60 bg-background/70">
-        <SettingRow label={t("ai.externalMcp.redaction.enable")}>
+        <SettingRow label={t("ai.privacy.enable")}>
           <Toggle
             checked={enabled}
             onChange={(next) => { setEnabled(next); setApplied(false); }}
-            ariaLabel={t("ai.externalMcp.redaction.enable")}
+            ariaLabel={t("ai.privacy.enable")}
             disabled={applying}
           />
         </SettingRow>
         <SettingRow
-          label={t("ai.externalMcp.redaction.privateIps")}
-          description={t("ai.externalMcp.redaction.privateIps.description")}
+          label={t("ai.privacy.privateIps")}
+          description={t("ai.privacy.privateIps.description")}
         >
           <Toggle
             checked={privateIps}
             onChange={(next) => { setPrivateIps(next); setApplied(false); }}
-            ariaLabel={t("ai.externalMcp.redaction.privateIps")}
+            ariaLabel={t("ai.privacy.privateIps")}
             disabled={applying}
           />
         </SettingRow>
       </SettingCard>
       <div className="space-y-3 rounded-md border border-border/60 bg-background/50 p-3">
         <label className="block space-y-1.5">
-          <span className="text-xs font-medium">{t("ai.externalMcp.redaction.cidrs")}</span>
-          <span className="block text-xs text-muted-foreground">{t("ai.externalMcp.redaction.cidrs.description")}</span>
+          <span className="text-xs font-medium">{t("ai.privacy.cidrs")}</span>
+          <span className="block text-xs text-muted-foreground">{t("ai.privacy.cidrs.description")}</span>
           <textarea
             value={cidrs}
             onChange={(event) => { setCidrs(event.currentTarget.value); setApplied(false); }}
-            aria-label={t("ai.externalMcp.redaction.cidrs")}
+            aria-label={t("ai.privacy.cidrs")}
             placeholder={"192.0.2.0/24\n2001:db8::/32"}
             rows={3}
             spellCheck={false}
@@ -74,12 +72,12 @@ export const ExternalMcpRedactionSection: React.FC = () => {
           />
         </label>
         <label className="block space-y-1.5">
-          <span className="text-xs font-medium">{t("ai.externalMcp.redaction.patterns")}</span>
-          <span className="block text-xs text-muted-foreground">{t("ai.externalMcp.redaction.patterns.description")}</span>
+          <span className="text-xs font-medium">{t("ai.privacy.patterns")}</span>
+          <span className="block text-xs text-muted-foreground">{t("ai.privacy.patterns.description")}</span>
           <textarea
             value={patterns}
             onChange={(event) => { setPatterns(event.currentTarget.value); setApplied(false); }}
-            aria-label={t("ai.externalMcp.redaction.patterns")}
+            aria-label={t("ai.privacy.patterns")}
             placeholder="INTERNAL_[A-Z0-9]+"
             rows={3}
             spellCheck={false}
@@ -87,21 +85,21 @@ export const ExternalMcpRedactionSection: React.FC = () => {
             className="w-full resize-y rounded-md border border-border/60 bg-background px-2 py-1.5 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         </label>
-        <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.redaction.connectionScope")}</p>
+        <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.connectionScope")}</p>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-amber-500">{t("ai.externalMcp.redaction.reconnect")}</p>
+          <p className="text-xs text-amber-500">{t("ai.privacy.reconnect")}</p>
           <Button size="sm" variant="outline" onClick={() => { void onApply(); }} disabled={applying}>
-            {t(applying ? "ai.externalMcp.redaction.applying" : "ai.externalMcp.redaction.apply")}
+            {t(applying ? "ai.privacy.applying" : "ai.privacy.apply")}
           </Button>
         </div>
         {error ? (
           <p role="alert" className="text-xs text-destructive">
-            {t("ai.externalMcp.redaction.failed")} {error}
+            {t("ai.privacy.failed")} {error}
           </p>
         ) : applied ? (
-          <p role="status" className="text-xs text-emerald-500">{t("ai.externalMcp.redaction.applied")}</p>
+          <p role="status" className="text-xs text-emerald-500">{t("ai.privacy.applied")}</p>
         ) : null}
       </div>
-    </section>
+    </SettingsSection>
   );
 };

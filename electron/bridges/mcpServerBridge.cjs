@@ -63,6 +63,9 @@ const DISCOVERY_SELF_HEAL_INTERVAL_MS = 15000;
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
+const managedPrivacyScopes = new WeakMap();
+const aiPrivacyService = require("../shared/aiPrivacyService.cjs");
+const { createManagedPrivacyBoundary } = require("../shared/managedPrivacyBoundary.cjs");
 // Sockets authenticated with the External MCP token (or that used the reserved scope).
 const externalMcpSockets = new Set();
 const sessionApprovedExternalSockets = new WeakSet();
@@ -1440,7 +1443,7 @@ async function handleMessage(socket, line) {
   }
 
   const { id, method, params } = msg;
-  debugLog("handleMessage", { id, method, params });
+  debugLog("handleMessage", { id, method });
   if (id == null || !method) return;
 
   // ── Authentication gate ──
@@ -1513,9 +1516,22 @@ async function handleMessage(socket, line) {
       );
     }
     notifyExternalMcpActivity(method, callParams);
-    const result = await dispatch(method, callParams, {
-      externalSocket: externalMcpSockets.has(socket) ? socket : null,
-    });
+    let result;
+    if (isExternalScope || externalMcpSockets.has(socket)) {
+      result = await dispatch(method, callParams, { externalSocket: socket });
+    } else {
+      const boundScope = managedPrivacyScopes.get(socket);
+      if (boundScope && boundScope !== callParams.chatSessionId) {
+        throw new Error("Managed agent connection cannot change its chat session.");
+      }
+      if (aiPrivacyService.isEnabled() && callParams.chatSessionId) {
+        managedPrivacyScopes.set(socket, callParams.chatSessionId);
+      }
+      result = await createManagedPrivacyBoundary(
+        (rpcMethod, rpcParams) => dispatch(rpcMethod, rpcParams),
+        aiPrivacyService,
+      )(method, callParams);
+    }
     const response = JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
     if (!socket.destroyed) socket.write(response);
   } catch (err) {

@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const { normalizeRedactionConfig } = require("../mcp/externalMcpRedaction.cjs");
+const aiPrivacyService = require("../shared/aiPrivacyService.cjs");
 
 const {
   getExternalMcpDiscoveryFilePath,
@@ -552,6 +553,7 @@ function createExternalMcpController(options = {}) {
       try {
         nextRedaction = normalizeRedactionConfig(config.redaction);
       } catch {
+        if (config.redaction === null) aiPrivacyService.invalidateConfiguration();
         return { ...buildStatus(), ok: false, error: "Invalid privacy rules. Check CIDRs and regular expressions." };
       }
       if (JSON.stringify(nextRedaction) !== JSON.stringify(redaction)) {
@@ -564,6 +566,7 @@ function createExternalMcpController(options = {}) {
           return { ...buildStatus(), ok: false, error: "Privacy settings could not be saved. Retry before reconnecting clients." };
         }
       }
+      aiPrivacyService.configure(nextRedaction);
     }
     const nextMode = config.mode == null ? mode : normalizeMode(config.mode);
     const nextIdleTimeoutMinutes = config.idleTimeoutMinutes == null

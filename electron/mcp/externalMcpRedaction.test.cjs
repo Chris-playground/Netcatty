@@ -211,6 +211,71 @@ test("repeated credentials are masked even before their defining field and in la
   assert.deepEqual(session.restore(masked), source);
 });
 
+test("known host literals repeat across free text without matching ordinary-word substrings", () => {
+  const session = enabledSession();
+  const source = {
+    before: "connect to db or build.example.test",
+    hostname: "db",
+    nested: { host: "build.example.test" },
+  };
+  const masked = session.redact(source);
+  assert.equal(masked.before, `connect to ${masked.hostname} or ${masked.nested.host}`);
+  assert.equal(session.redact("ssh db; ping build.example.test"),
+    `ssh ${masked.hostname}; ping ${masked.nested.host}`);
+  assert.equal(session.redact("dbx adb db.internal build.example.test.other"),
+    "dbx adb db.internal build.example.test.other");
+  assert.deepEqual(session.restore(masked), source);
+});
+
+test("managed boundaries can preserve known aliases without changing external literal-token behavior", () => {
+  const session = enabledSession();
+  const source = { host: "db", password: 123456, secret: false, text: "8.8.8.8" };
+  const aliases = session.redact(source);
+  assert.deepEqual(session.redact(aliases, { acceptExistingTokens: true }), aliases);
+  const repeated = { text: `${aliases.host} ${aliases.password} ${aliases.secret} ${aliases.text}` };
+  assert.deepEqual(session.redact(repeated, { acceptExistingTokens: true }), repeated);
+  assert.equal(session.redact(aliases.password, { acceptExistingTokens: true }), aliases.password);
+  assert.equal(session.restore(aliases.password), 123456);
+  assert.equal(session.restore(aliases.secret), false);
+  assert.notEqual(session.redact(aliases.host), aliases.host);
+  assert.throws(() => session.redact("[NC_unknown_HOST_1]", { acceptExistingTokens: true }),
+    /Unknown External MCP redaction token/);
+  assert.throws(() => session.redact("[NC_unclosed", { acceptExistingTokens: true }),
+    /Unknown External MCP redaction token/);
+});
+
+test("managed aliases stay intact alongside new secrets and do not become learned secrets", () => {
+  const session = enabledSession();
+  const token = session.redact("8.8.8.8");
+  const mixed = session.redact({ password: `fresh-secret ${token} another-secret`, text: token },
+    { acceptExistingTokens: true });
+  assert.equal(mixed.text, token);
+  assert.equal(mixed.password.includes(token), true);
+  assert.equal(mixed.password.includes("fresh-secret"), false);
+  assert.deepEqual(session.restore(mixed), { password: "fresh-secret 8.8.8.8 another-secret", text: "8.8.8.8" });
+  assert.equal(session.redact(token, { acceptExistingTokens: true }), token);
+});
+
+test("managed aliases do not break credential or custom-pattern context around raw fragments", () => {
+  const session = enabledSession({ patterns: ["SENSITIVE-BEGIN[\\s\\S]*?SENSITIVE-END"] });
+  const token = session.redact("8.8.8.8");
+  for (const source of [
+    `password=raw-prefix${token}raw-suffix`,
+    `--password 'quoted-prefix${token}quoted-suffix'`,
+    `SENSITIVE-BEGIN${token}SENSITIVE-END`,
+  ]) {
+    const masked = session.redact(source, { acceptExistingTokens: true });
+    assert.equal(masked.includes(token), true);
+    assert.equal(masked.includes("raw-prefix"), false);
+    assert.equal(masked.includes("raw-suffix"), false);
+    assert.equal(masked.includes("quoted-prefix"), false);
+    assert.equal(masked.includes("quoted-suffix"), false);
+    assert.equal(masked.includes("SENSITIVE-BEGIN"), false);
+    assert.equal(masked.includes("SENSITIVE-END"), false);
+    assert.equal(session.restore(masked), source.replace(token, "8.8.8.8"));
+  }
+});
+
 test("a value keeps its first token even when later recognized in a different namespace", () => {
   const session = enabledSession();
   const ip = session.redact("8.8.8.8");

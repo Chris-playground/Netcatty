@@ -13,6 +13,7 @@ import {
   STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION,
   STORAGE_KEY_AI_EXTERNAL_MCP_SILENT_SESSIONS,
   STORAGE_KEY_AI_PERMISSION_MODE,
+  STORAGE_KEY_AI_PRIVACY,
   STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES,
 } from '../../infrastructure/config/storageKeys';
 import type { AIPermissionMode } from '../../infrastructure/ai/types';
@@ -113,29 +114,32 @@ export function waitForExternalMcpStartupReady(hash?: string): Promise<void> {
   return externalMcpStartupReadyWaitPromise;
 }
 
-export type ExternalMcpRedactionSettings = {
+export type AIPrivacySettings = {
   enabled: boolean;
   redactPrivateIps: boolean;
   cidrs: string[];
   patterns: string[];
 };
 
-export function defaultExternalMcpRedactionSettings(): ExternalMcpRedactionSettings {
+export function defaultAIPrivacySettings(): AIPrivacySettings {
   return { enabled: false, redactPrivateIps: false, cidrs: [], patterns: [] };
 }
 
 /** Missing settings are opt-out; corrupt settings must never silently opt out. */
-export function readExternalMcpRedactionSettings(): ExternalMcpRedactionSettings {
-  const stored = localStorageAdapter.readString(STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION);
-  if (stored === null) return defaultExternalMcpRedactionSettings();
+export function readAIPrivacySettings(): AIPrivacySettings {
+  // The shared key wins, including invalid data: never fall back to a weaker legacy policy.
+  // Leave the legacy value intact for older installs; Apply writes only the validated shared key.
+  const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PRIVACY)
+    ?? localStorageAdapter.readString(STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION);
+  if (stored === null) return defaultAIPrivacySettings();
   let value: unknown;
   try {
     value = JSON.parse(stored);
   } catch {
-    throw new Error('Invalid saved External MCP privacy settings. Review and apply the settings again.');
+    throw new Error('Invalid saved AI privacy settings. Review and apply the settings again.');
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid saved External MCP privacy settings. Review and apply the settings again.');
+    throw new Error('Invalid saved AI privacy settings. Review and apply the settings again.');
   }
   const settings = value as Record<string, unknown>;
   if (
@@ -145,7 +149,7 @@ export function readExternalMcpRedactionSettings(): ExternalMcpRedactionSettings
     || !Array.isArray(settings.cidrs) || !settings.cidrs.every((item) => typeof item === 'string')
     || !Array.isArray(settings.patterns) || !settings.patterns.every((item) => typeof item === 'string')
   ) {
-    throw new Error('Invalid saved External MCP privacy settings. Review and apply the settings again.');
+    throw new Error('Invalid saved AI privacy settings. Review and apply the settings again.');
   }
   return {
     enabled: settings.enabled,
@@ -155,47 +159,50 @@ export function readExternalMcpRedactionSettings(): ExternalMcpRedactionSettings
   };
 }
 
-function configResponseError(result: unknown): string | null {
+function configResponseError(
+  result: unknown,
+  unverifiedMessage = 'External MCP settings could not be verified. The bridge has not been enabled.',
+): string | null {
   if (result && typeof result === 'object' && 'ok' in result && result.ok === true) return null;
   if (result && typeof result === 'object' && 'error' in result && typeof result.error === 'string' && result.error) {
     return result.error;
   }
-  return 'External MCP settings could not be verified. The bridge has not been enabled.';
+  return unverifiedMessage;
 }
 
 /** Validate in the main process before committing any privacy preference. */
-export async function applyExternalMcpRedactionSettings(
-  settings: ExternalMcpRedactionSettings,
+export async function applyAIPrivacySettings(
+  settings: AIPrivacySettings,
   bridge: ExternalMcpBridge | undefined = netcattyBridge.get(),
 ): Promise<void> {
   const result = await bridge?.externalMcpSetConfig?.({ redaction: settings });
-  const error = configResponseError(result);
+  const error = configResponseError(result, 'AI privacy settings could not be verified. Try applying them again.');
   if (error) throw new Error(error);
-  if (!localStorageAdapter.write(STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION, settings)) {
-    throw new Error('External MCP privacy settings could not be saved. Apply them again before restarting.');
+  if (!localStorageAdapter.write(STORAGE_KEY_AI_PRIVACY, settings)) {
+    throw new Error('AI privacy settings could not be saved. Apply them again before restarting.');
   }
   externalMcpConfigError = null;
-  emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION);
+  emitAIStateChanged(STORAGE_KEY_AI_PRIVACY);
 }
 
-function readExternalMcpRedactionState() {
+function readAIPrivacyState() {
   try {
-    return { settings: readExternalMcpRedactionSettings(), error: null as string | null };
+    return { settings: readAIPrivacySettings(), error: null as string | null };
   } catch (error) {
     return {
-      settings: defaultExternalMcpRedactionSettings(),
+      settings: defaultAIPrivacySettings(),
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
-export function useExternalMcpRedactionState() {
-  const [state, setState] = useState(readExternalMcpRedactionState);
+export function useAIPrivacyState() {
+  const [state, setState] = useState(readAIPrivacyState);
   const [applying, setApplying] = useState(false);
-  const apply = useCallback(async (settings: ExternalMcpRedactionSettings): Promise<boolean> => {
+  const apply = useCallback(async (settings: AIPrivacySettings): Promise<boolean> => {
     setApplying(true);
     try {
-      await applyExternalMcpRedactionSettings(settings);
+      await applyAIPrivacySettings(settings);
       setState({ settings, error: null });
       return true;
     } catch (error) {
@@ -211,11 +218,14 @@ export function useExternalMcpRedactionState() {
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION) setState(readExternalMcpRedactionState());
+      if (event.key === STORAGE_KEY_AI_PRIVACY || event.key === STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION) {
+        setState(readAIPrivacyState());
+      }
     };
     const onLocalChange = (event: Event) => {
-      if ((event as CustomEvent<{ key?: string }>).detail?.key === STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION) {
-        setState(readExternalMcpRedactionState());
+      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
+      if (key === STORAGE_KEY_AI_PRIVACY || key === STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION) {
+        setState(readAIPrivacyState());
       }
     };
     window.addEventListener('storage', onStorage);
@@ -229,6 +239,13 @@ export function useExternalMcpRedactionState() {
   return { ...state, applying, apply };
 }
 
+/** Compatibility exports for existing External MCP configuration callers. One shared policy only. */
+export type ExternalMcpRedactionSettings = AIPrivacySettings;
+export const defaultExternalMcpRedactionSettings = defaultAIPrivacySettings;
+export const readExternalMcpRedactionSettings = readAIPrivacySettings;
+export const applyExternalMcpRedactionSettings = applyAIPrivacySettings;
+export const useExternalMcpRedactionState = useAIPrivacyState;
+
 export type ExternalMcpHttpSettings = {
   enabled: boolean;
   port: number;
@@ -241,7 +258,8 @@ type ExternalMcpConfig = {
   mode?: ExternalMcpMode;
   idleTimeoutMinutes?: number;
   sessionIdleTimeoutMinutes?: number;
-  redaction?: ExternalMcpRedactionSettings;
+  /** null invalidates shared privacy when persisted settings cannot be read safely. */
+  redaction?: AIPrivacySettings | null;
   httpEnabled?: boolean;
   httpPort?: number;
   httpAllowCustomBind?: boolean;
@@ -506,7 +524,7 @@ export function createExternalMcpStartupSyncPlan({
   mode,
   idleTimeoutMinutes,
   sessionIdleTimeoutMinutes,
-  redaction = defaultExternalMcpRedactionSettings(),
+  redaction = defaultAIPrivacySettings(),
   http = {
     enabled: false,
     port: DEFAULT_EXTERNAL_MCP_HTTP_PORT,
@@ -520,7 +538,7 @@ export function createExternalMcpStartupSyncPlan({
   idleTimeoutMinutes: number;
   sessionIdleTimeoutMinutes: number;
   http?: ExternalMcpHttpSettings;
-  redaction?: ExternalMcpRedactionSettings;
+  redaction?: AIPrivacySettings;
 }): ExternalMcpStartupSyncPlan {
   const runtimeEnabled = shouldStartExternalMcpOnStartup({ enabled, mode });
   const storedEnabled = runtimeEnabled;
@@ -539,10 +557,10 @@ export function createExternalMcpStartupSyncPlan({
 }
 
 export function readExternalMcpStartupSyncPlan(): ExternalMcpStartupSyncPlan {
-  let redaction = defaultExternalMcpRedactionSettings();
+  let redaction = defaultAIPrivacySettings();
   let configError: string | undefined;
   try {
-    redaction = readExternalMcpRedactionSettings();
+    redaction = readAIPrivacySettings();
   } catch (error) {
     configError = error instanceof Error ? error.message : String(error);
   }
@@ -561,12 +579,21 @@ export async function syncExternalMcpConfig(
   bridge: ExternalMcpBridge | undefined = netcattyBridge.get(),
 ): Promise<void> {
   const plan = readExternalMcpStartupSyncPlan();
-  if (plan.configError) throw new Error(plan.configError);
+  if (plan.configError) {
+    // A corrupt saved policy must block all managed agents, not only External MCP.
+    // Keep the original recovery error even if notifying the main process fails.
+    try {
+      await bridge?.externalMcpSetConfig?.({ redaction: null });
+    } catch {
+      // The saved policy still needs user repair regardless of bridge availability.
+    }
+    throw new Error(plan.configError);
+  }
   const result = await bridge?.externalMcpSetConfig?.(plan.config);
   const error = configResponseError(result);
   if (error) throw new Error(error);
-  if (JSON.stringify(readExternalMcpRedactionSettings()) !== JSON.stringify(plan.config.redaction)) {
-    throw new Error('External MCP privacy settings changed. Try enabling the bridge again.');
+  if (JSON.stringify(readAIPrivacySettings()) !== JSON.stringify(plan.config.redaction)) {
+    throw new Error('AI privacy settings changed. Try enabling the bridge again.');
   }
 }
 
@@ -591,12 +618,16 @@ export async function syncExternalMcpStartupState(
   }
   let configError = initialPlan.configError;
   try {
-    if (!configError) {
+    if (configError) {
+      // Explicit invalidation is distinct from a rejected draft Apply, which keeps
+      // the previous working policy. Never replace corrupt saved data with defaults.
+      await Promise.resolve(bridge?.externalMcpSetConfig?.({ redaction: null }));
+    } else {
       const result = await Promise.resolve(bridge?.externalMcpSetConfig?.(initialPlan.config));
       configError = configResponseError(result) ?? undefined;
     }
   } catch (error) {
-    configError = error instanceof Error ? error.message : String(error);
+    configError ??= error instanceof Error ? error.message : String(error);
   }
 
   // A user toggle during config await invalidates this startup apply.
@@ -606,7 +637,7 @@ export async function syncExternalMcpStartupState(
 
   const plan = readExternalMcpStartupSyncPlan();
   if (JSON.stringify(plan.config.redaction) !== JSON.stringify(initialPlan.config.redaction)) {
-    configError = 'External MCP privacy settings changed during startup. Enable the bridge again.';
+    configError = 'AI privacy settings changed during startup. Enable the bridge again.';
   }
   if (configError || plan.configError) {
     // A rejected or unverified config must never expose an unprotected runtime.
@@ -616,7 +647,7 @@ export async function syncExternalMcpStartupState(
     plan.shouldPersistStoredEnabled = readExternalMcpStoredEnabled();
   }
   externalMcpConfigError = plan.configError ?? null;
-  emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_REDACTION);
+  emitAIStateChanged(STORAGE_KEY_AI_PRIVACY);
   if (plan.shouldPersistStoredEnabled) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, plan.storedEnabled);
     emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED);

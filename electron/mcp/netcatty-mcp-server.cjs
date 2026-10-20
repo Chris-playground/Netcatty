@@ -198,7 +198,7 @@ function rpcCall(method, params) {
   });
 }
 
-// Only standalone External MCP clients opt in; managed in-app agents are unchanged.
+// External clients own connection maps here; managed agents use the main-process chat boundary.
 const externalDiscoveryPath = process.env.NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE;
 const exposedRpcCall = externalDiscoveryPath
   ? createPrivacyBoundary(rpcCall, () => {
