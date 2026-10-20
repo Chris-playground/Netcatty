@@ -193,7 +193,6 @@ test("build.files excludes Vite-bundled renderer-only packages", () => {
     "!node_modules/@streamdown/**/*",
     "!node_modules/@tanstack/react-virtual/**/*",
     "!node_modules/pinyin-pro/**/*",
-    "!node_modules/re2js/**/*",
     "!node_modules/@eslint-community/regexpp/**/*",
     "!node_modules/clsx/**/*",
     "!node_modules/tailwind-merge/**/*",

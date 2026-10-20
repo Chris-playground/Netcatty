@@ -16,6 +16,16 @@ const BUILTIN_TOTP_PROMPTS = [
 // even when a host regex would otherwise match.
 const NON_TOTP_PROMPT = /SMS|EMAIL|RADIUS|PASSKEY|MFA_CUSTOM|短信|邮件|郵件|Option>|\[Y\/n\]/i;
 const MAX_PROMPT_PATTERN_LENGTH = 200;
+const MAX_PROMPT_SUBJECT_LENGTH = 1024;
+let compileBoundedPattern = null;
+
+function boundedPatternMatches(pattern, text) {
+  if (!compileBoundedPattern) {
+    const { RE2JS } = require("re2js");
+    compileBoundedPattern = (source) => RE2JS.compile(source);
+  }
+  return compileBoundedPattern(pattern).matcher(text).find();
+}
 const MIN_SECRET_BYTES = 10;
 const MAX_SECRET_BYTES = 128;
 
@@ -211,11 +221,15 @@ function isAutoSubmittableTotpPrompt({ prompts, name, instructions, promptPatter
   if (isExcludedTotpPrompt(prompts, name, instructions)) return false;
   const promptText = typeof prompts[0]?.prompt === "string" ? prompts[0].prompt : "";
   const pattern = typeof promptPattern === "string" ? promptPattern.trim() : "";
-  if (pattern && pattern.length <= MAX_PROMPT_PATTERN_LENGTH) {
+  if (
+    pattern
+    && pattern.length <= MAX_PROMPT_PATTERN_LENGTH
+    && promptText.length <= MAX_PROMPT_SUBJECT_LENGTH
+  ) {
     try {
-      if (new RegExp(pattern).test(promptText)) return true;
+      if (boundedPatternMatches(pattern, promptText)) return true;
     } catch {
-      // A broken custom pattern still leaves the built-in prompts available.
+      // An invalid or non-RE2 pattern still leaves the built-in prompts available.
     }
   }
   return BUILTIN_TOTP_PROMPTS.some((pattern) => pattern.test(promptText));

@@ -112,7 +112,8 @@ module.exports = {
         '!node_modules/@streamdown/**/*',
         '!node_modules/@tanstack/react-virtual/**/*',
         '!node_modules/pinyin-pro/**/*',
-        '!node_modules/re2js/**/*',
+        // re2js stays in the package: the main-process TOTP prompt matcher
+        // requires it so custom patterns cannot freeze Electron.
         '!node_modules/@eslint-community/regexpp/**/*',
         '!node_modules/clsx/**/*',
         '!node_modules/tailwind-merge/**/*',

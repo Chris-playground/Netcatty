@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
+import { RE2JS } from "re2js";
 import type { Host, HostTotpConfig } from "../domain/models";
 import { netcattyBridge } from "@/infrastructure/services/netcattyBridge.ts";
 import { Button } from "./ui/button";
@@ -67,7 +68,7 @@ function validPattern(value: string): string | null {
   if (!trimmed) return "";
   if (trimmed.length > 200) return null;
   try {
-    new RegExp(trimmed);
+    RE2JS.compile(trimmed);
     return trimmed;
   } catch {
     return null;
@@ -90,6 +91,20 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const hostIdRef = useRef(form.id);
+  const [trackedHostId, setTrackedHostId] = useState(form.id);
+  if (form.id !== trackedHostId) {
+    setTrackedHostId(form.id);
+    setOpen(configured);
+    setPattern(form.totp?.promptPattern || "");
+    setDraft("");
+    setError(null);
+    setPreview(null);
+    setSecondsLeft(null);
+    setBusy(false);
+    setScanning(false);
+  }
+  hostIdRef.current = form.id;
 
   useEffect(() => {
     if (configured) setOpen(true);
@@ -107,8 +122,9 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
       refreshed = true;
       const bridge = netcattyBridge.get();
       if (!bridge?.previewTotp) return;
+      const hostId = hostIdRef.current;
       void bridge.previewTotp({ text: uri }).then((result) => {
-        if (!result?.ok || !result.code) return;
+        if (hostIdRef.current !== hostId || !result?.ok || !result.code) return;
         setPreview((current) => current && current.uri === uri
           ? {
             ...current,
@@ -135,6 +151,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   };
 
   const remember = (result: Preview & { ok?: boolean }) => {
+    if (hostIdRef.current !== form.id) return;
     const patternValue = validPattern(pattern);
     setPreview(result);
     setError(null);
@@ -147,6 +164,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
   };
 
   const applyText = async (text: string) => {
+    const expectedHostId = form.id;
     const bridge = netcattyBridge.get();
     if (!bridge?.previewTotp) {
       setError("unavailable");
@@ -155,6 +173,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
     setBusy(true);
     try {
       const result = await bridge.previewTotp({ text });
+      if (hostIdRef.current !== expectedHostId) return;
       if (!result?.ok || !result.uri || !result.code) {
         setPreview(null);
         setError(result?.error || "invalid");
@@ -171,13 +190,14 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
         period: result.period,
       });
     } catch {
-      setError("unavailable");
+      if (hostIdRef.current === expectedHostId) setError("unavailable");
     } finally {
-      setBusy(false);
+      if (hostIdRef.current === expectedHostId) setBusy(false);
     }
   };
 
   const scanScreen = async () => {
+    const expectedHostId = form.id;
     const bridge = netcattyBridge.get();
     if (!bridge?.scanTotpQrFromScreen) {
       setError("unavailable");
@@ -187,6 +207,7 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
     setScanning(true);
     try {
       const result = await bridge.scanTotpQrFromScreen();
+      if (hostIdRef.current !== expectedHostId) return;
       if (!result?.ok || !result.uri || !result.code) {
         setPreview(null);
         setError(result?.error || "not-found");
@@ -203,10 +224,12 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
         period: result.period,
       });
     } catch {
-      setError("unavailable");
+      if (hostIdRef.current === expectedHostId) setError("unavailable");
     } finally {
-      setBusy(false);
-      setScanning(false);
+      if (hostIdRef.current === expectedHostId) {
+        setBusy(false);
+        setScanning(false);
+      }
     }
   };
 

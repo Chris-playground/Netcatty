@@ -162,7 +162,7 @@ export interface HostTotpConfig {
   uri: string;
   /** Defaults to true. False keeps the dialog fill button and skips auto-submit. */
   autoSubmit?: boolean;
-  /** Extra JavaScript regular expression matched against the KI prompt. */
+  /** Extra RE2 regular expression matched against the KI prompt. */
   promptPattern?: string;
 }
 

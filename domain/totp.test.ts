@@ -200,6 +200,23 @@ test("a host regex can add a prompt without overriding the exclusion list", () =
   }), true);
 });
 
+test("custom prompt patterns stay linear and ignore syntax RE2 rejects", () => {
+  const started = Date.now();
+  assert.equal(isAutoSubmittableTotpPrompt({
+    prompts: [{ prompt: `${"a".repeat(32)}!` }],
+    promptPattern: "(a+)+$",
+  }), false);
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(isAutoSubmittableTotpPrompt({
+    prompts: [{ prompt: "x".repeat(2048) }],
+    promptPattern: "x+",
+  }), false);
+  assert.equal(isAutoSubmittableTotpPrompt({
+    ...prompt("My OTP: "),
+    promptPattern: "^(a)\\1$",
+  }), false);
+});
+
 test("QR payload selection keeps the first totp URI and rejects HOTP or migration", () => {
   const totpUri = `otpauth://totp/Example:alice?secret=${encodeBase32(SHA1_SECRET)}`;
   const selected = selectTotpFromQrPayloads([
