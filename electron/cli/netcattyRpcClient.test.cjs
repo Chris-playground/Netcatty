@@ -22,8 +22,11 @@ function startFakeBridge({
   acceptToken = null,
   authResult = "ok",
   closeDuringAuth = null,
+  closeDuringStatus = null,
+  statusResult = "ok",
 } = {}) {
   let authAttempts = 0;
+  let statusAttempts = 0;
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
       let buffer = "";
@@ -69,6 +72,25 @@ function startFakeBridge({
             }
             socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } })}\n`);
             continue;
+          }
+          if (message.method === "netcatty/getStatus") {
+            statusAttempts += 1;
+            if (closeDuringStatus && statusAttempts === 1) {
+              if (closeDuringStatus === "reset") {
+                socket.destroy(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }));
+              } else {
+                socket.destroy();
+              }
+              return;
+            }
+            if (statusResult === "rpc-error") {
+              socket.write(`${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32000, message: "status unavailable" },
+              })}\n`);
+              continue;
+            }
           }
           socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`);
         }
@@ -198,11 +220,11 @@ test("connectClient stops retrying and surfaces the original error when discover
   await assert.rejects(connectClient(), isOriginalConnectError);
   const elapsed = Date.now() - startedAt;
 
-  // Same port, token, and pid: re-read once, then stop before the 900ms delay
-  // instead of hammering the dead port.
+  // Same port, token, and pid: do not open another TCP connection, but keep
+  // both delays so a later rewrite is still visible.
   assert.equal(getAttempts(), 1);
-  assert.equal(getReads(), 2);
-  assert.ok(elapsed < 1000, `unchanged identity should stop before the second delay, elapsed ${elapsed}ms`);
+  assert.equal(getReads(), 3);
+  assert.ok(elapsed >= 1100, `unchanged identity should keep the remaining delay, elapsed ${elapsed}ms`);
 });
 
 test("connectClient keeps polling when discovery disappears and surfaces the original connect error", async (t) => {
@@ -401,7 +423,7 @@ test("connectClient surfaces the original auth error when a stale token's discov
   );
 
   assert.equal(getAttempts(), 1);
-  assert.equal(getReads(), 2);
+  assert.equal(getReads(), 3);
 });
 
 test("connectClient surfaces the bridge auth error when the stale token's discovery identity is unchanged", async (t) => {
@@ -426,7 +448,7 @@ test("connectClient surfaces the bridge auth error when the stale token's discov
   );
 
   assert.equal(getAttempts(), 1);
-  assert.equal(getReads(), 2);
+  assert.equal(getReads(), 3);
 });
 
 test("connectClient polls an initially missing discovery file and then connects", async (t) => {
@@ -594,5 +616,89 @@ test("connectClient surfaces the original transport error when auth is reset and
   );
 
   assert.equal(getAttempts(), 1);
+  assert.equal(getReads(), 3);
+});
+
+test("connectClient observes a discovery rewrite after an unchanged reread", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+
+  const deadPort = await getDeadPort();
+  const { server, port: bridgePort } = await startFakeBridge();
+  t.after(() => {
+    server.close();
+  });
+  const getReads = countDiscoveryReads(t, discoveryPath, (reads) => {
+    if (reads < 3) {
+      return `${JSON.stringify({ port: deadPort, token: "stale-token", pid: 1 })}\n`;
+    }
+    return `${JSON.stringify({ port: bridgePort, token: "fresh-token", pid: 2 })}\n`;
+  });
+
+  const startedAt = Date.now();
+  const client = await connectClient();
+  const elapsed = Date.now() - startedAt;
+  assert.equal(client.discovery.port, bridgePort);
+  assert.equal(client.discovery.pid, 2);
+  assert.equal(getAttempts(), 2);
+  assert.equal(getReads(), 3);
+  assert.ok(elapsed >= 1100, `later rewrite should wait out both delays, elapsed ${elapsed}ms`);
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient retries when the status probe loses the socket and discovery changes", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+
+  const { server, port } = await startFakeBridge({ closeDuringStatus: "close" });
+  t.after(() => {
+    server.close();
+  });
+  const getReads = countDiscoveryReads(t, discoveryPath, (reads) => {
+    const record = reads === 1
+      ? { port, token: "token", pid: 1 }
+      : { port, token: "token", pid: 2 };
+    return `${JSON.stringify(record)}\n`;
+  });
+
+  const client = await connectClient();
+  assert.equal(client.discovery.pid, 2);
+  assert.equal(getAttempts(), 2);
   assert.equal(getReads(), 2);
+  await client.call("netcatty/getStatus", {});
+  client.close();
+  await sleep(20);
+});
+
+test("connectClient keeps the default timeout when the status probe returns an RPC error", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-connect-test-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  setupDiscoveryEnv(t, discoveryPath);
+  const getAttempts = countConnectAttempts(t);
+
+  const { server, port } = await startFakeBridge({ statusResult: "rpc-error" });
+  t.after(() => {
+    server.close();
+  });
+  writeDiscoveryFile(discoveryPath, port, "token", 3);
+
+  const client = await connectClient();
+  assert.equal(client.discovery.port, port);
+  assert.equal(getAttempts(), 1);
+  client.close();
+  await sleep(20);
 });

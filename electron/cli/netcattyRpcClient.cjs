@@ -62,11 +62,12 @@ function loadDiscovery() {
 // transient gap as a later re-read. Identity is port + token + pid (the same
 // triple `isCliDiscoveryFileCurrent` uses), because the OS may hand the new
 // bridge the same ephemeral port. A socket that closes or resets while
-// auth/verify is in flight is retried the same way: the process that accepted
-// the handshake may already be gone. Unchanged identity stops immediately
-// instead of hammering the same bridge. At most two extra attempts
-// (300ms + 900ms, ~1.2s). When every attempt fails, the original error is
-// surfaced unchanged.
+// auth/verify or the follow-up status probe is in flight is retried the same
+// way: the process that accepted the handshake may already be gone. An
+// unchanged identity is not connected again, but the remaining delays still
+// elapse so a rewrite later in the budget is observed. At most two extra
+// attempts (300ms + 900ms, ~1.2s). When every attempt fails, the original
+// error is surfaced unchanged.
 const CONNECT_RETRY_DELAYS_MS = [300, 900];
 
 function discoveryIdentity(record) {
@@ -141,8 +142,11 @@ async function establishConnection(discovery) {
     try {
       const statusResult = await client.call("netcatty/getStatus", {});
       client.ingestBridgeStatus(statusResult);
-    } catch {
-      // Keep the default RPC timeout when bridge status cannot be fetched.
+    } catch (err) {
+      // The peer can exit after auth succeeds and while this probe is in
+      // flight. Let the outer retry reread discovery. Other status failures
+      // keep the default RPC timeout.
+      if (err?.code === "CONNECTION_CLOSED" || err?.code === "CONNECTION_ERROR") throw err;
     }
 
     return {
@@ -184,7 +188,11 @@ async function connectClient() {
       if (!lastError) lastError = err;
       continue;
     }
-    if (attemptedIdentity && sameDiscoveryIdentity(discovery, attemptedIdentity)) break;
+    if (attemptedIdentity && sameDiscoveryIdentity(discovery, attemptedIdentity)) {
+      // Do not reconnect to the bridge that just failed. Keep the remaining
+      // delays so a later rewrite inside the budget is still observed.
+      continue;
+    }
 
     attemptedIdentity = discoveryIdentity(discovery);
     try {
