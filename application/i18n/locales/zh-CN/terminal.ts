@@ -1002,7 +1002,7 @@ export const zhCNTerminalMessages: Messages = {
   'keyboard.interactive.submit': '提交',
   'keyboard.interactive.verifying': '验证中...',
   'keyboard.interactive.savePassword': '保存密码',
-  'keyboard.interactive.fillTotp': '填入当前验证码',
+  'keyboard.interactive.fillTotp': '填入验证码',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'SSH 密钥密码',

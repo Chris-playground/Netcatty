@@ -596,8 +596,6 @@ export const zhTWVaultMessages: Messages = {
   'terminal.menu.cut': '剪下',
   'terminal.menu.copy': '複製',
   'terminal.menu.paste': '貼上',
-  'terminal.menu.typeTotp': '輸入驗證碼',
-  'terminal.menu.typeTotpFailed': '無法產生驗證碼。',
   'terminal.menu.addSelectionToAI': '新增到對話',
   'terminal.menu.pasteSelection': '貼上選取文字',
   'terminal.menu.selectAll': '全選',

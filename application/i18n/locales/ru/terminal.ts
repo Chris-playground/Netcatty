@@ -168,8 +168,6 @@ export const ruTerminalMessages: Messages = {
   'terminal.menu.cut': 'Вырезать',
   'terminal.menu.copy': 'Копировать',
   'terminal.menu.paste': 'Вставить',
-  'terminal.menu.typeTotp': 'Ввести код подтверждения',
-  'terminal.menu.typeTotpFailed': 'Не удалось создать код подтверждения.',
   'terminal.menu.uploadClipboardImage': 'Загрузить изображение из буфера',
   'terminal.menu.addSelectionToAI': 'Добавить в чат',
   'terminal.menu.pasteSelection': 'Вставить выделенное',
@@ -927,7 +925,7 @@ export const ruTerminalMessages: Messages = {
   'keyboard.interactive.submit': 'Отправить',
   'keyboard.interactive.verifying': 'Проверка...',
   'keyboard.interactive.savePassword': 'Сохранить пароль',
-  'keyboard.interactive.fillTotp': 'Подставить текущий код',
+  'keyboard.interactive.fillTotp': 'Подставить код подтверждения',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'Парольная фраза SSH-ключа',

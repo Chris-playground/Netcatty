@@ -96,13 +96,25 @@ interface KeyboardInteractiveModalProps {
   onFillTotp?: () => Promise<string | null> | string | null;
 }
 
-function totpResponseIndex(prompts: KeyboardInteractivePrompt[]): number {
-  const otpLike = /otp|verification|mfa auth|驗證碼|验证码/i;
-  const match = prompts.findIndex((prompt) => otpLike.test(prompt.prompt || ""));
-  if (match >= 0) return match;
-  if (prompts.length === 1) return 0;
-  const nonPassword = prompts.findIndex((prompt) => !isAPasswordPrompt(prompt));
-  return nonPassword >= 0 ? nonPassword : 0;
+const OTP_PROMPT = /otp|one[-\s]?time|totp|verification|passcode|authenticator|\bmfa\b|\b2fa\b|two[-\s]?factor|验证码|驗證碼|动态口令|動態口令|二次认证|二次認證|二次验证|二次驗證/i;
+
+export type TotpFillPlacement = "preferred" | "available" | "hidden";
+
+/** Where a TOTP fill action may appear. Password prompts never receive the code. */
+export function totpFillPlacement(prompt: KeyboardInteractivePrompt): TotpFillPlacement {
+  const text = prompt.prompt || "";
+  if (OTP_PROMPT.test(text)) return "preferred";
+  if (isAPasswordPrompt(prompt)) return "hidden";
+  const label = keyboardInteractiveFieldLabel(text, "").toLowerCase();
+  if (/\b(password|passwd|passphrase)\b/.test(label)) return "hidden";
+  return "available";
+}
+
+export function visibleTotpFillPlacements(prompts: KeyboardInteractivePrompt[]): TotpFillPlacement[] {
+  const placements = prompts.map(totpFillPlacement);
+  const hasPreferred = placements.some((placement) => placement === "preferred");
+  if (!hasPreferred) return placements;
+  return placements.map((placement) => (placement === "preferred" ? placement : "hidden"));
 }
 
 export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> = ({
@@ -183,11 +195,13 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
     }
   }, [request, onCancel, isSubmitting]);
 
-  const handleFillTotp = useCallback(async () => {
+  const handleFillTotp = useCallback(async (index: number) => {
     if (!request || isSubmitting || !onFillTotp) return;
+    const prompt = request.prompts[index];
+    if (!prompt || totpFillPlacement(prompt) === "hidden") return;
     const code = await onFillTotp();
     if (!code) return;
-    handleResponseChange(totpResponseIndex(request.prompts), code);
+    handleResponseChange(index, code);
   }, [request, isSubmitting, onFillTotp, handleResponseChange]);
 
   const handleKeyDown = useCallback(
@@ -207,7 +221,8 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
     request.hostname
       ? t("keyboard.interactive.descWithHost", { hostname: request.hostname })
       : t("keyboard.interactive.desc");
-  const fillIndex = canFillTotp ? totpResponseIndex(request.prompts) : -1;
+  const fillPlacements = canFillTotp ? visibleTotpFillPlacements(request.prompts) : [];
+  const preferredFillIndex = fillPlacements.findIndex((placement) => placement === "preferred");
 
   return (
     <Dialog open={!!request} onOpenChange={() => {/* intentionally non-dismissable */}}>
@@ -239,6 +254,7 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
               prompt.prompt,
               t("keyboard.interactive.verificationCode"),
             );
+            const fillPlacement = fillPlacements[index] ?? "hidden";
 
             return (
               <div key={index} className="space-y-2">
@@ -246,7 +262,7 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
                   {promptLabel}
                 </Label>
                 <div className="flex items-center gap-2">
-                  <div className="relative min-w-0 flex-1">
+                  <div className={fillPlacement === "preferred" ? "relative min-w-0 flex-1 rounded-md ring-1 ring-primary/40" : "relative min-w-0 flex-1"}>
                     <Input
                       id={`ki-prompt-${index}`}
                       type={isPassword && !showPassword ? "password" : "text"}
@@ -255,7 +271,7 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
                       onKeyDown={handleKeyDown}
                       placeholder=""
                       className={isPassword ? "pr-10" : undefined}
-                      autoFocus={index === 0}
+                      autoFocus={preferredFillIndex >= 0 ? index === preferredFillIndex : index === 0}
                       disabled={isSubmitting}
                     />
                     {isPassword && (
@@ -269,13 +285,14 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
                       </button>
                     )}
                   </div>
-                  {index === fillIndex && (
+                  {fillPlacement !== "hidden" && (
                     <Button
                       type="button"
-                      variant="secondary"
+                      variant={fillPlacement === "preferred" ? "default" : "secondary"}
                       size="sm"
                       className="shrink-0"
-                      onClick={() => { void handleFillTotp(); }}
+                      data-totp-fill={fillPlacement}
+                      onClick={() => { void handleFillTotp(index); }}
                       disabled={isSubmitting}
                     >
                       {t("keyboard.interactive.fillTotp")}

@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { keyboardInteractiveFieldLabel } from "./KeyboardInteractiveModal.tsx";
+import { keyboardInteractiveFieldLabel, totpFillPlacement, visibleTotpFillPlacements } from "./KeyboardInteractiveModal.tsx";
 
 const modalSource = readFileSync(new URL("./KeyboardInteractiveModal.tsx", import.meta.url), "utf8");
 
@@ -19,8 +19,24 @@ test("keyboardInteractiveFieldLabel uses the cleaned last prompt line", () => {
 test("keyboard-interactive dialog shows a field label and an inline TOTP action", () => {
   assert.doesNotMatch(modalSource, /<pre/);
   assert.match(modalSource, /keyboardInteractiveFieldLabel\(/);
-  assert.match(modalSource, /index === fillIndex/);
+  assert.match(modalSource, /data-totp-fill=\{fillPlacement\}/);
   assert.doesNotMatch(modalSource, /className="w-full"/);
+  assert.doesNotMatch(modalSource, /onTypeTotp/);
+});
+
+test("TOTP fill stays off password prompts and prefers verification prompts", () => {
+  assert.equal(totpFillPlacement({ prompt: "Password:", echo: false }), "hidden");
+  assert.equal(totpFillPlacement({ prompt: "Verification code:", echo: false }), "preferred");
+  assert.equal(totpFillPlacement({ prompt: "[OTP Code]:", echo: false }), "preferred");
+  assert.equal(totpFillPlacement({ prompt: "One-time password:", echo: false }), "preferred");
+  assert.equal(totpFillPlacement({ prompt: "SMS code:", echo: false }), "available");
+  assert.deepEqual(visibleTotpFillPlacements([
+    { prompt: "Password:", echo: false },
+    { prompt: "Verification code:", echo: false },
+  ]), ["hidden", "preferred"]);
+  assert.deepEqual(visibleTotpFillPlacements([
+    { prompt: "Password:", echo: false },
+  ]), ["hidden"]);
 });
 
 test("keyboard-interactive modal cannot be dismissed by outside click or Escape", () => {

@@ -596,8 +596,6 @@ export const zhCNVaultMessages: Messages = {
   'terminal.menu.cut': '剪切',
   'terminal.menu.copy': '复制',
   'terminal.menu.paste': '粘贴',
-  'terminal.menu.typeTotp': '输入验证码',
-  'terminal.menu.typeTotpFailed': '无法生成验证码。',
   'terminal.menu.addSelectionToAI': '添加到对话',
   'terminal.menu.pasteSelection': '粘贴选中文本',
   'terminal.menu.selectAll': '全选',

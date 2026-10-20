@@ -12,7 +12,6 @@ import {
   type RemoteClipboardImageUploadResult,
 } from "../clipboardImagePaste";
 import { handleTerminalClipboardPaste, pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
-import { pasteTextIntoTerminal } from "../runtime/terminalUserPaste";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
 import {
@@ -97,7 +96,6 @@ export const useTerminalContextActions = ({
   getRemoteCwd,
   scrollToBottomAfterProgrammaticInput,
   onClipboardImageUploadResult,
-  getTotpUri,
 }: {
   termRef: RefObject<XTerm | null>;
   sourceSessionId: string;
@@ -127,8 +125,6 @@ export const useTerminalContextActions = ({
   getRemoteCwd?: () => Promise<string | null | undefined>;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
   onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
-  /** Current host TOTP URI. Absent when this session has no authenticator. */
-  getTotpUri?: () => string | undefined;
 }) => {
   const { t } = useI18n();
   const savingScreenRef = useRef(false);
@@ -330,33 +326,6 @@ export const useTerminalContextActions = ({
     });
   }, [clearWipesScrollbackRef, sessionRef, termRef, terminalBackend]);
 
-  const onTypeTotp = useCallback(async () => {
-    const term = termRef.current;
-    const uri = getTotpUri?.();
-    if (!term || !uri) return;
-    requestHistoryPreviewHide(term.element?.parentElement);
-    term.focus();
-    try {
-      const bridge = netcattyBridge.get();
-      const result = await bridge?.previewTotp?.({ text: uri });
-      if (!result?.ok || !result.code) {
-        toast.error(t("terminal.menu.typeTotpFailed"));
-        return;
-      }
-      // Type the current code only. Enter stays with the user, matching a
-      // snippet that pastes without running. Returning true from onPasteData
-      // marks the paste as already dispatched so it is not broadcast.
-      pasteTextIntoTerminal(term, result.code, {
-        sensitive: true,
-        scrollOnPaste: scrollOnPasteRef?.current ?? false,
-        onPasteData: () => true,
-      });
-    } catch (err) {
-      logger.warn("Failed to type TOTP code", err);
-      toast.error(t("terminal.menu.typeTotpFailed"));
-    }
-  }, [getTotpUri, scrollOnPasteRef, t, termRef]);
-
   const onSelectWord = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
@@ -369,7 +338,6 @@ export const useTerminalContextActions = ({
     onSaveScreen,
     onCopy,
     onPaste,
-    onTypeTotp: getTotpUri ? onTypeTotp : undefined,
     onUploadClipboardImage: supportsRemoteImagePaste ? onUploadClipboardImage : undefined,
     onPasteSelection,
     onSelectAll,

@@ -5,7 +5,6 @@
 import {
   ClipboardPaste,
   Copy,
-  KeyRound,
   Download,
   Globe2,
   Pencil,
@@ -56,7 +55,6 @@ export interface TerminalContextMenuProps {
   onSaveScreen?: () => void;
   onCopy?: () => void;
   onPaste?: () => void;
-  onTypeTotp?: () => void;
   onUploadClipboardImage?: () => void;
   onPasteSelection?: () => void;
   onSelectAll?: () => void;
@@ -217,7 +215,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onSaveScreen,
   onCopy,
   onPaste,
-  onTypeTotp,
   onUploadClipboardImage,
   onPasteSelection,
   onSelectAll,
@@ -392,12 +389,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             {t('terminal.menu.paste')}
             <ContextMenuShortcut>{pasteShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
-          {onTypeTotp && (
-            <ContextMenuItem onClick={onTypeTotp}>
-              <KeyRound size={14} className="mr-2" />
-              {t('terminal.menu.typeTotp')}
-            </ContextMenuItem>
-          )}
           {shouldShowUploadClipboardImageContextMenuAction(onUploadClipboardImage) && (
             <ContextMenuItem onClick={onUploadClipboardImage}>
               <Upload size={14} className="mr-2" />

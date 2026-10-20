@@ -592,7 +592,6 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
       onCopy={terminalContextActions.onCopy}
       onOpenBrowser={(!host?.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol)) ? () => { void ctx.handleOpenHostBrowser(); } : undefined}
       onPaste={terminalContextActions.onPaste}
-      onTypeTotp={status === "connected" ? terminalContextActions.onTypeTotp : undefined}
       onUploadClipboardImage={status === "connected" ? terminalContextActions.onUploadClipboardImage : undefined}
       onPasteSelection={terminalContextActions.onPasteSelection}
       onSelectAll={terminalContextActions.onSelectAll}

@@ -147,8 +147,6 @@ export const enTerminalMessages: Messages = {
   'terminal.menu.cut': 'Cut',
   'terminal.menu.copy': 'Copy',
   'terminal.menu.paste': 'Paste',
-  'terminal.menu.typeTotp': 'Type verification code',
-  'terminal.menu.typeTotpFailed': 'Could not generate the verification code.',
   'terminal.menu.uploadClipboardImage': 'Upload clipboard image',
   'terminal.menu.addSelectionToAI': 'Add to Conversation',
   'terminal.menu.pasteSelection': 'Paste Selection',
@@ -920,7 +918,7 @@ export const enTerminalMessages: Messages = {
   'keyboard.interactive.submit': 'Submit',
   'keyboard.interactive.verifying': 'Verifying...',
   'keyboard.interactive.savePassword': 'Save password',
-  'keyboard.interactive.fillTotp': 'Fill current code',
+  'keyboard.interactive.fillTotp': 'Fill verification code',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'SSH Key Passphrase',
