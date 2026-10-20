@@ -178,6 +178,14 @@ test('prompt observation keeps the heredoc opener and drops it after the shell r
   assert.equal(isConfirmedTerminalShellPrompt(state.promptText), false);
 });
 
+test('prompt observation coalesces a CRLF split across chunks (#3796)', () => {
+  let state = { origin: '', current: '' };
+  state = foldTerminalPromptSecurityOutput(state, "[root@h ~]# cat >> f << EOF\r");
+  state = foldTerminalPromptSecurityOutput(state, '\n> ');
+  assert.equal(isConfirmedTerminalShellPrompt(state.promptText), true);
+  assert.equal(isUntrustedTerminalInputPrompt(state.promptText), false);
+});
+
 test('vim ex command-line is not an untrusted input prompt (#3422)', () => {
   assert.equal(isUntrustedTerminalInputPrompt(':', { alternateScreen: true }), false);
   assert.equal(isUntrustedTerminalInputPrompt(': ', { alternateScreen: true }), false);

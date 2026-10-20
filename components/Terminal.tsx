@@ -453,6 +453,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => () => clearTerminalBroadcastUserInput(sessionId), [sessionId]);
   const sensitivePromptOutputTailRef = useRef("");
   const heredocPromptOriginRef = useRef("");
+  const promptSecurityPendingCrRef = useRef(false);
   const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
   const dismissedScriptRunIdsRef = useRef(new Set<string>());
 
@@ -2015,9 +2016,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const folded = foldTerminalPromptSecurityOutput({
       origin: heredocPromptOriginRef.current,
       current: sensitivePromptOutputTailRef.current,
+      pendingCr: promptSecurityPendingCrRef.current,
     }, chunk);
     heredocPromptOriginRef.current = folded.origin;
     sensitivePromptOutputTailRef.current = folded.current;
+    promptSecurityPendingCrRef.current = folded.pendingCr;
     const promptSecurityOptions = {
       allowHostStyleGreaterThan: isNetworkDevice,
       alternateScreen: termRef.current
@@ -2034,6 +2037,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       } else {
         sensitivePromptOutputTailRef.current = "";
         heredocPromptOriginRef.current = "";
+        promptSecurityPendingCrRef.current = false;
       }
       return;
     } else if (isUntrustedTerminalInputPrompt(

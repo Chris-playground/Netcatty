@@ -86,19 +86,29 @@ function nextHeredocPromptOrigin(origin: string, completedLine: string): string 
  * completed non-PS2 line, so a long heredoc body does not have to be retained.
  */
 export function foldTerminalPromptSecurityOutput(
-  state: { origin: string; current: string },
+  state: { origin: string; current: string; pendingCr?: boolean },
   chunk: string,
-): { origin: string; current: string; promptText: string } {
-  const combined = `${state.current}${chunk}`;
+): { origin: string; current: string; promptText: string; pendingCr: boolean } {
+  // A PTY can split CRLF across chunks. The LF is the rest of that break,
+  // not a second empty line that would drop the heredoc opener.
+  let pendingCr = state.pendingCr === true;
+  let input = chunk;
+  if (pendingCr && input.startsWith('\n')) {
+    input = input.slice(1);
+    pendingCr = false;
+  }
+  const combined = `${state.current}${input}`;
   let origin = state.origin;
   for (const line of splitTerminalLogicalLines(combined).slice(0, -1)) {
     origin = nextHeredocPromptOrigin(origin, line);
   }
-  const current = appendTerminalPromptSecurityTail(state.current, chunk);
+  const current = appendTerminalPromptSecurityTail(state.current, input);
   const promptText = lastLogicalLine(current).trim() === '>' && origin
     ? `${origin}\n${current}`
     : current;
-  return { origin, current, promptText };
+  if (input.endsWith('\r')) pendingCr = true;
+  else if (input.length > 0) pendingCr = false;
+  return { origin, current, promptText, pendingCr };
 }
 
 /**
