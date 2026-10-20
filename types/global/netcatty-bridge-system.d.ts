@@ -76,6 +76,7 @@ declare global {
     ): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       containers?: import("../../domain/systemManager/types").DockerContainerInfo[];
     }>;
     listDockerImages?(
@@ -84,6 +85,7 @@ declare global {
     ): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       images?: import("../../domain/systemManager/types").DockerImageInfo[];
     }>;
     getDockerStats?(options: {
@@ -93,6 +95,7 @@ declare global {
     }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       stats?: import("../../domain/systemManager/types").DockerStatInfo[];
     }>;
     listAccelerators?(sessionId: string): Promise<{
@@ -129,6 +132,7 @@ declare global {
     }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       inspect?: Record<string, unknown>;
     }>;
     dockerImageInspect?(options: {
@@ -138,6 +142,7 @@ declare global {
     }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       inspect?: Record<string, unknown>;
     }>;
     dockerAction?(options: {
@@ -146,13 +151,14 @@ declare global {
       action: import("../../domain/systemManager/types").DockerContainerAction;
       newName?: string;
       runtime?: import("../../domain/systemManager/containerRuntime").ContainerRuntimeId;
-    }): Promise<{ success: boolean; error?: string }>;
+    }): Promise<{ success: boolean; error?: string; errorCode?: string }>;
     dockerImageAction?(options: {
       sessionId: string;
       runtime?: import("../../domain/systemManager/containerRuntime").ContainerRuntimeId;
     } & import("../../domain/systemManager/types").DockerImageManageAction): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       output?: string;
     }>;
     kubectl?(options: {
@@ -165,6 +171,7 @@ declare global {
     }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       contexts?: import("../../domain/systemManager/containerRuntime").KubeContextInfo[];
       current?: string;
       namespaces?: string[];

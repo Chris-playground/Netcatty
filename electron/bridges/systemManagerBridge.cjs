@@ -9,6 +9,20 @@ const { createGpuOpsApi } = require("./systemManager/gpuOps.cjs");
 const { createPortOpsApi } = require("./systemManager/portOps.cjs");
 const { createServiceOpsApi } = require("./systemManager/serviceOps.cjs");
 
+function nerdctlUsableClause(markCommand) {
+  // Offer nerdctl only when `nerdctl info` works. A socket permission error
+  // still counts: later commands can fall back to sudo. A dead containerd
+  // (rootless not running, connection refused) does not.
+  return [
+    "if command -v nerdctl >/dev/null 2>&1; then ",
+    "_nc_nerdctl_err=$( { if command -v timeout >/dev/null 2>&1; then timeout 3 nerdctl info; else nerdctl info; fi; } 2>&1 >/dev/null ); ",
+    "_nc_nerdctl_code=$?; ",
+    'if [ "$_nc_nerdctl_code" -eq 0 ] || printf "%s\\n" "$_nc_nerdctl_err" | grep -i "permission denied" >/dev/null 2>&1; then ',
+    markCommand,
+    "; fi; fi; ",
+  ].join("");
+}
+
 const CAPABILITY_SCRIPT_POSIX = [
   "exec sh -c ",
   "'",
@@ -16,7 +30,7 @@ const CAPABILITY_SCRIPT_POSIX = [
   'command -v tmux >/dev/null 2>&1 && printf "%s\\n" __NC_TMUX__=1; ',
   'command -v docker >/dev/null 2>&1 && printf "%s\\n" __NC_DOCKER__=1; ',
   'command -v podman >/dev/null 2>&1 && printf "%s\\n" __NC_PODMAN__=1; ',
-  'command -v nerdctl >/dev/null 2>&1 && printf "%s\\n" __NC_NERDCTL__=1; ',
+  nerdctlUsableClause('printf "%s\\n" __NC_NERDCTL__=1'),
   'command -v kubectl >/dev/null 2>&1 && printf "%s\\n" __NC_KUBECTL__=1; ',
   'command -v nvidia-smi >/dev/null 2>&1 && printf "%s\\n" __NC_NVIDIA_SMI__=1; ',
   'command -v npu-smi >/dev/null 2>&1 && printf "%s\\n" __NC_NPU_SMI__=1; ',
@@ -226,7 +240,7 @@ function createSystemManagerBridge(deps) {
             "if (Get-Command tmux -ErrorAction SilentlyContinue) { Write-Output '__NC_TMUX__=1' }; ",
             "docker info 2>$null; if ($LASTEXITCODE -eq 0) { Write-Output '__NC_DOCKER__=1' }; ",
             "if (Get-Command podman -ErrorAction SilentlyContinue) { Write-Output '__NC_PODMAN__=1' }; ",
-            "if (Get-Command nerdctl -ErrorAction SilentlyContinue) { Write-Output '__NC_NERDCTL__=1' }; ",
+            "if (Get-Command nerdctl -ErrorAction SilentlyContinue) { nerdctl info 2>$null; if ($LASTEXITCODE -eq 0) { Write-Output '__NC_NERDCTL__=1' } }; ",
             "if (Get-Command kubectl -ErrorAction SilentlyContinue) { Write-Output '__NC_KUBECTL__=1' }; ",
             "if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { Write-Output '__NC_NVIDIA_SMI__=1' }; ",
             "if (Get-Command npu-smi -ErrorAction SilentlyContinue) { Write-Output '__NC_NPU_SMI__=1' }; ",
@@ -252,7 +266,7 @@ function createSystemManagerBridge(deps) {
             "command -v tmux; ",
             "command -v docker >/dev/null 2>&1 && echo docker_ok; ",
             "command -v podman >/dev/null 2>&1 && echo podman_ok; ",
-            "command -v nerdctl >/dev/null 2>&1 && echo nerdctl_ok; ",
+            nerdctlUsableClause("echo nerdctl_ok"),
             "command -v kubectl >/dev/null 2>&1 && echo kubectl_ok; ",
             "command -v nvidia-smi >/dev/null 2>&1 && echo nvidia_ok; ",
             "command -v npu-smi >/dev/null 2>&1 && echo npu_ok; ",
@@ -472,6 +486,9 @@ function createSystemManagerBridge(deps) {
   async function dockerAction(event, payload) {
     const result = await dockerOps.containerAction(event, payload);
     if (result.success === false) {
+      if (result.errorCode === "nerdctlUnreachable") {
+        return { success: false, errorCode: result.errorCode };
+      }
       return { success: false, error: result.error || result.stderr || "docker command failed" };
     }
     return { success: true };
@@ -484,6 +501,9 @@ function createSystemManagerBridge(deps) {
   async function dockerImageAction(event, payload) {
     const result = await dockerOps.imageAction(event, payload);
     if (result.success === false) {
+      if (result.errorCode === "nerdctlUnreachable") {
+        return { success: false, errorCode: result.errorCode };
+      }
       return { success: false, error: result.error || result.stderr || "docker command failed" };
     }
     return { success: true, output: result.stdout };

@@ -7,6 +7,7 @@ import type {
   KubeContextInfo,
 } from '../../../domain/systemManager/containerRuntime';
 import {
+  describeRuntimeFailure,
   firstContainerRuntime,
   isKubectlForbiddenError,
   pickContainerSource,
@@ -102,7 +103,12 @@ export function useContainerRuntimeSelection({
       if (cancelled) return;
       if (!result.success || !result.contexts) {
         setContexts([]);
-        setScopeError(result.error || stableT('systemManager.errors.loadKubernetes'));
+        setScopeError(describeRuntimeFailure(
+          result,
+          stableT,
+          stableT('systemManager.errors.loadKubernetes'),
+          contextName,
+        ));
         return;
       }
       setScopeError(null);
@@ -137,7 +143,7 @@ export function useContainerRuntimeSelection({
     }).then((result) => {
       if (cancelled) return;
       if (!result.success || !result.namespaces) {
-        const message = result.error || stableT('systemManager.errors.loadKubernetes');
+        const message = result.error || '';
         if (isKubectlForbiddenError(message)) {
           const configured = contexts.find((item) => item.name === contextName)?.namespace || 'default';
           const fallback = namespaceNameRef.current || configured;
@@ -146,9 +152,15 @@ export function useContainerRuntimeSelection({
           setNamespaces([fallback]);
           return;
         }
-        setScopeError(message);
+        setScopeError(describeRuntimeFailure(
+          result,
+          stableT,
+          stableT('systemManager.errors.loadKubernetes'),
+          contextName,
+        ));
         return;
       }
+      setScopeError(null);
       setNamespaces(result.namespaces);
       setNamespaceName((current) => {
         if (current && result.namespaces?.includes(current)) return current;

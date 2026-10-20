@@ -5,6 +5,7 @@ const {
   buildKubectlDeletePodCommand,
   buildKubectlNamespacesCommand,
   buildKubectlPodsCommand,
+  isKubectlUnreachableError,
   parseKubeconfigContexts,
   parseKubectlPodList,
   parseNamespaceList,
@@ -16,6 +17,15 @@ function isSuccessfulCommandResult(result) {
 
 function commandError(result, fallback) {
   return (result?.stderr || result?.error || "").trim() || fallback;
+}
+
+function failureResult(result, fallback) {
+  const raw = commandError(result, fallback);
+  if (isKubectlUnreachableError(raw)) {
+    console.error(`[netcatty] kubectl: ${raw}`);
+    return { success: false, errorCode: "clusterUnreachable" };
+  }
+  return { success: false, error: raw };
 }
 
 function backgroundShell(sessionId, isLocalSession, nodeProcess) {
@@ -38,7 +48,7 @@ function createKubectlOpsApi({ execOnSession, isLocalSession, process: nodeProce
     if (op === "contexts") {
       const result = await execOnSession(event, sessionId, buildKubectlContextsCommand(), 10000);
       if (!isSuccessfulCommandResult(result)) {
-        return { success: false, error: commandError(result, "kubectl exited") };
+        return failureResult(result, "kubectl exited");
       }
       try {
         const parsed = parseKubeconfigContexts(result.stdout);
@@ -55,7 +65,7 @@ function createKubectlOpsApi({ execOnSession, isLocalSession, process: nodeProce
       if (!command) return { success: false, error: "Invalid context" };
       const result = await execOnSession(event, sessionId, command, 12000);
       if (!isSuccessfulCommandResult(result)) {
-        return { success: false, error: commandError(result, "kubectl exited") };
+        return failureResult(result, "kubectl exited");
       }
       try {
         return { success: true, namespaces: parseNamespaceList(result.stdout) };
@@ -69,7 +79,7 @@ function createKubectlOpsApi({ execOnSession, isLocalSession, process: nodeProce
       if (!command) return { success: false, error: "Invalid context or namespace" };
       const result = await execOnSession(event, sessionId, command, 15000);
       if (!isSuccessfulCommandResult(result)) {
-        return { success: false, error: commandError(result, "kubectl exited") };
+        return failureResult(result, "kubectl exited");
       }
       try {
         return { success: true, pods: parseKubectlPodList(result.stdout) };
@@ -83,7 +93,7 @@ function createKubectlOpsApi({ execOnSession, isLocalSession, process: nodeProce
       if (!command) return { success: false, error: "Invalid pod" };
       const result = await execOnSession(event, sessionId, command, 20000);
       if (!isSuccessfulCommandResult(result)) {
-        return { success: false, error: commandError(result, "kubectl delete failed") };
+        return failureResult(result, "kubectl delete failed");
       }
       return { success: true };
     }

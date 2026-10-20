@@ -216,6 +216,58 @@ function isKubectlForbiddenError(message) {
   return /\bforbidden\b/i.test(String(message || ""));
 }
 
+function isKubectlUnreachableError(message) {
+  const text = String(message || "");
+  if (!text.trim() || isKubectlForbiddenError(text)) return false;
+  return /couldn'?t get current server api group list|could not get current server api group list|unable to connect to the server|connection refused|dial tcp|i\/o timeout|no such host|network is unreachable|context deadline exceeded|tls handshake timeout/i.test(text);
+}
+
+function isNerdctlUnreachableError(message) {
+  const text = String(message || "").toLowerCase();
+  if (!text.trim()) return false;
+  if (text.includes("rootless containerd") || text.includes("xdg_runtime_dir")) return true;
+  if (text.includes("cannot connect to the docker daemon")) return true;
+  if (!text.includes("containerd")) return false;
+  return /not running|connection refused|no such file|cannot connect|failed to connect|unavailable/.test(text);
+}
+
+const POD_STATUS_MESSAGE_KEYS = {
+  Running: "systemManager.k8s.status.Running",
+  Pending: "systemManager.k8s.status.Pending",
+  Completed: "systemManager.k8s.status.Completed",
+  Succeeded: "systemManager.k8s.status.Succeeded",
+  Failed: "systemManager.k8s.status.Failed",
+  Unknown: "systemManager.k8s.status.Unknown",
+  CrashLoopBackOff: "systemManager.k8s.status.CrashLoopBackOff",
+  ContainerCreating: "systemManager.k8s.status.ContainerCreating",
+  Terminating: "systemManager.k8s.status.Terminating",
+  ImagePullBackOff: "systemManager.k8s.status.ImagePullBackOff",
+  ErrImagePull: "systemManager.k8s.status.ErrImagePull",
+  Error: "systemManager.k8s.status.Error",
+  OOMKilled: "systemManager.k8s.status.OOMKilled",
+};
+
+function podStatusMessageKey(status) {
+  return POD_STATUS_MESSAGE_KEYS[String(status || "")] || null;
+}
+
+function runtimeFailureMessage(errorCode, context) {
+  if (errorCode === "nerdctlUnreachable") {
+    return { key: "systemManager.errors.nerdctlUnreachable" };
+  }
+  if (errorCode === "clusterUnreachable") {
+    const name = typeof context === "string" ? context.trim() : "";
+    if (name) {
+      return {
+        key: "systemManager.errors.clusterUnreachable",
+        values: { context: name },
+      };
+    }
+    return { key: "systemManager.errors.clusterUnreachableGeneric" };
+  }
+  return null;
+}
+
 function wrapClearAndExec(command) {
   return `sh -c ${shQuote(`${CLEAR_STARTUP_OUTPUT} exec ${command}`)}`;
 }
@@ -447,6 +499,10 @@ module.exports = {
   buildKubectlLogsCommand,
   buildKubectlDescribeCommand,
   isKubectlForbiddenError,
+  isKubectlUnreachableError,
+  isNerdctlUnreachableError,
+  podStatusMessageKey,
+  runtimeFailureMessage,
   parseKubeconfigContexts,
   parseNamespaceList,
   parseKubectlPodList,

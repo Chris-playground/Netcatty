@@ -8,6 +8,8 @@ import {
   buildKubectlDescribeCommand,
   buildKubectlExecShellCommand,
   buildKubectlLogsCommand,
+  describeRuntimeFailure,
+  podStatusMessageKey,
 } from '../../domain/systemManager/containerRuntime';
 import type { TerminalSession } from '../../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -70,6 +72,8 @@ const KubernetesPodRow = memo(function KubernetesPodRow({
   onDelete: (pod: KubectlPodInfo) => void;
 }) {
   const { t } = useI18n();
+  const statusKey = podStatusMessageKey(pod.status);
+  const statusLabel = statusKey ? t(statusKey) : pod.status;
   return (
     <SystemPanelRow
       selected={selected}
@@ -79,7 +83,7 @@ const KubernetesPodRow = memo(function KubernetesPodRow({
       subtitle={`${pod.containers.join(', ') || '—'} · ${t('systemManager.k8s.restarts', { count: String(pod.restarts) })}${pod.age ? ` · ${pod.age}` : ''}`}
       trailing={(
         <div className="flex shrink-0 items-center gap-1">
-          <SystemPanelStatusBadge tone={podTone(pod.status)}>{pod.status}</SystemPanelStatusBadge>
+          <SystemPanelStatusBadge tone={podTone(pod.status)}>{statusLabel}</SystemPanelStatusBadge>
           {pod.shellContainers.length > 0 && (
             <SystemPanelRoundButton title={t('systemManager.docker.shell')} onClick={() => onShell(pod)}>
               <Terminal size={12} />
@@ -146,7 +150,12 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
       namespace: namespaceName,
     });
     if (!result.success || !result.pods) {
-      throw new Error(result.error || stableT('systemManager.errors.loadPods'));
+      throw new Error(describeRuntimeFailure(
+        result,
+        stableT,
+        stableT('systemManager.errors.loadPods'),
+        contextName,
+      ));
     }
     return result.pods;
   }, [backend, contextName, namespaceName, sessionId, stableT]);
@@ -164,11 +173,14 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
     const q = query.trim().toLowerCase();
     return (pods ?? []).filter((pod) => {
       if (!q) return true;
+      const statusKey = podStatusMessageKey(pod.status);
+      const statusLabel = (statusKey ? t(statusKey) : pod.status).toLowerCase();
       return pod.name.toLowerCase().includes(q)
         || pod.status.toLowerCase().includes(q)
+        || statusLabel.includes(q)
         || pod.containers.some((name) => name.toLowerCase().includes(q));
     });
-  }, [pods, query]);
+  }, [pods, query, t]);
 
   const displayList = useStableListOrder<KubectlPodInfo, string>(
     matched,
@@ -225,7 +237,10 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
         pod: name,
       });
       if (!result.success) {
-        showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+        showSystemManagerError(
+          describeRuntimeFailure(result, t, t('systemManager.errors.actionFailed'), contextName),
+          t('common.error'),
+        );
         return;
       }
       if (selectedName === name) setSelectedName(null);
@@ -327,7 +342,7 @@ export const KubernetesPodsPanel = memo(function KubernetesPodsPanel({
               <button
                 key={name}
                 type="button"
-                className="px-3 py-1.5 text-left text-sm rounded-md border border-border hover:bg-muted transition-colors"
+                className="rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                 onClick={() => {
                   const prompt = containerPrompt;
                   setContainerPrompt(null);

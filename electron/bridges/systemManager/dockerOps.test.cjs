@@ -406,3 +406,63 @@ test("getStats sums Podman per-interface Network counters", async () => {
   assert.equal(result.stats[0].netIO, "1.5KB / 2.2KB");
   assert.equal(result.stats[0].memUsage, "2MB / 1GB");
 });
+
+test("listContainers replaces raw nerdctl containerd failures with a stable code", async () => {
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => {
+    logged.push(args.map(String).join(" "));
+  };
+  try {
+    const dockerOps = createDockerOpsApi({
+      getSession: () => ({}),
+      execOnSession: async () => ({
+        success: true,
+        stdout: "",
+        stderr: 'time="2026-10-20T18:31:27+08:00" level=fatal msg="rootless containerd not running? environment variable XDG_RUNTIME_DIR is not set"',
+        code: 1,
+      }),
+    });
+
+    const result = await dockerOps.listContainers(null, "s1", "nerdctl");
+    const blob = JSON.stringify(result);
+
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, "nerdctlUnreachable");
+    assert.equal(result.error, undefined);
+    assert.equal(blob.includes("XDG_RUNTIME_DIR"), false);
+    assert.equal(blob.includes("level=fatal"), false);
+    assert.match(logged.join("\n"), /XDG_RUNTIME_DIR/);
+  } finally {
+    console.error = original;
+  }
+});
+
+test("listContainers keeps a specific nerdctl command error and docker stderr", async () => {
+  const nerdctl = createDockerOpsApi({
+    getSession: () => ({}),
+    execOnSession: async () => ({
+      success: true,
+      stdout: "",
+      stderr: "Error: no such container: abc",
+      code: 1,
+    }),
+  });
+  const specific = await nerdctl.listContainers(null, "s1", "nerdctl");
+  assert.equal(specific.success, false);
+  assert.equal(specific.errorCode, undefined);
+  assert.match(specific.error, /no such container/);
+
+  const docker = createDockerOpsApi({
+    getSession: () => ({}),
+    execOnSession: async () => ({
+      success: true,
+      stdout: "",
+      stderr: "permission denied while trying to connect to the Docker daemon socket",
+      code: 1,
+    }),
+  });
+  const denied = await docker.listContainers(null, "s1", "docker");
+  assert.match(denied.error, /permission denied/i);
+  assert.equal(denied.errorCode, undefined);
+});

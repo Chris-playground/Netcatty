@@ -8,7 +8,7 @@ import type { DockerContainerAction, DockerContainerInfo, DockerStatInfo, Termin
 import { dockerContainerInfoEqual } from '../../domain/systemManager/pollEquals';
 import { getContainerFlags, getContainerTone } from '../../domain/systemManager/containerState';
 import type { ContainerRuntimeId } from '../../domain/systemManager/containerRuntime';
-import { buildContainerExecShellCommand, buildContainerLogsCommand } from '../../domain/systemManager/containerRuntime';
+import { buildContainerExecShellCommand, buildContainerLogsCommand, describeRuntimeFailure } from '../../domain/systemManager/containerRuntime';
 import { DockerContainerDetail } from './DockerContainerDetail';
 import { DockerImageIcon } from './DockerImageIcon';
 import { useStableListOrder, mergePollListByKey } from './listStable';
@@ -187,7 +187,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
   const containersFetcher = useCallback(async () => {
     const result = await backend.listDockerContainers(sessionId, runtime);
     if (!result.success || !result.containers) {
-      throw new Error(result.error || stableT('systemManager.errors.loadDocker'));
+      throw new Error(describeRuntimeFailure(result, stableT, stableT('systemManager.errors.loadDocker')));
     }
     return result.containers;
   }, [backend, runtime, sessionId, stableT]);
@@ -245,7 +245,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
     if (statContainerIds.length === 0) return [];
     const result = await backend.getDockerStats({ sessionId, ids: statContainerIds, runtime });
     if (!result.success || !result.stats) {
-      throw new Error(result.error || stableT('systemManager.errors.loadDockerStats'));
+      throw new Error(describeRuntimeFailure(result, stableT, stableT('systemManager.errors.loadDockerStats')));
     }
     return result.stats;
   }, [backend, runtime, sessionId, stableT, statContainerIds]);
@@ -278,7 +278,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
       runtime,
     });
     if (!result.success) {
-      throw new Error(result.error || stableT('systemManager.errors.actionFailed'));
+      throw new Error(describeRuntimeFailure(result, stableT, stableT('systemManager.errors.actionFailed')));
     }
     return result.inspect ?? null;
   }, [backend, runtime, sessionId, stableT]);
@@ -311,7 +311,10 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
     try {
       const result = await backend.dockerAction({ sessionId, containerId, action, newName, runtime });
       if (!result.success) {
-        showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+        showSystemManagerError(
+          describeRuntimeFailure(result, t, t('systemManager.errors.actionFailed')),
+          t('common.error'),
+        );
         return;
       }
       const affectedContainer = (containers ?? []).find((container) => (

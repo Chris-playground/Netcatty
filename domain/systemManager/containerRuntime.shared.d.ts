@@ -62,6 +62,13 @@ export function buildKubectlPodsCommand(context: string, namespace: string, shel
 export function buildKubectlDeletePodCommand(context: string, namespace: string, pod: string, shell?: string): string | null;
 export type PopupShell = "posix" | "powershell" | "cmd";
 export function isKubectlForbiddenError(message: string | null | undefined): boolean;
+export function isKubectlUnreachableError(message: string | null | undefined): boolean;
+export function isNerdctlUnreachableError(message: string | null | undefined): boolean;
+export function podStatusMessageKey(status: string | null | undefined): string | null;
+export function runtimeFailureMessage(
+  errorCode: string | null | undefined,
+  context?: string | null,
+): { key: string; values?: Record<string, string> } | null;
 export function buildKubectlExecShellCommand(
   context: string,
   namespace: string,

@@ -2,7 +2,7 @@ import { Layers, Loader2, Tag, Trash2 } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
-import type { ContainerRuntimeId } from '../../domain/systemManager/containerRuntime';
+import { describeRuntimeFailure, type ContainerRuntimeId } from '../../domain/systemManager/containerRuntime';
 import { dockerImageRowKey, type DockerImageInfo } from '../../domain/systemManager/types';
 import { dockerImageInfoEqual } from '../../domain/systemManager/pollEquals';
 import { DockerImageIcon } from './DockerImageIcon';
@@ -119,7 +119,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
   const imagesFetcher = useCallback(async () => {
     const result = await backend.listDockerImages(sessionId, runtime);
     if (!result.success || !result.images) {
-      throw new Error(result.error || stableT('systemManager.errors.loadDockerImages'));
+      throw new Error(describeRuntimeFailure(result, stableT, stableT('systemManager.errors.loadDockerImages')));
     }
     return result.images;
   }, [backend, runtime, sessionId, stableT]);
@@ -166,7 +166,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
       runtime,
     });
     if (!result.success) {
-      throw new Error(result.error || stableT('systemManager.errors.actionFailed'));
+      throw new Error(describeRuntimeFailure(result, stableT, stableT('systemManager.errors.actionFailed')));
     }
     return result.inspect ?? null;
   }, [backend, runtime, sessionId, stableT]);
@@ -204,7 +204,10 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
       });
       if (actionGenerationRef.current !== actionGeneration) return;
       if (!result.success) {
-        showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+        showSystemManagerError(
+          describeRuntimeFailure(result, t, t('systemManager.errors.actionFailed')),
+          t('common.error'),
+        );
         return;
       }
       if (selectedId === dockerImageRowKey(image)) {
@@ -231,7 +234,10 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
       const result = await backend.dockerImageAction({ sessionId, runtime, action: 'prune', all });
       if (actionGenerationRef.current !== actionGeneration) return;
       if (!result.success) {
-        showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+        showSystemManagerError(
+          describeRuntimeFailure(result, t, t('systemManager.errors.actionFailed')),
+          t('common.error'),
+        );
         return;
       }
       await refresh();
@@ -256,7 +262,10 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
       tag: tag || 'latest',
     });
     if (!result.success) {
-      showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+      showSystemManagerError(
+        describeRuntimeFailure(result, t, t('systemManager.errors.actionFailed')),
+        t('common.error'),
+      );
       return;
     }
     await refresh();

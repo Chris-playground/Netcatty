@@ -22,6 +22,10 @@ const {
   pickContainerSource,
   sourcesFromCapabilities,
   isKubectlForbiddenError,
+  isKubectlUnreachableError,
+  isNerdctlUnreachableError,
+  podStatusMessageKey,
+  runtimeFailureMessage,
 } = require("./containerRuntime.shared.cjs");
 
 test("parseRuntimeProbe reads line-anchored command -v markers", () => {
@@ -353,4 +357,47 @@ test("isKubectlForbiddenError matches namespace list denial", () => {
     true,
   );
   assert.equal(isKubectlForbiddenError("Unable to connect to the server"), false);
+});
+
+test("unreachable kubectl API text is classified without treating Forbidden as unreachable", () => {
+  const spam = [
+    'memcache.go:381] "Couldn\'t get current server API group list"',
+    'dial tcp 127.0.0.1:6443: connect: connection refused',
+  ].join("\n");
+  assert.equal(isKubectlUnreachableError(spam), true);
+  assert.equal(isKubectlUnreachableError("Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout"), true);
+  assert.equal(
+    isKubectlUnreachableError('Error from server (Forbidden): pods is forbidden'),
+    false,
+  );
+  assert.equal(isKubectlUnreachableError(""), false);
+});
+
+test("nerdctl containerd failures are classified separately from socket permission errors", () => {
+  assert.equal(
+    isNerdctlUnreachableError('time="2026-10-20T18:31:27+08:00" level=fatal msg="rootless containerd not running? (hint: use containerd-rootless-setuptool.sh install to start rootless containerd): environment variable XDG_RUNTIME_DIR is not set"'),
+    true,
+  );
+  assert.equal(
+    isNerdctlUnreachableError("permission denied while trying to connect to the containerd socket"),
+    false,
+  );
+  assert.equal(isNerdctlUnreachableError("Error: no such container: abc"), false);
+});
+
+test("runtime failures map to localized message keys and pod badges use known status keys", () => {
+  assert.deepEqual(runtimeFailureMessage("nerdctlUnreachable"), {
+    key: "systemManager.errors.nerdctlUnreachable",
+  });
+  assert.deepEqual(runtimeFailureMessage("clusterUnreachable", "broken-cluster"), {
+    key: "systemManager.errors.clusterUnreachable",
+    values: { context: "broken-cluster" },
+  });
+  assert.deepEqual(runtimeFailureMessage("clusterUnreachable", "  "), {
+    key: "systemManager.errors.clusterUnreachableGeneric",
+  });
+  assert.equal(runtimeFailureMessage("other"), null);
+  assert.equal(podStatusMessageKey("Running"), "systemManager.k8s.status.Running");
+  assert.equal(podStatusMessageKey("CrashLoopBackOff"), "systemManager.k8s.status.CrashLoopBackOff");
+  assert.equal(podStatusMessageKey("Init:0/1"), null);
 });

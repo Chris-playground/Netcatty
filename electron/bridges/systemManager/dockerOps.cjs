@@ -35,10 +35,32 @@ function getSessionSudoPassword(session) {
 
 const {
   buildRuntimeCommand,
+  isNerdctlUnreachableError,
   isRuntimeSocketPermissionError,
   normalizeContainerRuntime,
   runtimeBinary,
 } = require("../../../domain/systemManager/containerRuntime.shared.cjs");
+
+function userFacingRuntimeFailure(runtime, result, fallback) {
+  const raw = dockerCommandError(result, fallback);
+  if (runtime === "nerdctl" && isNerdctlUnreachableError(raw)) {
+    console.error(`[netcatty] nerdctl: ${raw}`);
+    return { success: false, errorCode: "nerdctlUnreachable" };
+  }
+  return {
+    success: false,
+    error: raw,
+    stderr: result?.stderr,
+  };
+}
+
+function failurePayload(result) {
+  const payload = { success: false };
+  if (typeof result?.error === "string" && result.error) payload.error = result.error;
+  if (typeof result?.errorCode === "string" && result.errorCode) payload.errorCode = result.errorCode;
+  if (!payload.error && !payload.errorCode) payload.error = "command failed";
+  return payload;
+}
 
 function parseJsonRecords(stdout) {
   const raw = String(stdout || "").trim();
@@ -270,33 +292,34 @@ function createDockerOpsApi({ execOnSession, getSession }) {
         lastSudoResult = sudoResult;
       }
 
-      return {
-        success: false,
-        error: dockerCommandError(lastSudoResult, `sudo ${bin} exited with code ${lastSudoResult?.code}`),
-        stderr: lastSudoResult?.stderr,
-      };
+      return userFacingRuntimeFailure(
+        safeRuntime,
+        lastSudoResult,
+        `sudo ${bin} exited with code ${lastSudoResult?.code}`,
+      );
     }
 
-    if (!result.success) return result;
+    if (!result.success) {
+      if (safeRuntime === "nerdctl" && isNerdctlUnreachableError(dockerCommandError(result, ""))) {
+        return userFacingRuntimeFailure(safeRuntime, result, `${bin} failed`);
+      }
+      return result;
+    }
     if (result.code !== 0 && result.code !== null && result.code !== undefined) {
-      return {
-        success: false,
-        error: dockerCommandError(result, `${bin} exited with code ${result.code}`),
-        stderr: result.stderr,
-      };
+      return userFacingRuntimeFailure(safeRuntime, result, `${bin} exited with code ${result.code}`);
     }
     return result;
   }
 
   async function listContainers(event, sessionId, runtime) {
     const result = await runDocker(event, sessionId, "ps -a --format '{{json .}}'", 12000, runtime);
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return failurePayload(result);
     return { success: true, containers: parseDockerContainers(result.stdout) };
   }
 
   async function listImages(event, sessionId, runtime) {
     const result = await runDocker(event, sessionId, "images --format '{{json .}}'", 12000, runtime);
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return failurePayload(result);
     return { success: true, images: parseDockerImages(result.stdout) };
   }
 
@@ -312,7 +335,7 @@ function createDockerOpsApi({ execOnSession, getSession }) {
       15000,
       payload?.runtime,
     );
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return failurePayload(result);
     return { success: true, stats: parseDockerStats(result.stdout) };
   }
 
@@ -321,7 +344,7 @@ function createDockerOpsApi({ execOnSession, getSession }) {
     if (!sessionId || !containerId) return { success: false, error: "Missing params" };
     const safeId = sanitizeDockerId(containerId);
     const result = await runDocker(event, sessionId, `inspect ${safeId}`, 10000, payload?.runtime);
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return failurePayload(result);
     try {
       const parsed = JSON.parse(result.stdout || "[]");
       const info = Array.isArray(parsed) ? parsed[0] : parsed;
@@ -336,7 +359,7 @@ function createDockerOpsApi({ execOnSession, getSession }) {
     if (!sessionId || !imageId) return { success: false, error: "Missing params" };
     const safeId = sanitizeDockerId(imageId);
     const result = await runDocker(event, sessionId, `image inspect ${safeId}`, 10000, payload?.runtime);
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return failurePayload(result);
     try {
       const parsed = JSON.parse(result.stdout || "[]");
       const info = Array.isArray(parsed) ? parsed[0] : parsed;

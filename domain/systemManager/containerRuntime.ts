@@ -1,3 +1,5 @@
+import { runtimeFailureMessage } from "./containerRuntime.shared.cjs";
+
 export type {
   ContainerRuntimeId,
   ContainerSourceId,
@@ -17,5 +19,17 @@ export {
   isContainerSource,
   isKubectlForbiddenError,
   pickContainerSource,
+  podStatusMessageKey,
   sourcesFromCapabilities,
 } from "./containerRuntime.shared.cjs";
+
+export function describeRuntimeFailure(
+  result: { error?: string; errorCode?: string } | null | undefined,
+  translate: (key: string, values?: Record<string, string>) => string,
+  fallback: string,
+  context?: string | null,
+): string {
+  const mapped = runtimeFailureMessage(result?.errorCode, context);
+  if (mapped) return translate(mapped.key, mapped.values);
+  return result?.error || fallback;
+}
