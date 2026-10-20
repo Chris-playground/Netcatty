@@ -60,6 +60,25 @@ test("shouldBlockAutocompleteForSensitivePrompt blocks auth-challenge prompts", 
   );
 });
 
+test("shouldBlockAutocompleteForSensitivePrompt lets safe program prompts past the untrusted latch", () => {
+  // observeTerminalInputPrompt latches every untrusted colon prompt, including
+  // `Email:`, before limitSuggestionsForPrompt can offer snippets.
+  assert.equal(
+    shouldBlockAutocompleteForSensitivePrompt({
+      sensitiveInputActive: true,
+      promptText: "Email: ",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBlockAutocompleteForSensitivePrompt({
+      sensitiveInputActive: true,
+      promptText: "Password: ",
+    }),
+    true,
+  );
+});
+
 test("isSameAutocompleteQuery keeps late paths alive during live preview", () => {
   // Highlighting a candidate rewrites typedInputBuffer to the preview text.
   // Late path listings for the original query must still apply.

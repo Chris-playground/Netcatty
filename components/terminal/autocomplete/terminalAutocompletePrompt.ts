@@ -109,6 +109,10 @@ export function isSameAutocompleteQuery(options: {
  * Whether fetchSuggestions must refuse to query/render for an already-known
  * sensitive line (host latch or auth-challenge prompt text).
  *
+ * The host latch is set for every untrusted input boundary, including safe
+ * program prompts such as `Email:`. Those stay open so snippet candidates
+ * can render. Password, token, and other sensitive labels still block.
+ *
  * This is *not* a substitute for the empty-echo / `allowExternalProviders:
  * false` wait in useTerminalAutocomplete: `read -s -p '$ '` still looks like
  * a normal shell PS1 until echo validates, so that path stays fail-closed
@@ -118,6 +122,7 @@ export function shouldBlockAutocompleteForSensitivePrompt(options: {
   sensitiveInputActive: boolean;
   promptText: string;
 }): boolean {
+  if (isProgramInputPromptText(options.promptText)) return false;
   if (options.sensitiveInputActive) return true;
   return isSensitiveTerminalChallenge(options.promptText);
 }
