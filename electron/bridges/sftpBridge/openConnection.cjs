@@ -847,12 +847,17 @@ function createOpenConnectionApi(ctx) {
       if (!found || typeof createSessionBackedSftpClient !== "function") return null;
       const { sftpId: ownerId, client: source } = found;
       if (!channelContractMatches(options, source)) return null;
+      // A pane reconnect can ask for the owner's own id while a transfer still
+      // holds that soft-closed session. Storing the alias under that id would
+      // drop the SSH client and lease the id to itself, so closeSftp could
+      // never hard-close it.
+      const aliasId = connId === ownerId ? `${ownerId}:reconnect:${randomUUID()}` : connId;
       let leaseStore = null;
       let leaseId = null;
       try {
         const lease = require("../sftpTransferSessionLease.cjs");
         leaseStore = lease.sftpTransferSessionLeaseStore;
-        leaseId = lease.channelAliasLeaseId(connId);
+        leaseId = lease.channelAliasLeaseId(aliasId);
         // Hold the owner until this alias is torn down. closeSftp(owner) then
         // soft-closes instead of ending the only SFTP channel mid-transfer.
         if (!leaseStore.acquire(ownerId, leaseId)) return null;
@@ -860,7 +865,7 @@ function createOpenConnectionApi(ctx) {
         return null;
       }
       try {
-        const alias = createSessionBackedSftpClient(connId, source.client, {
+        const alias = createSessionBackedSftpClient(aliasId, source.client, {
           singleChannelSsh: true,
         });
         alias.sftp = source.sftp;
@@ -871,7 +876,7 @@ function createOpenConnectionApi(ctx) {
         alias.__netcattySingleChannelSsh = true;
         alias.__netcattySharedChannelAlias = true;
         alias.__netcattySharedChannelOwnerId = ownerId;
-        alias.__netcattySharedChannelAliasId = connId;
+        alias.__netcattySharedChannelAliasId = aliasId;
         alias.__netcattyEndpointKey = source.__netcattyEndpointKey;
         alias.__netcattyChannelAdoptionKey = source.__netcattyChannelAdoptionKey;
         alias.__netcattyTransportManaged = false;
@@ -879,9 +884,9 @@ function createOpenConnectionApi(ctx) {
           alias.__netcattyDisposed = true;
           alias.sftp = null;
         };
-        sftpClients.set(connId, alias);
+        sftpClients.set(aliasId, alias);
         return {
-          sftpId: connId,
+          sftpId: aliasId,
           fileProtocol: alias.__netcattyFileProtocol === "scp" ? "scp" : "sftp",
         };
       } catch (err) {

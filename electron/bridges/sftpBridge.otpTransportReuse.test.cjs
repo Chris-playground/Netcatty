@@ -836,6 +836,67 @@ test("sudo SFTP-page transfer reuses the elevated channel instead of dialing aga
   assert.equal(sftpClients.has("browse-sudo"), true);
 });
 
+test("reconnecting the soft-closed owner id does not replace it with a self-alias (#3310)", async (t) => {
+  const { sftpTransferSessionLeaseStore, channelAliasLeaseId } = require("./sftpTransferSessionLease.cjs");
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  sftpTransferSessionLeaseStore.resetForTests();
+  t.after(() => {
+    pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+    sftpTransferSessionLeaseStore.resetForTests();
+  });
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  const ownerId = "sftp-pane";
+  const options = {
+    hostname: "same-id.example",
+    hostId: "host-same-id",
+    port: 22,
+    username: "root",
+    authMethod: "password",
+    verifyHostKeys: false,
+    fileProtocol: "sftp",
+    useSshAgent: false,
+    sessionId: ownerId,
+  };
+  const endpoint = pool.buildConnectionReuseEndpoint(options, { sftpSudo: false });
+  let ownerEnded = false;
+  const owner = {
+    client: { end() { ownerEnded = true; } },
+    sftp: { readdir() {}, stat() {}, open() {} },
+    __netcattyEndpointKey: pool.buildEndpointKey(endpoint),
+    __netcattyChannelAdoptionKey: pool.buildChannelAdoptionKey(endpoint),
+    __netcattySingleChannelSsh: true,
+    __netcattyFileProtocol: "sftp",
+    __netcattyTransportManaged: false,
+    async end() { ownerEnded = true; },
+  };
+  sftpClients.set(ownerId, owner);
+  assert.equal(sftpTransferSessionLeaseStore.acquire(ownerId, "upload-1"), true);
+  const closed = await sftpBridge.closeSftp(null, { sftpId: ownerId });
+  assert.equal(closed?.deferred, true);
+
+  const reopened = await sftpBridge.openSftp({ sender: createSender() }, options);
+  assert.notEqual(reopened.sftpId, ownerId);
+  assert.equal(sftpClients.get(ownerId), owner, "the SSH client must stay under its own id");
+  assert.equal(owner.__netcattySharedChannelAlias, undefined);
+  const alias = sftpClients.get(reopened.sftpId);
+  assert.equal(alias?.__netcattySharedChannelAlias, true);
+  assert.equal(alias?.__netcattySharedChannelOwnerId, ownerId);
+  assert.equal(alias?.sftp, owner.sftp);
+  const leases = sftpTransferSessionLeaseStore.listTransferIds(ownerId);
+  assert.equal(leases.includes(channelAliasLeaseId(ownerId)), false);
+  assert.equal(leases.includes(channelAliasLeaseId(reopened.sftpId)), true);
+  assert.equal(ownerEnded, false);
+
+  sftpTransferSessionLeaseStore.release(ownerId, "upload-1");
+  assert.equal(ownerEnded, false, "the reconnect alias still holds the owner");
+  await sftpBridge.closeSftp(null, { sftpId: reopened.sftpId });
+  await waitFor(() => ownerEnded && !sftpClients.has(ownerId), {
+    timeoutMs: 2000,
+    message: "releasing the reconnect alias must hard-close the original client",
+  });
+});
+
 test("channel adoption reuses a still-trusted host key and rejects a replaced or removed one (#3310)", { timeout: 20000 }, async (t) => {
   const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
