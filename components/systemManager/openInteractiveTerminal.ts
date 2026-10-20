@@ -7,12 +7,15 @@ import type { useSystemManagerBackend } from '../../application/state/useSystemM
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 
 function readSystemPanelClientRect(): { x: number; y: number; width: number; height: number } | undefined {
-  if (typeof document === "undefined") return undefined;
-  const panel = document.querySelector('[data-section="system-manager-panel"]');
-  if (!panel || typeof panel.getBoundingClientRect !== "function") return undefined;
-  const rect = panel.getBoundingClientRect();
-  if (rect.width < 1 || rect.height < 1) return undefined;
-  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return undefined;
+  const panels = document.querySelectorAll('[data-section="system-manager-panel"]');
+  for (const panel of panels) {
+    if (typeof panel.getBoundingClientRect !== "function") continue;
+    const rect = panel.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }
+  return undefined;
 }
 
 function buildPopupTitle(parentSession: TerminalSession, title: string): string {
