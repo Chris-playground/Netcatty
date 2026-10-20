@@ -122,20 +122,45 @@ test("compressMessagesForRequestTooLargeRetry keeps attachments when preserveAtt
 
   const result = compressMessagesForRequestTooLargeRetry(messages, { preserveAttachments: true });
 
-  // Text and tool output are still reduced; only the multimodal parts survive.
+  // Text and tool output are still reduced. Images stay; other files become placeholders.
   assert.equal(result.didAdjust, true);
-  assert.doesNotMatch(JSON.stringify(result.messages), /attachment omitted to keep the AI request small/);
 
   const imageContent = result.messages[0].content;
   assert.ok(Array.isArray(imageContent));
   assert.deepEqual(imageContent[1], messages[0].content[1]);
+  assert.doesNotMatch(JSON.stringify(imageContent), /attachment omitted to keep the AI request small/);
 
   const fileContent = result.messages[1].content;
   assert.ok(Array.isArray(fileContent));
-  assert.deepEqual(fileContent[1], messages[1].content[1]);
+  assert.deepEqual(fileContent[1], {
+    type: "text",
+    text: `[file attachment omitted to keep the AI request small: filename=hosts.csv, mediaType=text/csv, ${fileData.length} chars]`,
+  });
 
   const toolContent = result.messages[2].content;
   assert.ok(Array.isArray(toolContent));
   const toolPart = toolContent[0] as { output?: { value?: string } };
   assert.ok((toolPart.output?.value?.length ?? 0) < 5_000);
+});
+
+test("compressMessagesForRequestTooLargeRetry still placeholders text/plain files when preserveAttachments is set", () => {
+  const text = "hello from a text file";
+  const messages: ModelMessage[] = [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "read this note" },
+        { type: "file", data: text, mediaType: "text/plain", filename: "note.txt" },
+      ],
+    },
+  ];
+
+  const result = compressMessagesForRequestTooLargeRetry(messages, { preserveAttachments: true });
+  const content = result.messages[0].content;
+  assert.ok(Array.isArray(content));
+  assert.deepEqual(content[0], { type: "text", text: "read this note" });
+  assert.deepEqual(content[1], {
+    type: "text",
+    text: `[file attachment omitted to keep the AI request small: filename=note.txt, mediaType=text/plain, ${text.length} chars]`,
+  });
 });

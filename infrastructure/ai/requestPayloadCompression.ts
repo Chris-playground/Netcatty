@@ -18,13 +18,12 @@ export interface CompressMessagesForRequestTooLargeRetryResult {
 
 export interface CompressMessagesForRequestTooLargeRetryOptions {
   /**
-   * Keep multimodal `image` / `file` content parts instead of replacing them
-   * with a text placeholder.
+   * Keep image attachments (`image` parts and `file` parts whose media type
+   * starts with `image/`) instead of replacing them with a text placeholder.
    *
-   * Only the 413 retry should drop attachments: there, a placeholder is better
-   * than a rejected request. Routine pre-turn and step-level typed compression
-   * run on every turn, so dropping attachments there would mean the model never
-   * receives the image or file the user just attached.
+   * Other file parts stay placeholders. Chat providers reject types such as
+   * `text/plain`, and the model reads those through attachment tools.
+   * Only the 413 retry drops images as well.
    */
   preserveAttachments?: boolean;
 }
@@ -196,7 +195,11 @@ function compressContentPartForRequestRetry(part: unknown, preserveAttachments: 
     }
   }
 
-  if (!preserveAttachments) {
+  const mediaType = typeof record.mediaType === "string" ? record.mediaType : "";
+  const preserveImage = preserveAttachments && (
+    type === "image" || (type === "file" && mediaType.startsWith("image/"))
+  );
+  if (!preserveImage) {
     if (type === "image" && typeof record.image === "string") {
       return omittedAttachmentTextPart("image", record.image, record);
     }
