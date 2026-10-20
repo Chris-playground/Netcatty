@@ -350,6 +350,59 @@ test("runOpenCodeV2Turn authenticates, keeps the user prompt unchanged, and stre
   }
 });
 
+test("runOpenCodeV2Turn reports a rejected prompt without waiting on the event stream", { timeout: 2000 }, async () => {
+  let releaseEvent;
+  const eventOpen = new Promise((resolve) => { releaseEvent = resolve; });
+  let streamCancelled = false;
+  const sse = new ReadableStream({
+    start() {},
+    cancel() { streamCancelled = true; },
+  });
+  const fetchImpl = async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/session" && init.method === "POST") return jsonResponse({ data: { id: "ses_1" } });
+    if (path === "/api/event") {
+      releaseEvent();
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (path.endsWith("/prompt")) {
+      await eventOpen;
+      return new Response(JSON.stringify({ message: "model not found" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(null, { status: 204 });
+  };
+  const events = [];
+  let closed = false;
+  const result = await runOpenCodeV2Turn({
+    prompt: "hello",
+    emitter: {
+      sessionId: (id) => events.push(["session", id]),
+      text: () => {},
+      emitDone: () => events.push(["done"]),
+      emitError: (message) => events.push(["error", message]),
+    },
+    openCodeV2Factory: async () => ({
+      client: createOpenCodeV2Client({
+        baseUrl: "http://127.0.0.1:4096",
+        username: "opencode",
+        password: "s3cret",
+        fetchImpl,
+      }),
+      server: { close: () => { closed = true; } },
+    }),
+  });
+  assert.equal(result.sessionId, "ses_1");
+  assert.equal(closed, true);
+  assert.equal(streamCancelled, true);
+  assert.deepEqual(events, [
+    ["session", "ses_1"],
+    ["error", "model not found"],
+  ]);
+});
+
 test("listOpenCodeModels stays on the 1.x factory for OpenCode 1.x", async () => {
   resetOpenCodeListServerPool();
   let v1 = false;

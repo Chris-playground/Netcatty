@@ -276,8 +276,14 @@ function toUserFacingOpenCodeV2Error(error) {
   if (isOpenCodeV2UserMessage(error?.message)) {
     return error instanceof Error ? error : openCodeV2UserError(String(error.message));
   }
+  // HTTP failures already carry a status. Do not run them through the spawn
+  // classifier: a 400 body of "model not found" is not a missing CLI.
+  if (Number.isInteger(error?.status)) {
+    if (error.status === 401) return openCodeV2UserError("ai.opencode.v2.unauthorized");
+    const safe = sanitizeOpenCodeV2Detail(error?.message);
+    return openCodeV2UserError(safe || "ai.opencode.v2.unavailable");
+  }
   if (classifyOpenCodeSpawnError(error).isSpawnEnoent) return openCodeV2UserError(OPENCODE_V1_NOT_FOUND);
-  if (error?.status === 401) return openCodeV2UserError("ai.opencode.v2.unauthorized");
   const code = String(error?.code || "");
   const message = String(error?.message || "");
   if (
@@ -397,14 +403,19 @@ async function* iterateSse(response, signal) {
   if (!reader) throw openCodeV2UserError("ai.opencode.v2.unavailable");
   const decoder = new TextDecoder();
   const parser = createSseJsonDecoder();
+  const cancelReader = () => { try { void reader.cancel(); } catch {} };
+  if (signal?.aborted) cancelReader();
+  else signal?.addEventListener("abort", cancelReader, { once: true });
   try {
     while (!signal?.aborted) {
       const next = await reader.read();
+      if (signal?.aborted) break;
       const text = decoder.decode(next.value || new Uint8Array(), { stream: !next.done });
       for (const event of parser.push(text)) yield event;
       if (next.done) break;
     }
   } finally {
+    signal?.removeEventListener("abort", cancelReader);
     try { await reader.cancel(); } catch {}
   }
 }
@@ -821,6 +832,7 @@ async function runOpenCodeV2Turn({
   let hasContent = false;
   let failed = false;
   let removeAbortListener = null;
+  let removeStreamAbort = null;
 
   try {
     opened = typeof openCodeV2Factory === "function"
@@ -869,7 +881,15 @@ async function runOpenCodeV2Turn({
       }
     }
 
+    const streamAbort = new AbortController();
+    if (signal?.aborted) streamAbort.abort(signal.reason);
+    else if (signal) {
+      const stopStream = () => streamAbort.abort(signal.reason);
+      signal.addEventListener("abort", stopStream);
+      removeStreamAbort = () => signal.removeEventListener("abort", stopStream);
+    }
     const abortOpenCode = async () => {
+      streamAbort.abort(signal?.reason);
       if (sessionId) {
         try { await client.interrupt(sessionId, signal); } catch {}
       }
@@ -893,7 +913,7 @@ async function runOpenCodeV2Turn({
     let streamError = null;
     const eventLoop = (async () => {
       try {
-        for await (const event of client.events(signal)) {
+        for await (const event of client.events(streamAbort.signal)) {
           if (signal?.aborted) break;
           const result = translateOpenCodeV2Event(event, emitter, state);
           if (result.content) hasContent = true;
@@ -913,6 +933,10 @@ async function runOpenCodeV2Turn({
       await client.prompt(sessionId, promptBody, signal);
     } catch (error) {
       failed = true;
+      // A rejected prompt does not emit a terminal execution event, so the
+      // global SSE stream would otherwise stay open and block this turn.
+      streamAbort.abort(signal?.reason);
+      try { opened?.server?.close?.(); } catch {}
       await eventLoop;
       throw error;
     }
@@ -933,6 +957,7 @@ async function runOpenCodeV2Turn({
     return { sessionId };
   } finally {
     removeAbortListener?.();
+    removeStreamAbort?.();
     try { opened?.server?.close?.(); } catch {}
   }
 }
