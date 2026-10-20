@@ -1451,10 +1451,12 @@ export function AppSideEffects() {
 
   // Wrapper to connect to host with logging
   const handleConnectToHost = useCallback((host: Host, alreadyEffective = false, hidden = false) => {
-    const connectionHost = prepareConnectionHost(
-      host,
-      terminalSettings.temporaryConnectionsAllowLegacyAlgorithms,
-    );
+    const connectionHost = prepareConnectionHost(host, {
+      temporaryConnectionsAllowLegacyAlgorithms:
+        terminalSettings.temporaryConnectionsAllowLegacyAlgorithms,
+      temporaryConnectionsNetworkDeviceMode:
+        terminalSettings.temporaryConnectionsNetworkDeviceMode,
+    });
     if (connectionHost.ephemeral) {
       setEphemeralHosts((previous) => {
         const existingIndex = previous.findIndex((candidate) => candidate.id === connectionHost.id);
