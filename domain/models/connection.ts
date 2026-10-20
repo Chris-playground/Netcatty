@@ -217,6 +217,12 @@ export interface Host {
   proxy?: string; // Deprecated: use proxyConfig instead
   proxyProfileId?: string; // Reference to reusable proxy profile
   proxyConfig?: ProxyConfig; // New structured proxy configuration
+  /**
+   * Explicit direct connection for this host. Overrides group and global
+   * proxy defaults. Absent means inherit. This is not the jump-host
+   * "Direct" choice (`hostChain`).
+   */
+  directProxy?: boolean;
   hostChain?: HostChainConfig; // New structured host chain configuration
   envVars?: string; // Deprecated: use environmentVariables instead
   environmentVariables?: EnvVar[]; // Structured environment variables
@@ -313,7 +319,8 @@ export interface Host {
   order?: number;
 }
 
-export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';
+/** Software keys plus OpenSSH FIDO2 security-key types (agent + hardware only). */
+export type KeyType = 'RSA' | 'ECDSA' | 'ED25519' | 'ED25519-SK' | 'ECDSA-SK';
 type KeySource = 'generated' | 'imported' | 'reference';
 export type KeyCategory = 'key' | 'certificate' | 'identity';
 type IdentityAuthMethod = 'password' | 'key' | 'certificate';
@@ -426,6 +433,7 @@ export interface GroupConfig {
   protocol?: 'ssh' | 'telnet';
   deviceType?: 'general' | 'network';
   agentForwarding?: boolean;
+  x11Forwarding?: boolean;
   proxyProfileId?: string;
   proxyConfig?: ProxyConfig;
   hostChain?: HostChainConfig;

@@ -500,6 +500,20 @@ export function handlePassphraseSkipImpl(getCtx: AppContextGetter, requestId: st
   }
 }
 
+export function handleFidoPromptSubmitImpl(getCtx: AppContextGetter, requestId: string, response: string) {
+  const { netcattyBridge, setFidoPromptQueue } = getCtx();
+  const bridge = netcattyBridge.get();
+  void bridge?.respondFidoPrompt?.(requestId, response, false);
+  setFidoPromptQueue((prev: { requestId: string }[]) => prev.filter((r) => r.requestId !== requestId));
+}
+
+export function handleFidoPromptCancelImpl(getCtx: AppContextGetter, requestId: string) {
+  const { netcattyBridge, setFidoPromptQueue } = getCtx();
+  const bridge = netcattyBridge.get();
+  void bridge?.respondFidoPrompt?.(requestId, '', true);
+  setFidoPromptQueue((prev: { requestId: string }[]) => prev.filter((r) => r.requestId !== requestId));
+}
+
 export function createLocalTerminalWithCurrentShellImpl(getCtx: AppContextGetter) {
   const { classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, terminalSettings } = getCtx();
 {
@@ -520,9 +534,10 @@ async function captureCtxInheritedCwd(getCtx: AppContextGetter, sessionId: strin
   const source = sessions?.find((s: { id: string }) => s.id === sessionId);
   if (!source) return undefined;
 
-  // Freshest cwd: the live OSC 7 value tracked in terminal state (the only
-  // source that reflects `cd`s in a running local terminal — lastCwd is a
-  // startup snapshot). Falls through to the SSH probe / lastCwd when absent.
+  // Freshest cwd: the live value tracked in terminal state (OSC 7 or the
+  // post-command probe, including local shells). lastCwd on the session object
+  // is only the startup snapshot. Falls through to the SSH probe / lastCwd
+  // when absent.
   const liveCwd: string | undefined = getSessionRestoreCwd?.(sessionId);
 
   const bridge = netcattyBridge?.get?.();

@@ -24,6 +24,14 @@ export interface ProcessInfo {
   command: string;
 }
 
+export interface GpuDeviceStats {
+  index: number;
+  name: string;
+  utilization: number | null; // percent, null when nvidia-smi reports N/A
+  memoryUsed: number | null;  // MiB
+  memoryTotal: number | null; // MiB
+}
+
 export interface ServerStats {
   hostname?: string;            // Remote hostname
   osName?: string;              // Remote operating system name
@@ -37,6 +45,7 @@ export interface ServerStats {
   gpuName: string | null;       // First GPU name (tooltip)
   gpuMemUsed: number | null;    // Summed VRAM used in MB
   gpuMemTotal: number | null;   // Summed VRAM total in MB
+  gpus: GpuDeviceStats[];       // Per-GPU utilization and VRAM
   memTotal: number | null;      // Total memory in MB
   memUsed: number | null;       // Used memory in MB (excluding buffers/cache)
   memFree: number | null;       // Free memory in MB
@@ -86,6 +95,7 @@ interface SharedServerStatsSession {
   clients: Map<number, ServerStatsClient>;
   intervalRef: ReturnType<typeof setInterval> | null;
   initialTimerRef: ReturnType<typeof setTimeout> | null;
+  retryTimerRef: ReturnType<typeof setTimeout> | null;
   connectedAt: number;
   hasFetched: boolean;
   fetchGeneration: number;
@@ -115,6 +125,7 @@ function createEmptyServerStats(): ServerStats {
     gpuName: null,
     gpuMemUsed: null,
     gpuMemTotal: null,
+    gpus: [],
     memTotal: null,
     memUsed: null,
     memFree: null,
@@ -154,6 +165,7 @@ function getSharedServerStatsSession(sessionId: string): SharedServerStatsSessio
     clients: new Map(),
     intervalRef: null,
     initialTimerRef: null,
+    retryTimerRef: null,
     connectedAt: 0,
     hasFetched: false,
     fetchGeneration: 0,
@@ -180,6 +192,10 @@ function updateServerStatsState(session: SharedServerStatsSession, patch: Partia
 }
 
 function clearServerStatsTimers(session: SharedServerStatsSession): void {
+  if (session.retryTimerRef) {
+    clearTimeout(session.retryTimerRef);
+    session.retryTimerRef = null;
+  }
   if (session.initialTimerRef) {
     clearTimeout(session.initialTimerRef);
     session.initialTimerRef = null;
@@ -212,6 +228,7 @@ function normalizeServerStats(stats: Partial<ServerStats>): ServerStats {
     gpuName: stats.gpuName ?? null,
     gpuMemUsed: stats.gpuMemUsed ?? null,
     gpuMemTotal: stats.gpuMemTotal ?? null,
+    gpus: Array.isArray(stats.gpus) ? stats.gpus : [],
     memTotal: stats.memTotal ?? null,
     memUsed: stats.memUsed ?? null,
     memFree: stats.memFree ?? null,
@@ -236,10 +253,17 @@ function markServerStatsFailure(session: SharedServerStatsSession, message: stri
   session.consecutiveFailures += 1;
   updateServerStatsState(session, { error: message });
   if (session.consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
-    // Stop polling this session. This covers network devices that advertise
-    // OpenSSH but do not support the POSIX stats shell command.
+    // Back off unsupported or temporarily unavailable probes, then recover
+    // automatically. Three transient failures must not disable the panel for
+    // the entire lifetime of an otherwise healthy terminal session.
     session.givenUp = true;
     clearServerStatsTimers(session);
+    session.retryTimerRef = setTimeout(() => {
+      session.retryTimerRef = null;
+      session.givenUp = false;
+      session.consecutiveFailures = 0;
+      reconcileSharedServerStatsSession(session);
+    }, 30_000);
   }
 }
 
@@ -256,6 +280,10 @@ async function fetchSharedServerStats(session: SharedServerStatsSession, force =
   if (!bridge?.getServerStats) return;
 
   if (force) {
+    if (session.retryTimerRef) {
+      clearTimeout(session.retryTimerRef);
+      session.retryTimerRef = null;
+    }
     session.givenUp = false;
     session.consecutiveFailures = 0;
   }
@@ -319,6 +347,11 @@ function reconcileSharedServerStatsSession(session: SharedServerStatsSession): v
     // (or re-enabling a terminal stats strip) can paint immediately instead of
     // flashing "No system overview data yet." Still clear give-up / failure so a
     // later resume can auto-retry (old reset wiped stats + flags together).
+    // Invalidate a request before pausing: a late reply must not publish data
+    // or re-arm failure/retry timers after disconnect/disable.
+    if (session.pollingActive || session.inflight || session.givenUp) {
+      session.fetchGeneration += 1;
+    }
     clearServerStatsTimers(session);
     session.givenUp = false;
     session.consecutiveFailures = 0;

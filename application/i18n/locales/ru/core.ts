@@ -397,7 +397,7 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': 'Палитра тёмной темы',
   'settings.appearance.customCss': 'Пользовательский CSS',
   'settings.appearance.customCss.desc':
-    'Добавьте пользовательский CSS, чтобы настроить внешний вид. Изменения применяются сразу.',
+    'Добавьте пользовательский CSS, чтобы настроить внешний вид. Изменения применяются сразу. Выбранные верхние вкладки (`.top-tab[data-active="true"]`) читают `--top-tab-active-bg`, `--top-tab-active-fg` и `--top-tab-active-border`. Не задавайте их, чтобы сохранить текущий вид.',
   'settings.appearance.customCss.help.ariaLabel': 'Справка по пользовательскому CSS',
   'settings.appearance.customCss.help.title': 'Руководство по пользовательскому CSS',
   'settings.appearance.customCss.help.body': `Основные области интерфейса помечены атрибутом \`data-section\` для CSS-селекторов. Изменения применяются сразу после правки.
@@ -422,6 +422,22 @@ export const ruCoreMessages: Messages = {
 - \`top-tabs\`
 - \`top-tabs-host-tree-toggle\`
 - \`top-tabs-quick-switcher-toggle\`
+
+У выбранных верхних вкладок есть класс \`top-tab\` и атрибут \`data-active="true"\`. Задайте эти переменные, чтобы перекрасить выбранную вкладку. Не задавайте их, чтобы сохранить текущий вид. \`!important\` не нужен.
+
+- \`--top-tab-active-bg\` — заливка выбранной вкладки (по умолчанию текущий фон вкладки)
+- \`--top-tab-active-fg\` — цвет подписи (по умолчанию текущий цвет текста)
+- \`--top-tab-active-border\` — внутренняя обводка 1px (по умолчанию прозрачная, то есть без рамки)
+
+Вкладка Vaults остаётся плоской и не использует заливку.
+
+\`\`\`css
+.top-tab[data-active="true"] {
+  --top-tab-active-bg: #2563eb;
+  --top-tab-active-fg: #ffffff;
+  --top-tab-active-border: #1d4ed8;
+}
+\`\`\`
 
 ### Хранилище
 
@@ -502,7 +518,7 @@ export const ruCoreMessages: Messages = {
 \`\`\`
 `,
   'settings.appearance.customCss.placeholder':
-    '/* Примеры — используйте !important, чтобы переопределить специфичность утилит Tailwind */\n\n/* Скрыть переключатель списка хостов в верхней панели вкладок */\n[data-section="top-tabs-host-tree-toggle"] {\n  width: 0 !important;\n  opacity: 0 !important;\n  pointer-events: none !important;\n}\n\n/* Скрыть кнопку плюса, открывающую быстрый переключатель */\n[data-section="top-tabs-quick-switcher-toggle"] {\n  display: none !important;\n}\n\n/* Рамка вокруг боковой панели SFTP (не остаётся после закрытия) */\n[data-section="terminal-side-panel"] {\n  border: 2px solid #00c851 !important;\n  border-radius: 6px !important;\n}\n\n/* Изменить фон всей боковой панели, а не только верхних вкладок */\n[data-section="terminal-side-panel"],\n[data-section="terminal-side-panel-tabs"],\n[data-section="terminal-side-panel-content"],\n[data-section="terminal-sftp-panel"],\n[data-section="terminal-sftp-pane"],\n[data-section="terminal-sftp-list"],\n[data-section="terminal-sftp-tree"],\n[data-section="terminal-sftp-transfer-queue"] {\n  background-color: #1c384a !important;\n}\n\n/* Настроить выбранные строки SFTP */\n[data-section="terminal-sftp-list-row"][data-selected="true"] {\n  background-color: #00c851 !important;\n  color: #001b10 !important;\n}\n\n/* Более заметные разделители сплита */\n[data-section="terminal-split-resizer-bar"] {\n  background-color: hsl(var(--primary)) !important;\n  transform: scale(2) !important;\n}\n\n/* Подсветка активной панели сплита */\n[data-section="terminal-split-pane"][data-focused="true"] {\n  outline: 2px solid hsl(var(--primary)) !important;\n  outline-offset: -2px;\n}\n\n/* Или: Настройки → Терминал → Индикатор фокуса → Рамка вокруг активной панели */',
+    '/* Примеры — используйте !important, чтобы переопределить специфичность утилит Tailwind */\n\n/* Выбранная верхняя вкладка. Не задавайте переменные, чтобы сохранить текущий вид. */\n.top-tab[data-active="true"] {\n  --top-tab-active-bg: #2563eb;\n  --top-tab-active-fg: #ffffff;\n  --top-tab-active-border: #1d4ed8;\n}\n\n/* Скрыть переключатель списка хостов в верхней панели вкладок */\n[data-section="top-tabs-host-tree-toggle"] {\n  width: 0 !important;\n  opacity: 0 !important;\n  pointer-events: none !important;\n}\n\n/* Скрыть кнопку плюса, открывающую быстрый переключатель */\n[data-section="top-tabs-quick-switcher-toggle"] {\n  display: none !important;\n}\n\n/* Рамка вокруг боковой панели SFTP (не остаётся после закрытия) */\n[data-section="terminal-side-panel"] {\n  border: 2px solid #00c851 !important;\n  border-radius: 6px !important;\n}\n\n/* Изменить фон всей боковой панели, а не только верхних вкладок */\n[data-section="terminal-side-panel"],\n[data-section="terminal-side-panel-tabs"],\n[data-section="terminal-side-panel-content"],\n[data-section="terminal-sftp-panel"],\n[data-section="terminal-sftp-pane"],\n[data-section="terminal-sftp-list"],\n[data-section="terminal-sftp-tree"],\n[data-section="terminal-sftp-transfer-queue"] {\n  background-color: #1c384a !important;\n}\n\n/* Настроить выбранные строки SFTP */\n[data-section="terminal-sftp-list-row"][data-selected="true"] {\n  background-color: #00c851 !important;\n  color: #001b10 !important;\n}\n\n/* Более заметные разделители сплита */\n[data-section="terminal-split-resizer-bar"] {\n  background-color: hsl(var(--primary)) !important;\n  transform: scale(2) !important;\n}\n\n/* Подсветка активной панели сплита */\n[data-section="terminal-split-pane"][data-focused="true"] {\n  outline: 2px solid hsl(var(--primary)) !important;\n  outline-offset: -2px;\n}\n\n/* Или: Настройки → Терминал → Индикатор фокуса → Рамка вокруг активной панели */',
   'settings.appearance.language': 'Язык',
   'settings.appearance.language.desc': 'Выберите язык интерфейса',
   'settings.appearance.uiFont': 'Шрифт интерфейса',
@@ -663,7 +679,7 @@ export const ruCoreMessages: Messages = {
     'Отправлять настроенный текст вместо обычного Enter при нажатии Shift+Enter в терминале.',
   'settings.terminal.behavior.shiftEnterNewlineText': 'Отправляемый текст',
   'settings.terminal.behavior.shiftEnterNewlineText.desc':
-    'Используйте \\n для перевода строки, \\t для табуляции, \\e для Escape и \\\\ для обратной косой черты.',
+    'Используйте \\n для перевода строки, \\t для табуляции, \\e для Escape и \\\\ для обратной косой черты. По умолчанию \\e\\r (Escape + Enter, классическая кодировка Alt+Enter), которую большинство TUI-CLI распознают как перевод строки.',
   'settings.terminal.behavior.shiftEnterForceText': 'Отправлять текст и в режиме ввода Win32',
   'settings.terminal.behavior.shiftEnterForceText.desc':
     'Отправлять указанный выше текст даже когда локальная сессия Windows ConPTY согласует режим ввода Win32. Нужно для CLI на Node/Bun (Claude Code, CodeBuddy), которые не читают модификаторы из записей ввода консоли.',
@@ -718,6 +734,11 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.smoothScrolling': 'Плавная прокрутка',
   'settings.terminal.behavior.smoothScrolling.desc':
     'Анимировать прокрутку области терминала вместо мгновенного перехода',
+  'settings.terminal.sidePanel.pane.browser': 'Браузер',
+  'settings.terminal.behavior.linkBrowser': 'Открывать ссылки терминала в',
+  'settings.terminal.behavior.linkBrowser.desc': 'SSH-ссылки используют подключённый хост; локальные ссылки — этот компьютер.',
+  'settings.terminal.behavior.linkBrowser.netcatty': 'Браузер Netcatty (по умолчанию)',
+  'settings.terminal.behavior.linkBrowser.system': 'Системный браузер',
   'settings.terminal.behavior.linkModifier': 'Клавиша-модификатор для ссылок',
   'settings.terminal.behavior.linkModifier.desc': 'Удерживайте эту клавишу, чтобы нажимать на ссылки в терминале',
   'settings.terminal.behavior.linkModifier.none': 'Нет (нажимать напрямую)',
@@ -777,6 +798,9 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.connection.x11Display': 'Дисплей X11',
   'settings.terminal.connection.x11Display.desc': 'Необязательный адрес локального дисплея для перенаправления X11. Оставьте пустым, чтобы использовать системное значение по умолчанию.',
   'settings.terminal.connection.x11Display.placeholder': 'Авто (:0 или DISPLAY)',
+  'settings.terminal.connection.defaultProxy': 'Прокси по умолчанию',
+  'settings.terminal.connection.defaultProxy.desc': 'Сохраненный прокси, если у хоста нет своего и он не наследует прокси группы. «Нет» — прямое подключение.',
+  'settings.terminal.connection.defaultProxy.none': 'Нет',
   'settings.terminal.section.serverStats': 'Статистика сервера (Linux)',
   'settings.terminal.hostInfoBar.show': 'Показывать сведения о хосте',
   'settings.terminal.hostInfoBar.show.desc': 'Показывать адрес хоста и сведения о сервере над терминалом. Кнопки действий остаются доступными после скрытия.',

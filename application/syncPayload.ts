@@ -1,3 +1,5 @@
+import { readMonitorPanels, applyMonitorPanels } from './state/monitorPanelsStorage';
+import { normalizeMonitorPanels } from '../domain/monitorPanels';
 import { decryptProviderHeaders, encryptProviderHeaders } from '../infrastructure/ai/providerHeaderCredentials';
 /**
  * Sync Payload Builders - Single source of truth for constructing and applying
@@ -31,6 +33,7 @@ import {
   type SyncPayload,
 } from '../domain/sync';
 import { migrateLegacyCommandBlocklist } from '../domain/commandBlocklist';
+import { normalizeGlobalDefaultProxyProfileId } from '../domain/globalDefaultProxy';
 import { migrateHostsFromLegacyLineTimestamps } from '../domain/host';
 import { toPersistedPortForwardingRules } from '../domain/portForwardingPersistence';
 import {
@@ -59,6 +62,7 @@ import {
   readCommandBlocklistSetting,
 } from './state/commandBlocklistSettings';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
+import { applyHostBrowserBookmarks, collectHostBrowserBookmarks, getCachedHostBrowserBookmarks } from './hostBrowserBookmarks';
 import {
   clampTerminalFontSizeValue,
   nextTerminalFontSizeSyncVersion,
@@ -109,6 +113,7 @@ import {
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
+  STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
@@ -213,11 +218,11 @@ export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
 
 /**
  * Returns true only when the payload contains synced vault entities.
- * Settings and chat history are ignored: neither proves that the vault's
+ * Settings, chat history, and browser bookmarks are ignored: none proves that the vault's
  * hosts and keys survived local data loss.
  */
 export function hasCloudSyncEntityData(payload: SyncPayload): boolean {
-  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS.filter((key) => key !== 'aiSessions'));
+  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS.filter((key) => key !== 'aiSessions' && key !== 'browserBookmarks'));
 }
 
 export function shouldPromptCloudVaultRecovery(
@@ -342,6 +347,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
+  STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE,
   STORAGE_KEY_AI_PROVIDERS,
   STORAGE_KEY_AI_ACTIVE_PROVIDER,
   STORAGE_KEY_AI_ACTIVE_MODEL,
@@ -588,6 +594,10 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const workspaceFocusStyle = localStorageAdapter.readString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE);
   if (workspaceFocusStyle === 'dim' || workspaceFocusStyle === 'border') {
     settings.workspaceFocusStyle = workspaceFocusStyle;
+  }
+  const storedDefaultProxyProfileId = localStorageAdapter.readString(STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE);
+  if (storedDefaultProxyProfileId !== null) {
+    settings.defaultProxyProfileId = normalizeGlobalDefaultProxyProfileId(storedDefaultProxyProfileId) ?? '';
   }
 
   const ai: NonNullable<SyncPayload['settings']>['ai'] = {};
@@ -903,6 +913,12 @@ async function applySyncableSettings(
   if (settings.workspaceFocusStyle != null) {
     localStorageAdapter.writeString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE, settings.workspaceFocusStyle);
   }
+  if (typeof settings.defaultProxyProfileId === 'string') {
+    localStorageAdapter.writeString(
+      STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE,
+      normalizeGlobalDefaultProxyProfileId(settings.defaultProxyProfileId) ?? '',
+    );
+  }
 
   const ai = settings.ai;
   if (ai) {
@@ -1077,6 +1093,7 @@ function buildVaultSyncPayload(
   vault: SyncableVaultData,
   portForwardingRules?: PortForwardingRule[],
 ): SyncPayload {
+  const browserBookmarks = getCachedHostBrowserBookmarks();
   return {
     hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
@@ -1088,7 +1105,9 @@ function buildVaultSyncPayload(
     notes: vault.notes,
     noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
+    monitorPanels: readMonitorPanels(),
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
+    ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
     settings: collectSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -1163,6 +1182,7 @@ export async function buildCloudSyncPayload(
   },
 ): Promise<SyncPayload> {
   const aiSessions = collectAiSessionsForSync();
+  const browserBookmarks = await collectHostBrowserBookmarks();
   const base: SyncPayload = {
     hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
@@ -1174,8 +1194,10 @@ export async function buildCloudSyncPayload(
     notes: vault.notes,
     noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
+    monitorPanels: readMonitorPanels(),
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
     ...(aiSessions !== undefined ? { aiSessions } : {}),
+    ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
     settings: await collectCloudSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -1226,6 +1248,8 @@ export async function buildLocalVaultPayloadAsync(
   portForwardingRules?: PortForwardingRule[],
 ): Promise<SyncPayload> {
   const base = buildLocalVaultPayload(vault, portForwardingRules);
+  const browserBookmarks = await collectHostBrowserBookmarks();
+  if (browserBookmarks !== undefined) base.browserBookmarks = browserBookmarks;
   const {
     collectPluginSyncSidecarsFromHost,
     isPluginSidecarHostUnavailableError,
@@ -1352,6 +1376,7 @@ async function preparePayloadApply(
   // so a previously poisoned cloud/backup snapshot can still restore host
   // shells and let the user re-enter secrets (#2702).
   const sanitizedPayload = stripSyncPayloadEncryptedCredentials(payload);
+  const monitorPanelsAtPrepare = readMonitorPanels();
   // Prepare credentials before any vault or settings mutation. Encryption can
   // fail when local credential storage is unavailable; reuse the result below.
   const providers = sanitizedPayload.settings?.ai?.providers;
@@ -1393,12 +1418,16 @@ async function preparePayloadApply(
   }
 
   return () => Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(async () => {
+    if (sanitizedPayload.monitorPanels !== undefined) await applyMonitorPanels(normalizeMonitorPanels(sanitizedPayload.monitorPanels), monitorPanelsAtPrepare, options.includeLocalOnlyData);
     // Only import port-forwarding rules when the payload explicitly carries
     // them.  Absent field = "payload was created before this feature existed",
     // so local rules are preserved.  Explicitly present [] = "remote has no
     // rules, clear local state".
     if (sanitizedPayload.portForwardingRules !== undefined && importers.importPortForwardingRules) {
       importers.importPortForwardingRules(sanitizedPayload.portForwardingRules);
+    }
+    if (sanitizedPayload.browserBookmarks !== undefined) {
+      await applyHostBrowserBookmarks(sanitizedPayload.browserBookmarks);
     }
 
     // AI chat sessions merge append-only: a cloud snapshot may be missing

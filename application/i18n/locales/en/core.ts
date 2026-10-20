@@ -413,7 +413,7 @@ export const enCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': 'Dark palette',
   'settings.appearance.customCss': 'Custom CSS',
   'settings.appearance.customCss.desc':
-    'Add custom CSS to personalize the app appearance. Changes apply immediately.',
+    'Add custom CSS to personalize the app appearance. Changes apply immediately. Selected top tabs (`.top-tab[data-active="true"]`) read `--top-tab-active-bg`, `--top-tab-active-fg`, and `--top-tab-active-border`. Leave them unset to keep the current look.',
   'settings.appearance.customCss.help.ariaLabel': 'Custom CSS help',
   'settings.appearance.customCss.help.title': 'Custom CSS guide',
   'settings.appearance.customCss.help.body': `Major UI regions expose a \`data-section\` attribute you can target. Changes apply as soon as you edit the CSS.
@@ -439,6 +439,22 @@ Because many styles come from Tailwind utilities, you often need \`!important\` 
 - \`top-tabs-toolbar-actions\` — Right-side menu and utility toolbar
 - \`top-tabs-host-tree-toggle\`
 - \`top-tabs-quick-switcher-toggle\`
+
+Selected top tabs use the class \`top-tab\` and \`data-active="true"\`. Set these variables to recolor the selected tab. Leave them unset to keep the current look. They apply without \`!important\`.
+
+- \`--top-tab-active-bg\` — selected fill (defaults to the current tab background)
+- \`--top-tab-active-fg\` — selected label color (defaults to the current tab text)
+- \`--top-tab-active-border\` — 1px inset outline (defaults to transparent, so there is no border)
+
+The Vaults tab stays flat and does not use the fill.
+
+\`\`\`css
+.top-tab[data-active="true"] {
+  --top-tab-active-bg: #2563eb;
+  --top-tab-active-fg: #ffffff;
+  --top-tab-active-border: #1d4ed8;
+}
+\`\`\`
 
 ### Vault
 
@@ -533,7 +549,7 @@ Highlight the focused split pane:
 \`\`\`
 `,
   'settings.appearance.customCss.placeholder':
-    '/* Examples — use !important to beat Tailwind utility specificity */\n\n/* Hide the host-list toggle in the top tab bar */\n[data-section="top-tabs-host-tree-toggle"] {\n  width: 0 !important;\n  opacity: 0 !important;\n  pointer-events: none !important;\n}\n\n/* Hide the plus button that opens the quick switcher */\n[data-section="top-tabs-quick-switcher-toggle"] {\n  display: none !important;\n}\n\n/* Border around the SFTP / side panel (does not linger after closing) */\n[data-section="terminal-side-panel"] {\n  border: 2px solid #00c851 !important;\n  border-radius: 6px !important;\n}\n\n/* Change the whole side panel background, not only the top tabs */\n[data-section="terminal-side-panel"],\n[data-section="terminal-side-panel-tabs"],\n[data-section="terminal-side-panel-content"],\n[data-section="terminal-sftp-panel"],\n[data-section="terminal-sftp-pane"],\n[data-section="terminal-sftp-list"],\n[data-section="terminal-sftp-tree"],\n[data-section="terminal-sftp-transfer-queue"] {\n  background-color: #1c384a !important;\n}\n\n/* Style selected SFTP file rows */\n[data-section="terminal-sftp-list-row"][data-selected="true"] {\n  background-color: #00c851 !important;\n  color: #001b10 !important;\n}\n\n/* Thicker split dividers */\n[data-section="terminal-split-resizer-bar"] {\n  background-color: hsl(var(--primary)) !important;\n  transform: scale(2) !important;\n}\n\n/* Highlight the focused split pane */\n[data-section="terminal-split-pane"][data-focused="true"] {\n  outline: 2px solid hsl(var(--primary)) !important;\n  outline-offset: -2px;\n}\n\n/* Or use Settings → Terminal → Workspace Focus Indicator → Border on focused pane */',
+    '/* Examples — use !important to beat Tailwind utility specificity */\n\n/* Selected top tab. Leave these unset to keep the current look. */\n.top-tab[data-active="true"] {\n  --top-tab-active-bg: #2563eb;\n  --top-tab-active-fg: #ffffff;\n  --top-tab-active-border: #1d4ed8;\n}\n\n/* Hide the host-list toggle in the top tab bar */\n[data-section="top-tabs-host-tree-toggle"] {\n  width: 0 !important;\n  opacity: 0 !important;\n  pointer-events: none !important;\n}\n\n/* Hide the plus button that opens the quick switcher */\n[data-section="top-tabs-quick-switcher-toggle"] {\n  display: none !important;\n}\n\n/* Border around the SFTP / side panel (does not linger after closing) */\n[data-section="terminal-side-panel"] {\n  border: 2px solid #00c851 !important;\n  border-radius: 6px !important;\n}\n\n/* Change the whole side panel background, not only the top tabs */\n[data-section="terminal-side-panel"],\n[data-section="terminal-side-panel-tabs"],\n[data-section="terminal-side-panel-content"],\n[data-section="terminal-sftp-panel"],\n[data-section="terminal-sftp-pane"],\n[data-section="terminal-sftp-list"],\n[data-section="terminal-sftp-tree"],\n[data-section="terminal-sftp-transfer-queue"] {\n  background-color: #1c384a !important;\n}\n\n/* Style selected SFTP file rows */\n[data-section="terminal-sftp-list-row"][data-selected="true"] {\n  background-color: #00c851 !important;\n  color: #001b10 !important;\n}\n\n/* Thicker split dividers */\n[data-section="terminal-split-resizer-bar"] {\n  background-color: hsl(var(--primary)) !important;\n  transform: scale(2) !important;\n}\n\n/* Highlight the focused split pane */\n[data-section="terminal-split-pane"][data-focused="true"] {\n  outline: 2px solid hsl(var(--primary)) !important;\n  outline-offset: -2px;\n}\n\n/* Or use Settings → Terminal → Workspace Focus Indicator → Border on focused pane */',
   'settings.appearance.language': 'Language',
   'settings.appearance.language.desc': 'Choose the UI language',
   'settings.appearance.uiFont': 'Interface Font',
@@ -712,7 +728,7 @@ Highlight the focused split pane:
     'Send configured text instead of normal Enter when pressing Shift+Enter in the terminal.',
   'settings.terminal.behavior.shiftEnterNewlineText': 'Text to send',
   'settings.terminal.behavior.shiftEnterNewlineText.desc':
-    'Use \\n for newline, \\t for tab, \\e for Escape, and \\\\ for backslash.',
+    'Use \\n for newline, \\t for tab, \\e for Escape, and \\\\ for backslash. Defaults to \\e\\r (Escape + Enter, the legacy Alt+Enter encoding), which most TUI CLIs treat as a newline.',
   'settings.terminal.behavior.shiftEnterForceText': 'Send text in Win32 input mode',
   'settings.terminal.behavior.shiftEnterForceText.desc':
     'Also send the text above when a local Windows ConPTY session negotiates Win32 input mode. Needed for Node/Bun CLIs (Claude Code, CodeBuddy) that cannot read modifier keys from console input records.',
@@ -767,6 +783,11 @@ Highlight the focused split pane:
   'settings.terminal.behavior.smoothScrolling': 'Smooth scrolling',
   'settings.terminal.behavior.smoothScrolling.desc':
     'Animate terminal viewport scrolling instead of jumping instantly',
+  'settings.terminal.sidePanel.pane.browser': 'Browser',
+  'settings.terminal.behavior.linkBrowser': 'Open terminal links in',
+  'settings.terminal.behavior.linkBrowser.desc': 'SSH links use the connected host; local terminal links use this computer.',
+  'settings.terminal.behavior.linkBrowser.netcatty': 'Netcatty browser (default)',
+  'settings.terminal.behavior.linkBrowser.system': 'System default browser',
   'settings.terminal.behavior.linkModifier': 'Link modifier key',
   'settings.terminal.behavior.linkModifier.desc': 'Hold this key to click on links in terminal',
   'settings.terminal.behavior.linkModifier.none': 'None (click directly)',
@@ -824,6 +845,9 @@ Highlight the focused split pane:
   'settings.terminal.connection.x11Display': 'X11 display',
   'settings.terminal.connection.x11Display.desc': 'Optional local display address for X11 forwarding. Leave empty to use the system default.',
   'settings.terminal.connection.x11Display.placeholder': 'Auto (:0 or DISPLAY)',
+  'settings.terminal.connection.defaultProxy': 'Default proxy',
+  'settings.terminal.connection.defaultProxy.desc': 'Saved proxy used when a host has no proxy of its own and does not inherit one from a group. None connects directly.',
+  'settings.terminal.connection.defaultProxy.none': 'None',
   'settings.terminal.section.serverStats': 'Server Stats (Linux)',
   'settings.terminal.hostInfoBar.show': 'Show host information bar',
   'settings.terminal.hostInfoBar.show.desc': 'Show the host address and server information above the terminal. Action buttons remain available when hidden.',

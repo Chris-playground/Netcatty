@@ -224,9 +224,9 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
           description={t("settings.terminal.behavior.shiftEnterNewlineText.desc")}
         >
           <Input
-            value={terminalSettings.shiftEnterNewlineText ?? "\\n"}
+            value={terminalSettings.shiftEnterNewlineText ?? "\\e\\r"}
             onChange={(e) => updateTerminalSetting("shiftEnterNewlineText", e.target.value)}
-            placeholder="\\n"
+            placeholder="\\e\\r"
             className="w-56 font-mono"
             spellCheck={false}
           />
@@ -365,6 +365,22 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
           description={t("settings.terminal.behavior.smoothScrolling.desc")}
         >
           <Toggle checked={terminalSettings.smoothScrolling} onChange={(v) => updateTerminalSetting("smoothScrolling", v)} />
+        </SettingRow>
+
+        <SettingRow
+          anchorId="terminal-link-browser"
+          label={t("settings.terminal.behavior.linkBrowser")}
+          description={t("settings.terminal.behavior.linkBrowser.desc")}
+        >
+          <Select
+            value={terminalSettings.linkBrowser ?? 'netcatty'}
+            options={[
+              { value: 'netcatty', label: t('settings.terminal.behavior.linkBrowser.netcatty') },
+              { value: 'system', label: t('settings.terminal.behavior.linkBrowser.system') },
+            ]}
+            onChange={(v) => updateTerminalSetting('linkBrowser', v as 'netcatty' | 'system')}
+            className="w-48"
+          />
         </SettingRow>
 
         <SettingRow

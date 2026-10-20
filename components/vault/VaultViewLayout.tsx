@@ -1,3 +1,5 @@
+import { MonitorPanels } from './MonitorPanels';
+import { MonitorNavButton } from './MonitorNavButton';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Combobox } from "../ui/combobox";
 import React, { useCallback } from "react";
@@ -26,6 +28,7 @@ import { useNotesStore } from "../../application/state/notesStore";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { toast } from "../ui/toast";
 import { AppWordmark } from "../AppWordmark";
+import { openHostBrowser } from "../../application/hostBrowser";
 
 type VaultViewLayoutContext = Record<string, any>;
 
@@ -248,6 +251,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Network,
     newFolderName,
     newHostGroupPath,
+    onConnect,
     onConnectSerial,
     onCreateLocalTerminal,
     onDeleteHost,
@@ -620,6 +624,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </TooltipContent>
               )}
             </Tooltip>
+            <MonitorNavButton active={currentSection === "monitor"} collapsed={sidebarCollapsed} onClick={() => setCurrentSection("monitor")} />
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
@@ -1215,6 +1220,11 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 handleEditGroupConfig,
                 handleEditHost,
                 handleHostConnect,
+                handleOpenHostBrowser: (host: any) => {
+                  if (host.protocol && !['ssh', 'mosh', 'local'].includes(host.protocol)) return;
+                  void openHostBrowser({ host, hosts, keys, identities, knownHosts, terminalSettings })
+                    .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not open the host browser'));
+                },
                 handleUnmanageGroup,
                 hasHostsSidePanel,
                 hostListScrollRef,
@@ -1401,6 +1411,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </Suspense>
               </LazyLoadBoundary>
             )}
+            {currentSection === "monitor" && <MonitorPanels hosts={hosts} customGroups={customGroups} onConnect={onConnect} />}
             {currentSection === "port" && (
               <LazyLoadBoundary
                 name="Port forwarding"

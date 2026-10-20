@@ -126,6 +126,7 @@ export interface TerminalSettings {
   middleClickPaste: boolean; // Legacy mirror for older settings payloads
   wordSeparators: string; // Characters for word selection
   linkModifier: LinkModifier; // Modifier key to click links
+  linkBrowser?: 'netcatty' | 'system';
   autoCloseOnExit: boolean; // Automatically close terminal UI after eligible session exits
   disconnectedNoticeMode: DisconnectedNoticeMode; // Non-blocking terminal line or legacy dialog after disconnect
   /** Action when double-clicking a terminal session tab. */
@@ -428,6 +429,7 @@ export const normalizeTerminalSettings = (
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
     wordSeparators,
+    linkBrowser: settings?.linkBrowser === 'system' ? 'system' as const : 'netcatty' as const,
     shiftEnterNewlineText,
     cursorBarWidth: normalizeCursorBarWidth(settings?.cursorBarWidth),
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
@@ -501,6 +503,17 @@ export const normalizeTerminalSettings = (
 /** Default scrollback rows for new installs (VS Code uses 1000; we keep a modest headroom). */
 export const DEFAULT_TERMINAL_SCROLLBACK = 3000;
 
+/** Backslash-escaped Shift+Enter text for a fresh install (legacy Alt+Enter). */
+export const DEFAULT_SHIFT_ENTER_NEWLINE_TEXT = '\\e\\r';
+
+/**
+ * Stored forms of the pre-#3770 Shift+Enter default. `\\n` is the escaped
+ * setting string; `\n` is a raw newline if one was ever persisted.
+ */
+export function isLegacyDefaultShiftEnterNewlineText(value: unknown): boolean {
+  return value === '\\n' || value === '\n';
+}
+
 const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollback: DEFAULT_TERMINAL_SCROLLBACK,
   drawBoldInBrightColors: true,
@@ -520,7 +533,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   altAsMeta: false,
   optionArrowWordJump: false,
   shiftEnterNewlineEnabled: true,
-  shiftEnterNewlineText: '\\n',
+  shiftEnterNewlineText: DEFAULT_SHIFT_ENTER_NEWLINE_TEXT,
   shiftEnterForceText: false,
   kittyKeyboardProtocolEnabled: false,
   scrollOnInput: true,
@@ -537,6 +550,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   middleClickPaste: true,
   wordSeparators: DEFAULT_TERMINAL_WORD_SEPARATORS,
   linkModifier: 'none',
+  linkBrowser: 'netcatty',
   // Off by default: remote graceful channel closes can be reported as a clean
   // exit (code 0), which would auto-close tabs on network drops. Users who
   // want close-on-exit can enable it in Settings -> Terminal -> Behavior.

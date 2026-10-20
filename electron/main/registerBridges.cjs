@@ -4,6 +4,10 @@ let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
 const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");
 const { registerSystemNotificationHandlers } = require("../bridges/systemNotification.cjs");
+const {
+  installWindowAttention,
+  registerExternalMcpApprovalAlertHandlers,
+} = require("../bridges/windowAttention.cjs");
 
 const excludedFigSpecPrefixes = ["aws", "gcloud", "az"];
 
@@ -457,6 +461,11 @@ function createBridgeRegistrar(context) {
   
     // Register all IPC handlers
     sshBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    const stopMonitoring = () => terminalWorkerManager
+      ? terminalWorkerManager.request("netcatty:monitor:stop-all", {}, {}).catch(() => {})
+      : sshBridge.stopAllMonitoring();
+    electronModule.powerMonitor?.on("suspend", stopMonitoring);
+    require("../plugins/shutdownCoordinator.cjs").registerPluginShutdown(stopMonitoring);
     sftpBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     localFsBridge.registerHandlers(ipcMain);
     require("../bridges/localFileDragBridge.cjs").registerHandlers(ipcMain, {
@@ -466,6 +475,25 @@ function createBridgeRegistrar(context) {
     });
     transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     portForwardingBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    if (electronModule.WebContentsView && electronModule.session?.fromPartition) {
+      const { createHostBrowserManager } = require("../hostBrowser/hostBrowserManager.cjs");
+      const hostBrowserManager = createHostBrowserManager({
+        electron: electronModule,
+        app,
+        portForwardingBridge,
+      });
+      ipcMain.handle("netcatty:host-browser:request-panel", (event, request) => {
+        const senderWindow = BrowserWindow.fromWebContents(event.sender);
+        const mainWindow = getWindowManager().getMainWindow?.();
+        if (!senderWindow || senderWindow.webContents !== event.sender || !mainWindow || mainWindow.isDestroyed()
+          || typeof request?.host?.id !== "string") throw new Error("Browser opener is unavailable");
+        mainWindow.webContents.send("netcatty:host-browser:request-panel", request);
+        mainWindow.show();
+        mainWindow.focus();
+        return true;
+      });
+      app.once?.("will-quit", () => hostBrowserManager.closeAll());
+    }
     terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });
 
     const scriptBridge = require("../bridges/scriptBridge.cjs");
@@ -968,7 +996,26 @@ function createBridgeRegistrar(context) {
     );
   
     // OSC 9/777/99 desktop notifications (Codex, iTerm2, kitty, rxvt)
-    registerSystemNotificationHandlers(ipcMain, { electronModule, BrowserWindow });
+    // and External MCP approval alerts, which reuse the same click-to-focus channel.
+    registerSystemNotificationHandlers(ipcMain, {
+      electronModule,
+      BrowserWindow,
+      getAppFocused: () => BrowserWindow.getAllWindows().some(
+        (win) => win && !win.isDestroyed?.() && win.isFocused?.(),
+      ),
+    });
+    installWindowAttention({
+      app,
+      platform: process.platform,
+      getWindows: () => {
+        try {
+          return BrowserWindow.getAllWindows();
+        } catch {
+          return [];
+        }
+      },
+    });
+    registerExternalMcpApprovalAlertHandlers(ipcMain);
 
     // Clipboard helpers for renderer fallback paths (e.g. Monaco paste in Electron)
     ipcMain.handle("netcatty:clipboard:readText", async () => {

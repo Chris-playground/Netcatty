@@ -4,6 +4,7 @@ import {
   EyeOff,
   FileText,
   FolderPlus,
+  PlugZap,
   Plus,
   Settings2,
   Tag,
@@ -61,6 +62,7 @@ import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 import { toast } from "./ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 import {
   ChainPanel,
@@ -451,7 +453,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const updateProxyConfig = useCallback(
     (field: keyof ProxyConfig, value: ProxyConfig[keyof ProxyConfig]) => {
       setForm((prev) => {
-        const { proxyProfileId: _proxyProfileId, ...rest } = prev;
+        const { proxyProfileId: _proxyProfileId, directProxy: _directProxy, ...rest } = prev;
         return {
           ...rest,
           proxyConfig: updateProxyConfigField(prev.proxyConfig, field, value),
@@ -463,16 +465,23 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
   const clearProxyConfig = useCallback(() => {
     setForm((prev) => {
-      const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, ...rest } = prev;
+      const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, directProxy: _directProxy, ...rest } = prev;
       return rest as Host;
     });
   }, []);
 
   const selectProxyProfile = useCallback((profileId: string | undefined) => {
     setForm((prev) => {
-      const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, ...rest } = prev;
+      const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, directProxy: _directProxy, ...rest } = prev;
       if (!profileId) return rest as Host;
       return { ...rest, proxyProfileId: profileId } as Host;
+    });
+  }, []);
+
+  const selectDirectProxy = useCallback(() => {
+    setForm((prev) => {
+      const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, ...rest } = prev;
+      return { ...rest, directProxy: true } as Host;
     });
   }, []);
 
@@ -884,8 +893,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         proxyProfiles={proxyProfiles}
         identities={identities}
         selectedProxyProfileId={form.proxyProfileId}
+        directProxy={form.directProxy}
         onUpdateProxy={updateProxyConfig}
         onSelectProxyProfile={selectProxyProfile}
+        onSelectDirectProxy={selectDirectProxy}
         onClearProxy={clearProxyConfig}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
@@ -1015,16 +1026,39 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         initialData ? t("hostDetails.title.details") : t("hostDetails.title.new")
       }
       actions={
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={handleSubmit}
-          disabled={!canSaveHost}
-          aria-label={t("hostDetails.saveAria")}
-        >
-          <Check size={16} />
-        </Button>
+        <>
+          {!pluginProtocolActive && form.protocol !== "telnet" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={handleStartTest}
+                    disabled={!canSaveHost}
+                    aria-label={t("hostConnectionTest.title")}
+                  >
+                    <PlugZap size={16} />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t("hostConnectionTest.title")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={handleSubmit}
+            disabled={!canSaveHost}
+            aria-label={t("hostDetails.saveAria")}
+          >
+            <Check size={16} />
+          </Button>
+        </>
       }
     >
       <AsidePanelContent>
@@ -1346,19 +1380,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           </Button>
         )}
       </AsidePanelContent>
-      <AsidePanelFooter className="flex flex-row gap-2">
-        {!pluginProtocolActive && form.protocol !== "telnet" && (
-          <Button
-            variant="outline"
-            className="h-10 px-4"
-            onClick={handleStartTest}
-            disabled={!canSaveHost}
-          >
-            {t("hostConnectionTest.test")}
-          </Button>
-        )}
+      <AsidePanelFooter>
         <Button
-          className="flex-1 h-10"
+          className="w-full h-10"
           onClick={handleSubmit}
           disabled={!canSaveHost}
         >

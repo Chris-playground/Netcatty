@@ -1,3 +1,4 @@
+import { installBrowserLockFixture } from "./testSupport/browserLockFixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -37,6 +38,8 @@ function installLocalStorage(): LocalStorageMock {
   });
   return localStorage;
 }
+
+installBrowserLockFixture();
 
 const localStorage = installLocalStorage();
 const {
@@ -449,6 +452,30 @@ test("note appearance settings survive sync and trigger auto-sync", async () => 
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_FAMILY), "Menlo, monospace");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_SIZE), "16");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE), "14");
+});
+
+test("buildSyncPayload round-trips the global default proxy profile", async () => {
+  localStorage.clear();
+  const absent = buildSyncPayload(vault([]));
+  assert.equal(absent.settings?.defaultProxyProfileId, undefined);
+
+  localStorage.setItem(storageKeys.STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE, "proxy-1");
+  const selected = buildSyncPayload(vault([]));
+  assert.equal(selected.settings?.defaultProxyProfileId, "proxy-1");
+
+  localStorage.setItem(storageKeys.STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE, "");
+  const cleared = buildSyncPayload(vault([]));
+  assert.equal(cleared.settings?.defaultProxyProfileId, "");
+
+  localStorage.clear();
+  await applySyncPayload(selected, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE), "proxy-1");
+
+  await applySyncPayload(cleared, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE), "");
+  assert.ok((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
+    storageKeys.STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE,
+  ));
 });
 
 test("buildSyncPayload includes host tree sidebar visibility setting", () => {
@@ -1418,6 +1445,26 @@ test("hasCloudSyncEntityData ignores settings-only payloads for empty-vault reco
     }),
     false,
   );
+});
+
+test("surviving browser bookmarks do not suppress empty-vault recovery", () => {
+  const local: SyncPayload = {
+    ...vault([]), syncedAt: 1,
+    browserBookmarks: [{
+      id: "app", title: "App", url: "https://app.example.com/", scope: "all-hosts",
+      hostId: null, icon: "A", color: "#247969", order: 0, createdAt: 1, updatedAt: 1,
+    }],
+  };
+  assert.equal(hasMeaningfulCloudSyncData(local), true, "bookmarks must remain syncable");
+  assert.equal(hasCloudSyncEntityData(local), false);
+  const host = {
+    id: "remote", label: "Remote", hostname: "remote.example.com", username: "test",
+    port: 22, protocol: "ssh" as const, tags: [], os: "linux" as const,
+  };
+  for (const hosts of [[host], [host, { ...host, id: "second" }]]) {
+    assert.equal(shouldPromptCloudVaultRecovery(local, { ...vault([]), hosts, syncedAt: 2 }), true);
+  }
+  assert.equal(shouldPromptCloudVaultRecovery({ ...vault([]), syncedAt: 1 }, local), false);
 });
 
 test("shouldPromptCloudVaultRecovery ignores settings-only remote payloads", () => {

@@ -466,6 +466,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.localShell",
   },
   {
+    id: "terminal-default-proxy",
+    tab: "terminal",
+    labelKey: "settings.terminal.connection.defaultProxy",
+    descriptionKey: "settings.terminal.connection.defaultProxy.desc",
+    sectionKey: "settings.terminal.section.connection",
+    keywords: ["proxy", "socks", "默认代理", "全域"],
+  },
+  {
     id: "terminal-verify-host-keys",
     tab: "terminal",
     labelKey: "settings.terminal.connection.verifyHostKeys",
@@ -713,6 +721,15 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     aiSubTab: "tools",
     labelKey: "ai.externalMcp.title",
     keywords: ["mcp"],
+  },
+  {
+    id: "ai-external-mcp-approval-alert",
+    tab: "ai",
+    aiSubTab: "tools",
+    labelKey: "ai.externalMcp.approvalAlert",
+    descriptionKey: "ai.externalMcp.approvalAlert.description",
+    sectionKey: "ai.externalMcp.title",
+    keywords: ["notification", "approval", "dock"],
   },
   {
     id: "ai-user-skills",

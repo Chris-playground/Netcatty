@@ -282,6 +282,8 @@ export interface SyncPayload {
   notes?: import('./models').VaultNote[];
   noteGroups?: string[];
 
+  monitorPanels?: import('./monitorPanels').MonitorPanel[];
+
   // Group configs (connection defaults per host group)
   groupConfigs?: import('./models').GroupConfig[];
 
@@ -296,6 +298,7 @@ export interface SyncPayload {
    * are stripped — only their metadata travels.
    */
   aiSessions?: import('../infrastructure/ai/types').AISession[];
+  browserBookmarks?: import('./browserBookmark').BrowserBookmark[];
   
   // Known hosts
   knownHosts?: import('./models').KnownHost[];
@@ -365,6 +368,11 @@ export interface SyncPayload {
     showHostTreeSidebar?: boolean;
     // Workspace focus indicator style
     workspaceFocusStyle?: 'dim' | 'border';
+    /**
+     * Saved proxy profile for hosts that do not set a proxy and do not inherit
+     * one from a group. An empty string is an explicit direct default.
+     */
+    defaultProxyProfileId?: string;
     // AI configuration
     ai?: {
       providers?: Array<Record<string, unknown>>;
@@ -479,8 +487,10 @@ export const SYNC_PAYLOAD_ENTITY_KEYS = [
   'notes',
   'noteGroups',
   'portForwardingRules',
+  'browserBookmarks',
   'knownHosts',
   'groupConfigs',
+  'monitorPanels',
 ] as const;
 
 export const CLOUD_SYNC_PAYLOAD_ENTITY_KEYS = [
@@ -494,7 +504,9 @@ export const CLOUD_SYNC_PAYLOAD_ENTITY_KEYS = [
   'notes',
   'noteGroups',
   'portForwardingRules',
+  'browserBookmarks',
   'groupConfigs',
+  'monitorPanels',
   'aiSessions',
 ] as const;
 

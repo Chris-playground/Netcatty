@@ -1,10 +1,11 @@
+import { subscribeHostBrowserPanelRequests } from '../application/state/hostBrowserPanelRequests';
+import { openHostBrowserPanelUrl } from '../application/hostBrowser';
 import { captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { pruneComposeBarHistory } from '../application/state/composeBarHistoryStore';
 import { FolderTree, History, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore } from '../application/state/activeTabStore';
 import { getScriptRecordingSnapshot } from '../application/state/scriptRecordingStore.ts';
-import { canReuseTerminalConnection } from '../application/state/terminalConnectionReuse';
 import { resolveTerminalSessionExitIntent, type TerminalSessionExitEvent } from '../application/state/resolveTerminalSessionExitIntent';
 import { prewarmAIStateStorageSnapshots } from '../application/state/aiStateSnapshots';
 import {
@@ -112,7 +113,7 @@ import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   resolveSessionSidePanelAutoOpen,
 } from '../domain/terminalSidePanelAutoOpen';
-import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
+import { canScheduleCommandCwdProbe, shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
   resolvePreferredTerminalCwd,
   scheduleBackendCwdProbeAfterCommand,
@@ -488,6 +489,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         setThemeMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       } else if (pane.tool === 'system') {
         setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'browser') {
+        setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       } else if (pane.tool === 'notes') {
         setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       } else if (pane.tool === 'sftp') {
@@ -659,6 +662,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     } else if (targetPanel === 'notes') {
       setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+    } else if (targetPanel === 'browser') {
+      setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     }
 
     setSidePanelOpenTabs(prev => {
@@ -770,6 +775,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [scriptsMountedTabIds, setScriptsMountedTabIds] = useState<string[]>([]);
   const [systemMountedTabIds, setSystemMountedTabIds] = useState<string[]>([]);
   const [themeMountedTabIds, setThemeMountedTabIds] = useState<string[]>([]);
+  const [browserMountedTabIds, setBrowserMountedTabIds] = useState<string[]>([]);
   const [notesMountedTabIds, setNotesMountedTabIds] = useState<string[]>([]);
   const [sidePanelWidth, setSidePanelWidth, persistSidePanelWidth] = useStoredNumber(
     STORAGE_KEY_SIDE_PANEL_WIDTH,
@@ -1009,6 +1015,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setScriptsMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
     setThemeMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
     setSystemMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
+    setBrowserMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
     setNotesMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
     setNotesOpenNoteByTab((previous) => {
       const next = new Map(previous);
@@ -1340,7 +1347,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    if (!session || !canReuseTerminalConnection(session)) return;
+    // Local POSIX shells do not emit OSC 7. They share this probe so session
+    // restore can `cd` back after restart (#1952). Prompt return calls this
+    // again with an empty command once the shell is idle, so a slow command
+    // such as `sleep 1; cd /tmp` is not recorded at the 150ms snapshot.
+    // SSH keeps the extra-exec eligibility check inside canScheduleCommandCwdProbe.
+    if (!session || !canScheduleCommandCwdProbe(session)) return;
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
     const visibleSftpHost = tabId && sidePanelLayoutHasTool(sidePanelLayoutsRef.current.get(tabId), 'sftp')
       ? sftpHostForTabRef.current.get(tabId) ?? null
@@ -1364,6 +1376,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
       canProbe: async () => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return false;
+        // Local cwd is the PTY process directory, not an extra SSH channel.
+        if (session.protocol === "local") return true;
         const host = sessionHostsMapRef.current.get(sessionId);
         if (!host) return false;
         const hostDeviceClass = classifyDistroId(host.distro);
@@ -1549,6 +1563,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       return;
     }
+    if (panel === 'browser') {
+      setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      return;
+    }
     if (panel === 'notes') {
       setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     }
@@ -1582,7 +1600,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }): Promise<string | null> => {
     const sessionId = getActiveTerminalSessionId();
     const host = sessionId ? sessionHostsMapRef.current.get(sessionId) : undefined;
-    const skipBackendPwd = hostRestrictsExtraSshChannels(host);
+    // Same rule as the terminal's own SFTP path lookup (#3631).
+    let skipBackendPwd = hostRestrictsExtraSshChannels(host);
+    if (!skipBackendPwd && sessionId && host) {
+      const info = await terminalBackend.getSessionRemoteInfo?.(sessionId).catch(() => null);
+      skipBackendPwd = !shouldProbeSessionCwd({
+        isNetworkDevice: classifyDistroId(host.distro) === 'network-device',
+        remoteSshVersion: info?.remoteSshVersion,
+      });
+    }
     return resolvePreferredTerminalCwd({
       rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
       rendererCwdSource: sessionId
@@ -1888,6 +1914,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       handleCloseSidePanel();
       return;
     }
+    if (closingPane?.tool === 'browser') {
+      setBrowserMountedTabIds((previous) => removeMountedSidePanelTabId(previous, tabId));
+    }
     if (shouldMarkSftpPaneClosed({
       closingPaneTool: closingPane?.tool,
       closesWholePanel: closesWholePanel,
@@ -1973,6 +2002,39 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleOpenSystem = useCallback(() => {
     handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
+
+  const handleOpenBrowser = useCallback(() => {
+    handleSwitchSidePanelTab('browser');
+  }, [handleSwitchSidePanelTab]);
+
+  useEffect(() => subscribeHostBrowserPanelRequests(({ host, sessionId, url }) => {
+    const session = sessionsRef.current.find((candidate) => sessionId
+      ? candidate.id === sessionId : !candidate.hiddenFromTabs && candidate.hostId === host.id
+        && (!candidate.protocol || ['ssh', 'mosh', 'local'].includes(candidate.protocol)));
+    let tabId: string | null = null;
+    if (session) {
+      tabId = session.workspaceId ?? session.id;
+      if (session.workspaceId) onSetWorkspaceFocusedSessionRef.current?.(session.workspaceId, session.id);
+      activeTabStore.setActiveTabId(tabId);
+    } else {
+      const opened = onConnectToHost(host);
+      if (typeof opened === 'string') tabId = opened;
+    }
+    if (!tabId) return;
+    if (url) {
+      void openHostBrowserPanelUrl(`${tabId}:${session?.id ?? tabId}`, url)
+        .catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)));
+    }
+    setBrowserMountedTabIds((previous) => addMountedSidePanelTabId(previous, tabId));
+    setSidePanelOpenTabs((previous) => new Map(previous).set(tabId, 'browser'));
+  }), [onConnectToHost, setSidePanelOpenTabs]);
+
+  useEffect(() => {
+    setBrowserMountedTabIds((previous) => {
+      const next = previous.filter((tabId) => validAIScopeTargetIds.has(tabId));
+      return next.length === previous.length ? previous : next;
+    });
+  }, [validAIScopeTargetIds]);
 
   const handleOpenNotes = useCallback(() => {
     const tabId = activeTabIdRef.current;
@@ -2546,6 +2608,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenAI,
     handleOpenSystem,
     handleOpenNotes,
+    handleOpenBrowser,
     handleFocusSidePanelPane,
     handleMagnifySidePanelPane,
     handleRestoreMagnifiedPane,
@@ -2612,6 +2675,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     mountedSftpTabIds,
     magnifiedPane,
     notesMountedTabIds,
+    browserMountedTabIds,
     notesOpenNoteByTab,
     scriptsMountedTabIds,
     systemMountedTabIds,

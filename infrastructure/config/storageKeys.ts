@@ -26,6 +26,8 @@ export const STORAGE_KEY_TERM_FONT_SIZE = 'netcatty_term_font_size_v1';
 export const STORAGE_KEY_TERM_SETTINGS = 'netcatty_term_settings_v1';
 /** One-time marker: pre-#3619 builds materialized autoCloseOnExit: true into saved settings. */
 export const STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED = 'netcatty_term_auto_close_exit_migrated_v1';
+/** One-time marker: pre-#3770 builds materialized shiftEnterNewlineText "\\n" into saved settings. */
+export const STORAGE_KEY_TERM_SHIFT_ENTER_NEWLINE_MIGRATED = 'netcatty_term_shift_enter_newline_migrated_v1';
 export const STORAGE_KEY_HOTKEY_SCHEME = 'netcatty_hotkey_scheme_v1';
 export const STORAGE_KEY_CUSTOM_KEY_BINDINGS = 'netcatty_custom_key_bindings_v1';
 export const STORAGE_KEY_HOTKEY_RECORDING = 'netcatty_hotkey_recording_v1';
@@ -183,6 +185,8 @@ export const STORAGE_KEY_SHOW_TRAY_ICON = 'netcatty_show_tray_icon_v1';
 export const STORAGE_KEY_AUTO_LAUNCH_ENABLED = 'netcatty_auto_launch_enabled_v1';
 /** App-level HTTP(S) proxy for cloud sync / AI (not SSH ProxyJump). */
 export const STORAGE_KEY_HTTP_NETWORK_PROXY = 'netcatty_http_network_proxy_v1';
+/** Saved proxy profile used when a host and its groups do not set one. Empty string means explicit none. */
+export const STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE = 'netcatty_global_default_proxy_profile_v1';
 export const STORAGE_KEY_GLOBAL_HOTKEY_ENABLED = 'netcatty_global_hotkey_enabled_v1';
 export const STORAGE_KEY_WINDOW_OPACITY = 'netcatty_window_opacity_v1';
 export const STORAGE_KEY_APP_ICON_VARIANT = 'netcatty_app_icon_variant_v1';
@@ -227,6 +231,8 @@ export const STORAGE_KEY_AI_EXTERNAL_MCP_FOCUS_ON_HOST_OPEN = 'netcatty_ai_exter
 export const STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES = 'netcatty_ai_session_idle_timeout_minutes_v1';
 /** External MCP: whether host_open sessions stay hidden from the tab bar (default false). */
 export const STORAGE_KEY_AI_EXTERNAL_MCP_SILENT_SESSIONS = 'netcatty_ai_external_mcp_silent_sessions_v1';
+/** External MCP confirm-mode approval alert: off, unfocused, or always. Default unfocused. */
+export const STORAGE_KEY_AI_EXTERNAL_MCP_APPROVAL_ALERT = 'netcatty_ai_external_mcp_approval_alert_v1';
 /** AI panel diagnostic hide list (comma-separated part names). */
 export const STORAGE_KEY_AI_PANEL_DIAGNOSTIC_HIDE = 'netcatty.aiDebug.hide';
 /** AI panel React profiler toggle. */
@@ -296,8 +302,6 @@ export const STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB = 'netcatty_local_
 export const STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH = 'netcatty_workspace_focus_sidebar_width';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_WIDTH = 'netcatty_terminal_host_tree_width_v1';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_COLLAPSED = 'netcatty_terminal_host_tree_collapsed_v1';
-/** Terminal scripts side panel library: 'list' vs 'stacked' view mode. */
-export const STORAGE_KEY_SCRIPTS_SIDE_PANEL_VIEW = 'netcatty:scripts:sidePanelView';
 export const STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN = 'netcatty_terminal_compose_bar_open_v1';
 /** Opt-in "broadcast without password protection" switch (terminal compose bar, issue #3488). */
 export const STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS = 'netcatty_terminal_broadcast_password_bypass_v1';
@@ -320,3 +324,9 @@ export const STORAGE_KEY_AVAILABLE_PLUGIN_SYNC_PROVIDERS = 'netcatty_available_p
 // Debug Flags (no _v1 suffix — developer-only, not persisted data)
 export const STORAGE_KEY_DEBUG_HOTKEYS = 'debug.hotkeys';
 export const STORAGE_KEY_DEBUG_UPDATE_DEMO = 'debug.updateDemo';
+
+// Portable monitor configuration. Runtime samples never use storage.
+export const STORAGE_KEY_MONITOR_PANELS = 'netcatty_monitor_panels_v1';
+export const STORAGE_KEY_MONITOR_TABLE_COLUMNS = 'netcatty_monitor_table_columns_v1';
+
+export const STORAGE_KEY_MONITOR_HIDDEN_COLUMNS = "netcatty_monitor_hidden_columns_v1";
