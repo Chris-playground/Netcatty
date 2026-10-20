@@ -326,9 +326,15 @@ function buildOpenCodeV2Url(baseUrl, path, query) {
 
 function catalogModelId(model) {
   if (!model || typeof model !== "object") return null;
-  if (model.providerID && model.modelID) return `${model.providerID}/${model.modelID}`;
-  if (typeof model.id === "string" && model.id.includes("/")) return model.id;
-  if (model.providerID && model.id) return `${model.providerID}/${model.id}`;
+  const providerID = typeof model.providerID === "string" ? model.providerID : "";
+  // `id` is the selectable catalog id. `modelID` is the provider API id and
+  // can differ for aliases such as coding-default -> gpt-5.2.
+  const catalogID = typeof model.id === "string" ? model.id : "";
+  if (providerID && catalogID) {
+    return catalogID.startsWith(`${providerID}/`) ? catalogID : `${providerID}/${catalogID}`;
+  }
+  if (catalogID.includes("/")) return catalogID;
+  if (providerID && typeof model.modelID === "string" && model.modelID) return `${providerID}/${model.modelID}`;
   return null;
 }
 
@@ -528,7 +534,11 @@ function createOpenCodeV2Client({ baseUrl, username = OPENCODE_V2_USERNAME, pass
         });
         return { ok: true };
       } catch (error) {
-        if (error?.status === 404 || error?.status === 405) return { ok: false };
+        // Missing or rejected instruction routes must not block the user prompt.
+        // The published client types this value as JSON, including a string.
+        if (error?.status === 400 || error?.status === 404 || error?.status === 405 || error?.status === 413) {
+          return { ok: false };
+        }
         throw error;
       }
     },

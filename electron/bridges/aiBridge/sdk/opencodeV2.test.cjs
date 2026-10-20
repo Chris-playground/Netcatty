@@ -173,6 +173,22 @@ test("mapOpenCodeV2Catalog uses provider and model ids from the 2.x payloads", (
     currentModelId: "openai/gpt-5",
     models: [{ id: "openai/gpt-5", name: "OpenAI GPT-5" }],
   });
+
+  const aliased = mapOpenCodeV2Catalog(
+    { data: [
+      { id: "coding-default", modelID: "gpt-5.2", providerID: "openai", name: "Coding default", enabled: true },
+      { id: "anthropic/claude-sonnet-4.5", modelID: "claude-sonnet-4.5", providerID: "openrouter", name: "Sonnet", enabled: true },
+    ] },
+    { data: [{ id: "openai", name: "OpenAI" }, { id: "openrouter", name: "OpenRouter" }] },
+    { data: { id: "coding-default", modelID: "gpt-5.2", providerID: "openai", name: "Coding default" } },
+  );
+  assert.deepEqual(aliased, {
+    currentModelId: "openai/coding-default",
+    models: [
+      { id: "openai/coding-default", name: "OpenAI Coding default" },
+      { id: "openrouter/anthropic/claude-sonnet-4.5", name: "OpenRouter Sonnet" },
+    ],
+  });
 });
 
 test("OpenCode 2 client sends Basic auth and hides unauthorized bodies", async () => {
@@ -348,6 +364,72 @@ test("runOpenCodeV2Turn authenticates, keeps the user prompt unchanged, and stre
   for (const request of requests) {
     assert.equal(request.headers.Authorization, buildOpenCodeBasicAuthorization("opencode", "s3cret"));
   }
+});
+
+test("runOpenCodeV2Turn continues when the instruction entry is rejected", async () => {
+  const requests = [];
+  const encoder = new TextEncoder();
+  const sse = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        type: "session.text.delta",
+        data: { sessionID: "ses_1", delta: "Hello" },
+      })}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        type: "session.execution.succeeded",
+        data: { sessionID: "ses_1" },
+      })}\n\n`));
+      controller.close();
+    },
+  });
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), method: init.method, body: init.body });
+    const path = new URL(url).pathname;
+    if (path === "/api/session" && init.method === "POST") return jsonResponse({ data: { id: "ses_1" } });
+    if (path.includes("/instructions/")) {
+      return new Response(JSON.stringify({ message: "value must be an object" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (path === "/api/event") {
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (path.endsWith("/prompt")) return jsonResponse({ data: { id: "msg_1" } });
+    return jsonResponse({ data: {} });
+  };
+  const events = [];
+  const result = await runOpenCodeV2Turn({
+    prompt: "hello",
+    systemPrompt: "netcatty context",
+    emitter: {
+      sessionId: (id) => events.push(["session", id]),
+      text: (text) => events.push(["text", text]),
+      emitDone: () => events.push(["done"]),
+      emitError: (message) => events.push(["error", message]),
+      warning: (id, message) => events.push(["warning", id, message]),
+    },
+    openCodeV2Factory: async () => ({
+      client: createOpenCodeV2Client({
+        baseUrl: "http://127.0.0.1:4096",
+        username: "opencode",
+        password: "s3cret",
+        fetchImpl,
+      }),
+      server: { close() {} },
+    }),
+  });
+  assert.equal(result.sessionId, "ses_1");
+  assert.deepEqual(events, [
+    ["session", "ses_1"],
+    ["warning", "opencode-v2-context", "ai.opencode.v2.contextSkipped"],
+    ["text", "Hello"],
+    ["done"],
+  ]);
+  const prompt = requests.find((request) => request.url.endsWith("/prompt"));
+  assert.equal(JSON.parse(prompt.body).text, "hello");
+  const instruction = requests.find((request) => request.url.includes("/instructions/"));
+  assert.equal(JSON.parse(instruction.body).value, "netcatty context");
 });
 
 test("runOpenCodeV2Turn reports a rejected prompt without waiting on the event stream", { timeout: 2000 }, async () => {
