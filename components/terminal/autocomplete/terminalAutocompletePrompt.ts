@@ -234,7 +234,7 @@ export function computeSnippetAcceptClearSequence(options: {
   const replaceWord = currentWord.length > 0
     && line.endsWith(currentWord)
     && (wordIndex > 0 || isProgramInputPromptText(options.promptText));
-  if (replaceWord) return "\b".repeat(currentWord.length);
+  if (replaceWord) return "\b".repeat(Array.from(currentWord).length);
 
   return isWindowsShellLineInput(options.os, options.promptText)
     ? "\b".repeat(line.length)

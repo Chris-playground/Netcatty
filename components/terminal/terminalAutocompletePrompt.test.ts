@@ -297,6 +297,14 @@ test("snippet accept deletes only the mid-line word (#3622)", () => {
     }),
     "\b\b\b",
   );
+  assert.equal(
+    computeSnippetAcceptClearSequence({
+      line: "git pull \u{1F680}",
+      os: "linux",
+      promptText: "user@host:~$ ",
+    }),
+    "\b",
+  );
 });
 
 test("program input prompts keep snippet suggestions only (#3622)", () => {
