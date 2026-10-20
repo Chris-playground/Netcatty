@@ -63,13 +63,29 @@ test("shouldBlockAutocompleteForSensitivePrompt blocks auth-challenge prompts", 
 test("shouldBlockAutocompleteForSensitivePrompt lets safe program prompts past the untrusted latch", () => {
   // observeTerminalInputPrompt latches every untrusted colon prompt, including
   // `Email:`, before limitSuggestionsForPrompt can offer snippets.
-  assert.equal(
-    shouldBlockAutocompleteForSensitivePrompt({
-      sensitiveInputActive: true,
-      promptText: "Email: ",
-    }),
-    false,
-  );
+  for (const promptText of [
+    "Email: ",
+    "email:",
+    "E-mail: ",
+    "EMAIL ADDRESS: ",
+    "Enter your username: ",
+    "user: ",
+    "User Name: ",
+    "Login: ",
+    "Name: ",
+    "\u90ae\u7bb1: ",
+    "\u90ae\u7bb1\uFF1A",
+    "\u7528\u6237\u540d: ",
+  ]) {
+    assert.equal(
+      shouldBlockAutocompleteForSensitivePrompt({
+        sensitiveInputActive: true,
+        promptText,
+      }),
+      false,
+      promptText,
+    );
+  }
   assert.equal(
     shouldBlockAutocompleteForSensitivePrompt({
       sensitiveInputActive: true,
@@ -77,6 +93,33 @@ test("shouldBlockAutocompleteForSensitivePrompt lets safe program prompts past t
     }),
     true,
   );
+});
+
+test("shouldBlockAutocompleteForSensitivePrompt keeps the latch for unknown and secret labels", () => {
+  for (const promptText of [
+    "API key:",
+    "API key: ",
+    "Recovery key: ",
+    "Token: ",
+    "TOKEN:",
+    "Password: ",
+    "Passphrase: ",
+    "Secret: ",
+    "PIN: ",
+    "OTP: ",
+    "One-time password: ",
+    "Favorite color: ",
+    "SSH key: ",
+  ]) {
+    assert.equal(
+      shouldBlockAutocompleteForSensitivePrompt({
+        sensitiveInputActive: true,
+        promptText,
+      }),
+      true,
+      promptText,
+    );
+  }
 });
 
 test("isSameAutocompleteQuery keeps late paths alive during live preview", () => {
