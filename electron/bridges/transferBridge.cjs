@@ -1830,6 +1830,16 @@ function execSshCommandCancellable(sshClient, command, transfer) {
   });
 }
 
+function markDisposableUploadChannel(channel) {
+  if (!channel || typeof channel !== "object") return channel;
+  // This subsystem can die without taking the shared browse connection with it.
+  try { channel.__netcattyDisposableChannel = true; } catch { /* ignore */ }
+  if (channel.sftp && typeof channel.sftp === "object" && channel.sftp !== channel) {
+    try { channel.sftp.__netcattyDisposableChannel = true; } catch { /* ignore */ }
+  }
+  return channel;
+}
+
 async function openIsolatedSftpChannel(client, signal = null) {
   // The dedicated one-channel login already holds its only session channel.
   // Opening another SFTP subsystem drops that login, so stay on the browse channel.
@@ -2468,7 +2478,9 @@ async function uploadFile(
   let isolated = null;
   if (!client.__netcattySudoMode) {
     try {
-      isolated = await openIsolatedSftpChannel(client, transfer?.signal);
+      isolated = markDisposableUploadChannel(
+        await openIsolatedSftpChannel(client, transfer?.signal),
+      );
     } catch (err) {
       rememberPipelineError(err);
       console.warn(
@@ -2534,7 +2546,9 @@ async function uploadFile(
 
   if (!isolated && !client.__netcattySudoMode) {
     try {
-      isolated = await openIsolatedSftpChannel(client, transfer?.signal);
+      isolated = markDisposableUploadChannel(
+        await openIsolatedSftpChannel(client, transfer?.signal),
+      );
     } catch (err) {
       rememberPipelineError(err);
       console.warn(
@@ -3118,7 +3132,7 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
 
     const onOpenChannelClosed = () => {
       onOpenChannelError(isWriteOpen
-        ? sftpChannelClosedError()
+        ? sftpChannelClosedError(null, sftp)
         : new Error("SFTP channel closed before the source file was opened"));
     };
 
@@ -3694,11 +3708,19 @@ async function readLocalRange(fileHandle, buffer, position, length) {
  */
 const sftpChannelDeathWaiters = new WeakMap();
 
-function sftpChannelClosedError(cause) {
+function disposableUploadChannel(sftp) {
+  return sftp?.__netcattyDisposableChannel === true
+    || sftp?.sftp?.__netcattyDisposableChannel === true;
+}
+
+function sftpChannelClosedError(cause, sftp) {
   const error = new Error("SFTP channel closed");
   error.code = "ERR_SFTP_CHANNEL_CLOSED";
   error.sftpChannelClosed = true;
-  error.noTransferFallback = true;
+  // The owner/borrowed/sudo channel is gone: do not fall through into another
+  // dial. A disposable upload subsystem can still fail over to the live browse
+  // channel.
+  if (!disposableUploadChannel(sftp)) error.noTransferFallback = true;
   if (cause) error.cause = cause;
   return error;
 }
@@ -3724,9 +3746,11 @@ function isSftpChannelLossError(error) {
 
 function normalizeSftpChannelLoss(sftp, error) {
   if (!error) return error;
-  if (error.sftpChannelClosed && error.noTransferFallback) return error;
+  if (error.sftpChannelClosed && (error.noTransferFallback || disposableUploadChannel(sftp))) {
+    return error;
+  }
   const dead = !sftp || sftp.readable === false || sftp.destroyed === true;
-  if (dead || isSftpChannelLossError(error)) return sftpChannelClosedError(error);
+  if (dead || isSftpChannelLossError(error)) return sftpChannelClosedError(error, sftp);
   return error;
 }
 
@@ -3782,7 +3806,7 @@ function watchSftpChannelDeath(sftp, onDeath) {
       channels,
       client,
       onError: (error) => fail(error || new Error("SFTP channel error")),
-      onClose: () => fail(sftpChannelClosedError(), { flushRequests: true }),
+      onClose: () => fail(sftpChannelClosedError(null, sftp), { flushRequests: true }),
       onClientError: (error) => {
         if (isSftpChannelLossError(error)) fail(error || sftpChannelClosedError());
       },
@@ -3807,7 +3831,7 @@ function watchSftpChannelDeath(sftp, onDeath) {
   if (alreadyDead) {
     queueMicrotask(() => {
       if (!entry.waiters.has(onDeath)) return;
-      onDeath(sftpChannelClosedError());
+      onDeath(sftpChannelClosedError(null, sftp));
     });
   }
   return () => {
