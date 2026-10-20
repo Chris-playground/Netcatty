@@ -420,9 +420,13 @@ function createExternalMcpHttpServer(deps = {}) {
 
     if (method === "GET" || method === "DELETE") {
       const sessionId = headerValue(req, "mcp-session-id");
-      const session = sessionId ? sessions.get(sessionId) : null;
-      if (!session) {
+      if (!sessionId) {
         sendJson(res, 400, jsonRpcError("Bad Request: missing session"));
+        return;
+      }
+      const session = sessions.get(sessionId);
+      if (!session) {
+        sendJson(res, 404, jsonRpcError("Session not found"));
         return;
       }
       await withSession(session, () => requestContext.run({ externalClient: session.externalClient }, () => (

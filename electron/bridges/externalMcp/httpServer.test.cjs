@@ -49,6 +49,29 @@ function postJson(url, { token, host, origin, body, sessionId }) {
   });
 }
 
+function requestSession(url, method, sessionId) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const headers = {
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${TOKEN}`,
+    };
+    if (sessionId) headers["mcp-session-id"] = sessionId;
+    const req = http.request({
+      hostname: target.hostname,
+      port: target.port,
+      path: target.pathname,
+      method,
+      headers,
+    }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 async function startServer(overrides = {}) {
   const calls = [];
   const server = createExternalMcpHttpServer({
@@ -229,6 +252,12 @@ describe("external MCP streamable HTTP server", () => {
       body: { jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
     });
     assert.equal(expired.status, 404);
+    const expiredGet = await requestSession(active.url, "GET", initialized.sessionId);
+    const expiredDelete = await requestSession(active.url, "DELETE", initialized.sessionId);
+    assert.equal(expiredGet.status, 404);
+    assert.equal(expiredDelete.status, 404);
+    const missing = await requestSession(active.url, "GET", "");
+    assert.equal(missing.status, 400);
   });
 
   it("is not listening after stop", async () => {
