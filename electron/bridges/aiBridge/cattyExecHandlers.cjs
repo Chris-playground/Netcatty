@@ -75,6 +75,7 @@ async function proxyCattyExecToWorker({
       commandBlocklist: mcpServerBridge.getCommandBlocklist?.(),
     }, {
       webContentsId: event?.sender?.id,
+      beforeExecute,
     });
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };

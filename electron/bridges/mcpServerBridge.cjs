@@ -1808,7 +1808,7 @@ function buildTerminalToolGuidance(toolHints) {
   return "";
 }
 
-async function handleWorkerTerminalExec(params = {}) {
+async function handleWorkerTerminalExec(params = {}, beforeExecute) {
   const { sessionId, command } = params;
   if (!sessionId || !command) throw new Error("sessionId and command are required");
   if (typeof command !== "string" || !command.trim()) {
@@ -1856,7 +1856,7 @@ async function handleWorkerTerminalExec(params = {}) {
       sessionMeta: meta,
       enforceWallTimeout: true,
       commandBlocklist,
-    }, {});
+    }, typeof beforeExecute === "function" ? { beforeExecute } : {});
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   } finally {
@@ -1865,7 +1865,7 @@ async function handleWorkerTerminalExec(params = {}) {
   }
 }
 
-async function handleWorkerJobStart(params = {}) {
+async function handleWorkerJobStart(params = {}, beforeExecute) {
   const { sessionId, command } = params;
   if (!sessionId || !command) throw new Error("sessionId and command are required");
   if (typeof command !== "string" || !command.trim()) {
@@ -1907,7 +1907,7 @@ async function handleWorkerJobStart(params = {}) {
       commandTimeoutMs,
       sessionMeta: meta,
       commandBlocklist,
-    }, {});
+    }, typeof beforeExecute === "function" ? { beforeExecute } : {});
     if (result?.ok && result.jobId) {
       if (pendingStart.cancelled || closingTerminalSessions.has(sessionId)) {
         await waitForWorkerCleanup(terminalWorkerManager.request("netcatty:ai:jobStop", {
@@ -2259,10 +2259,10 @@ async function dispatch(method, params, approvalContext = {}) {
     // not only when the managed request entered the dispatcher.
     approvalContext.beforeExecute?.();
     if (capability?.id === "terminal.execute" && params?.sessionId && !sessions?.get?.(params.sessionId)) {
-      return await handleWorkerTerminalExec(params);
+      return await handleWorkerTerminalExec(params, approvalContext.beforeExecute);
     }
     if (capability?.id === "terminal.start" && params?.sessionId && !sessions?.get?.(params.sessionId)) {
-      return await handleWorkerJobStart(params);
+      return await handleWorkerJobStart(params, approvalContext.beforeExecute);
     }
     if (capability?.id === "terminal.poll" && workerBackgroundJobs.has(params?.jobId)) {
       return await handleWorkerJobPoll(params);

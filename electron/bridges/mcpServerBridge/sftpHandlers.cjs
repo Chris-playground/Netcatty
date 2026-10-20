@@ -318,9 +318,9 @@ function createSftpHandlerApi(ctx) {
             }
           },
         };
-        const useOuterAdmission = !!(
-          shouldProxySessionBackedSftpToWorker(params) && transferBridge?.runAdmittedTransfer
-        );
+        // Admit before opening the handle so the execution guard runs after
+        // queue waits for main-process transfers as well as worker transfers.
+        const useOuterAdmission = typeof transferBridge?.runAdmittedTransfer === "function";
         const runDownload = (skipAdmission) => withSessionBackedSftp(
           params,
           (payload) => transferBridge
@@ -407,9 +407,7 @@ function createSftpHandlerApi(ctx) {
             }
           },
         };
-        const useOuterAdmissionUpload = !!(
-          shouldProxySessionBackedSftpToWorker(params) && transferBridge?.runAdmittedTransfer
-        );
+        const useOuterAdmissionUpload = typeof transferBridge?.runAdmittedTransfer === "function";
         const runUpload = (skipAdmission) => withSessionBackedSftp(
           params,
           (payload) => transferBridge

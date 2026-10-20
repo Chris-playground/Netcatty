@@ -90,9 +90,10 @@ test("catty AI exec proxies to the terminal worker when the real session lives i
         sessionMeta: { protocol: "ssh", deviceType: "", hostname: "host.example" },
         commandBlocklist: [],
       },
-      options: { webContentsId: 7 },
+      options: { webContentsId: 7, beforeExecute: requests[0].options.beforeExecute },
     },
   ]);
+  assert.equal(typeof requests[0].options.beforeExecute, "function");
   assert.deepEqual(locks, [
     ["reserve", "ssh-1", "exec"],
     ["release", "ssh-1", "token-1"],
