@@ -80,14 +80,18 @@ export function prepareConnectionHost<T extends Host>(
     temporaryConnectionsAllowLegacyAlgorithms: resolved.temporaryConnectionsAllowLegacyAlgorithms,
   });
   const legacyUnchanged = (host.legacyAlgorithms === true) === legacyAlgorithms;
-  const deviceTypeUnchanged = resolved.temporaryConnectionsNetworkDeviceMode !== true
-    || host.deviceType === "network";
+  // Mosh and ET are stored as SSH plus a transport flag. Network device mode
+  // is a plain-SSH CLI behavior; stamping it onto those hosts makes later
+  // raw-host checks (such as the copy-session cwd probe) treat them as
+  // network gear.
+  const stampNetworkDevice = resolved.temporaryConnectionsNetworkDeviceMode === true
+    && host.moshEnabled !== true
+    && host.etEnabled !== true;
+  const deviceTypeUnchanged = !stampNetworkDevice || host.deviceType === "network";
   if (legacyUnchanged && deviceTypeUnchanged) return host;
   return {
     ...host,
     ...(legacyUnchanged ? {} : { legacyAlgorithms }),
-    ...(resolved.temporaryConnectionsNetworkDeviceMode === true
-      ? { deviceType: "network" as const }
-      : {}),
+    ...(stampNetworkDevice ? { deviceType: "network" as const } : {}),
   };
 }

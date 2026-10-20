@@ -104,6 +104,30 @@ test("temporary network device mode can be combined with the legacy algorithm op
   assert.equal(prepared.hostname, "192.0.2.10");
 });
 
+test("temporary Mosh and ET connections do not receive network device mode", () => {
+  const mosh = host({
+    ephemeral: true,
+    protocol: "ssh",
+    moshEnabled: true,
+    hostname: "10.1.1.1",
+  });
+  const et = host({
+    ephemeral: true,
+    protocol: "ssh",
+    etEnabled: true,
+    hostname: "10.1.1.1",
+  });
+  const options = {
+    temporaryConnectionsAllowLegacyAlgorithms: true,
+    temporaryConnectionsNetworkDeviceMode: true,
+  };
+
+  assert.equal(prepareConnectionHost(mosh, options).deviceType, undefined);
+  assert.equal(prepareConnectionHost(mosh, options).legacyAlgorithms, true);
+  assert.equal(prepareConnectionHost(et, options).deviceType, undefined);
+  assert.equal(prepareConnectionHost(et, options).legacyAlgorithms, true);
+});
+
 test("temporary telnet connections do not receive network device mode", () => {
   const telnet = host({
     ephemeral: true,
