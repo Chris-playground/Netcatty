@@ -131,6 +131,7 @@ import {
 import {
   keepImeCommittedTextThroughModifierKeyDowns,
   keepLateImeTextInsert,
+  markImeDeferralConsumedInput,
 } from "./imeModifierKeyDownSeenGuard";
 import { keepLiveImeTranscriptionSingle } from "./imeCompositionRewrite";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
@@ -2895,6 +2896,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const markKittyTextInput = (event: InputEvent) => {
     if (shouldCommitDeferredImeTextInput(imeTextInputDeferredKey, event)) {
       commitImeTextInput(event.data);
+      // This insert was already sent. Leave xterm's dedupe flag armed.
+      markImeDeferralConsumedInput(event);
       // Keep the helper textarea empty so the next composition does not treat
       // the deferred punctuation as pre-existing suffix text.
       try {

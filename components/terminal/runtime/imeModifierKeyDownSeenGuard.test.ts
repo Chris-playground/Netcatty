@@ -8,6 +8,7 @@ import {
   isModifierOnlyKeyDownEvent,
   keepImeCommittedTextThroughModifierKeyDowns,
   keepLateImeTextInsert,
+  markImeDeferralConsumedInput,
 } from "./imeModifierKeyDownSeenGuard";
 import { keepLiveImeTranscriptionSingle } from "./imeCompositionRewrite";
 
@@ -98,6 +99,10 @@ test("runtime installs the guard when the terminal is created", () => {
   assert.match(
     runtimeSource,
     /keepImeCommittedTextThroughModifierKeyDowns\(term\)/,
+  );
+  assert.match(
+    runtimeSource,
+    /commitImeTextInput\(event\.data\);\s*\/\/ This insert was already sent\. Leave xterm's dedupe flag armed\.\s*markImeDeferralConsumedInput\(event\);/,
   );
   const modifierAt = runtimeSource.indexOf("keepImeCommittedTextThroughModifierKeyDowns(term)");
   const lateAt = runtimeSource.indexOf("keepLateImeTextInsert(term)");
@@ -335,6 +340,33 @@ test("normal composition still commits once", async () => {
     await flushMacrotask();
     await flushMacrotask();
     assert.equal(sent.join(""), "\u4f60\u597d");
+  } finally {
+    closeTerminal(term);
+  }
+});
+
+test("insertText already committed by the IME deferral is not sent again", async () => {
+  // A deferred punctuation key whose keyup was swallowed stays armed across
+  // later keyCode 229 keydowns. markKittyTextInput then commits the eventual
+  // insertText before this guard runs; xterm must not emit that string too.
+  const { term, textarea, sent, win } = await openGuardedTerminal();
+  try {
+    const ancestor = textarea.parentElement;
+    assert.ok(ancestor);
+    ancestor.addEventListener("input", (event) => {
+      const input = event as InputEvent;
+      if (input.inputType !== "insertText" || !input.data) return;
+      markImeDeferralConsumedInput(event);
+      sent.push(input.data);
+    }, true);
+
+    dispatchKey(win, textarea, "keydown", "Enter", 229);
+    await flushMacrotask();
+    assert.deepEqual(sent, [], "the 0ms check still finds no text");
+
+    dispatchInsert(win, textarea, "qzmark");
+    assert.deepEqual(sent, ["qzmark"]);
+    assert.equal(term._core._keyDownSeen, true);
   } finally {
     closeTerminal(term);
   }

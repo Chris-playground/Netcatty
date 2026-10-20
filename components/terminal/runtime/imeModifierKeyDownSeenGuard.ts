@@ -75,6 +75,22 @@ function isImeTextInsert(event: {
 }
 
 /**
+ * insertText events the punctuation deferral already forwarded via
+ * `commitImeTextInput`. That handler runs on an ancestor during capture,
+ * before this guard, and the same event object reaches both.
+ */
+const imeDeferralConsumedInputs = new WeakSet<object>();
+
+/** Keep xterm from sending an insertText the IME deferral already committed. */
+export function markImeDeferralConsumedInput(event: object): void {
+  imeDeferralConsumedInputs.add(event);
+}
+
+function isImeDeferralConsumedInput(event: object): boolean {
+  return imeDeferralConsumedInputs.has(event);
+}
+
+/**
  * True when xterm's `_inputEvent` must be allowed to forward this insert.
  * The 0ms CompositionHelper check already ran and found nothing; the
  * committed text showed up on a later task. Clearing `_keyDownSeen` is the
@@ -82,7 +98,9 @@ function isImeTextInsert(event: {
  *
  * While that check is still scheduled, the textarea already holds the text
  * and the check will send it. Leaving the flag armed stops `_inputEvent`
- * from sending the same string again.
+ * from sending the same string again. The same holds when the punctuation
+ * deferral already committed this insert: its handler sent the text, so the
+ * flag must stay armed.
  */
 function shouldReleaseKeyDownSeenForLateImeInsert(state: {
   inputType?: string;
@@ -93,7 +111,9 @@ function shouldReleaseKeyDownSeenForLateImeInsert(state: {
   compositionActive: boolean;
   compositionSendPending: boolean;
   textareaCheckPending: boolean;
+  deferralConsumed: boolean;
 }): boolean {
+  if (state.deferralConsumed) return false;
   if (!isImeTextInsert(state)) return false;
   if (state.inputComposing) return false;
   if (!state.keyDownSeen || state.lastKeyCode !== IME_PROCESS_KEY_CODE) return false;
@@ -162,6 +182,7 @@ export function keepLateImeTextInsert(term: XTerm): void {
       // No helper means the 0ms check cannot be observed. Treat that as
       // still pending so a late insert is not forwarded twice.
       textareaCheckPending: helper == null || helper._textareaChangeTimer != null,
+      deferralConsumed: isImeDeferralConsumedInput(event),
     })) return;
     core._keyDownSeen = false;
   };
