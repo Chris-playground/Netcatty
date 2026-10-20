@@ -111,7 +111,7 @@ export type ShiftEnterSubmittedInput = {
 
 /** ESC immediately before a terminating CR is the legacy Alt+Enter line break. */
 function isAltEnterLineBreak(text: string): boolean {
-  return /\u001b\r\n?$/.test(text);
+  return text.endsWith("\u001b\r") || text.endsWith("\u001b\r\n");
 }
 
 export function getShiftEnterSubmittedInput(
