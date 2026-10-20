@@ -61,10 +61,10 @@ function loadDiscovery() {
 // it, so a missing, unreadable, or unparseable file at startup is the same
 // transient gap as a later re-read. Identity is port + token + pid (the same
 // triple `isCliDiscoveryFileCurrent` uses), because the OS may hand the new
-// bridge the same ephemeral port. A socket that closes, resets, or fails a
-// write while auth/verify or the follow-up status probe is in flight is retried the same
-// way: the process that accepted the handshake may already be gone. An
-// unchanged identity is not connected again, but the remaining delays still
+// bridge the same ephemeral port. A socket that closes or resets while
+// auth/verify is in flight is retried the same way: the process that accepted
+// the handshake may already be gone. An unchanged identity is not connected
+// again, but the remaining delays still
 // elapse so a rewrite later in the budget is observed. At most two extra
 // attempts (300ms + 900ms, ~1.2s). When every attempt fails, the original
 // error is surfaced unchanged.
@@ -86,17 +86,15 @@ function sameDiscoveryIdentity(left, right) {
 
 // Stale token: the bridge returns `{ ok: false }` (AUTH_FAILED) or, in the
 // live host, RPC -32001 "Authentication required. Send auth/verify with valid
-// token first." Transport loss is the handshake that dies with the old
-// process: the socket closes or resets, or the in-flight write fails.
-// Other RPC failures mean this bridge is current.
-function isTransportLoss(err) {
-  return err?.code === "CONNECTION_CLOSED"
-    || err?.code === "CONNECTION_ERROR"
-    || err?.code === "WRITE_FAILED";
-}
-
+// token first." A socket that closes or resets before that response arrives
+// is the same restart. Other RPC failures mean this bridge is current.
 function isRetryableConnectError(err) {
-  if (err?.code === "CONNECT_FAILED" || err?.code === "AUTH_FAILED" || isTransportLoss(err)) {
+  if (
+    err?.code === "CONNECT_FAILED"
+    || err?.code === "AUTH_FAILED"
+    || err?.code === "CONNECTION_CLOSED"
+    || err?.code === "CONNECTION_ERROR"
+  ) {
     return true;
   }
   return err?.code === "RPC_ERROR"
@@ -143,11 +141,8 @@ async function establishConnection(discovery) {
     try {
       const statusResult = await client.call("netcatty/getStatus", {});
       client.ingestBridgeStatus(statusResult);
-    } catch (err) {
-      // The peer can exit after auth succeeds and while this probe is in
-      // flight. Let the outer retry reread discovery. Other status failures
-      // keep the default RPC timeout.
-      if (isTransportLoss(err)) throw err;
+    } catch {
+      // Keep the default RPC timeout when bridge status cannot be fetched.
     }
 
     return {
