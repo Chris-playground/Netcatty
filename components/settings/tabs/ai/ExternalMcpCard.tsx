@@ -15,10 +15,12 @@ import {
   writeExternalMcpSilentSessions,
   writeSessionIdleTimeoutMinutes,
   readExternalMcpHttpAllowCustomBind,
+  readExternalMcpHttpClientHost,
   readExternalMcpHttpEnabled,
   readExternalMcpHttpListenAddress,
   readExternalMcpHttpPort,
   writeExternalMcpHttpAllowCustomBind,
+  writeExternalMcpHttpClientHost,
   writeExternalMcpHttpEnabled,
   writeExternalMcpHttpListenAddress,
   writeExternalMcpHttpPort,
@@ -264,6 +266,7 @@ export const ExternalMcpCard: React.FC = () => {
     port: readExternalMcpHttpPort(),
     allowCustomBind: readExternalMcpHttpAllowCustomBind(),
     listenAddress: readExternalMcpHttpListenAddress(),
+    clientHost: readExternalMcpHttpClientHost(),
   }));
   const [isRotatingHttpToken, setIsRotatingHttpToken] = useState(false);
   const [status, setStatus] = useState<ExternalMcpStatus | null>(null);
@@ -326,6 +329,7 @@ export const ExternalMcpCard: React.FC = () => {
       port: writeExternalMcpHttpPort(next.port),
       allowCustomBind: writeExternalMcpHttpAllowCustomBind(next.allowCustomBind),
       listenAddress: writeExternalMcpHttpListenAddress(next.listenAddress),
+      clientHost: writeExternalMcpHttpClientHost(next.clientHost),
     };
     setHttpSettings(normalized);
     const nextStatus = await getBridge()?.externalMcpSetConfig?.({
@@ -333,6 +337,7 @@ export const ExternalMcpCard: React.FC = () => {
       httpPort: normalized.port,
       httpAllowCustomBind: normalized.allowCustomBind,
       httpListenAddress: normalized.listenAddress,
+      httpClientHost: normalized.clientHost,
     });
     if (nextStatus && typeof nextStatus === "object") {
       setStatus(nextStatus as ExternalMcpStatus);

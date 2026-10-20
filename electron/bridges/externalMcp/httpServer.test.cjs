@@ -153,6 +153,39 @@ describe("external MCP streamable HTTP server", () => {
     active = null;
   });
 
+  it("returns 413 before closing an oversized request", async () => {
+    active = await startServer();
+    const payload = Buffer.alloc((4 * 1024 * 1024) + 64, 0x61);
+    const result = await new Promise((resolve, reject) => {
+      const target = new URL(active.url);
+      const req = http.request({
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "Content-Length": payload.length,
+          Authorization: `Bearer ${TOKEN}`,
+        },
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      });
+      req.on("error", reject);
+      req.end(payload);
+    });
+    assert.equal(result.status, 413);
+    assert.match(result.body, /Payload too large/);
+  });
+
   it("stop finishes while a client holds an incomplete request", async () => {
     active = await startServer();
     const socket = net.connect(active.port, "127.0.0.1");

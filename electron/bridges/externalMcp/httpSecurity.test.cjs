@@ -45,8 +45,11 @@ describe("external MCP HTTP security", () => {
     );
   });
 
-  it("uses loopback in the client URL when listening on every interface", () => {
-    assert.equal(buildClientUrl("0.0.0.0", 47391), "http://127.0.0.1:47391/mcp");
+  it("does not advertise loopback for a wildcard bind", () => {
+    assert.equal(buildClientUrl("0.0.0.0", 47391), null);
+    assert.equal(buildClientUrl("::", 47391, "127.0.0.1"), "http://127.0.0.1:47391/mcp");
+    assert.equal(buildClientUrl("0.0.0.0", 47391, "172.22.0.1"), "http://172.22.0.1:47391/mcp");
+    assert.equal(buildClientUrl("0.0.0.0", 47391, "0.0.0.0"), null);
     assert.equal(buildClientUrl("172.22.0.1", 47391), "http://172.22.0.1:47391/mcp");
   });
 

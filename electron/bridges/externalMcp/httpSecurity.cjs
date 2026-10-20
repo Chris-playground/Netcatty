@@ -64,8 +64,22 @@ function formatHostForUrl(host) {
   return host;
 }
 
-function buildClientUrl(listenAddress, port) {
-  const host = isWildcardBind(listenAddress) ? DEFAULT_EXTERNAL_MCP_HTTP_HOST : listenAddress;
+function normalizeClientHost(value) {
+  const address = String(value ?? "").trim();
+  if (!address) return { ok: true, address: "" };
+  if (net.isIP(address) === 0 || isWildcardBind(address)) {
+    return {
+      ok: false,
+      errorCode: "invalid_client_host",
+      error: "Client address must be a reachable IP, not 0.0.0.0 or ::.",
+    };
+  }
+  return { ok: true, address };
+}
+
+function buildClientUrl(listenAddress, port, clientHost) {
+  const host = isWildcardBind(listenAddress) ? String(clientHost || "").trim() : listenAddress;
+  if (!host || isWildcardBind(host) || net.isIP(host) === 0) return null;
   return `http://${formatHostForUrl(host)}:${port}${EXTERNAL_MCP_HTTP_PATH}`;
 }
 
@@ -166,6 +180,7 @@ module.exports = {
   MIN_EXTERNAL_MCP_HTTP_PORT,
   buildClientUrl,
   describeListenError,
+  normalizeClientHost,
   isAllowedHostname,
   isLoopbackHost,
   isWildcardBind,

@@ -19,6 +19,7 @@ export type ExternalMcpHttpViewStatus = {
   port?: number;
   listenAddress?: string;
   allowCustomBind?: boolean;
+  clientHost?: string;
   url?: string | null;
   bearerToken?: string | null;
   state?: string;
@@ -31,6 +32,7 @@ export type ExternalMcpHttpViewSettings = {
   port: number;
   allowCustomBind: boolean;
   listenAddress: string;
+  clientHost: string;
 };
 
 type ExternalMcpHttpSectionProps = {
@@ -43,6 +45,11 @@ type ExternalMcpHttpSectionProps = {
   onChange: (next: ExternalMcpHttpViewSettings) => void;
   onRotateToken: () => void;
 };
+
+function isWildcardAddress(value: string): boolean {
+  const address = value.trim();
+  return address === "0.0.0.0" || address === "::";
+}
 
 function isIpAddress(value: string): boolean {
   const address = value.trim();
@@ -73,11 +80,21 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
   const { t } = useI18n();
   const [portDraft, setPortDraft] = useState(String(settings.port || DEFAULT_EXTERNAL_MCP_HTTP_PORT));
   const [addressDraft, setAddressDraft] = useState(settings.listenAddress || "0.0.0.0");
+  const [clientHostDraft, setClientHostDraft] = useState(settings.clientHost || "");
   const [portError, setPortError] = useState(false);
   const [addressError, setAddressError] = useState(false);
+  const [clientHostError, setClientHostError] = useState(false);
 
-  const clientHost = settings.allowCustomBind ? (status?.listenAddress || settings.listenAddress) : "127.0.0.1";
-  const url = status?.url || buildExternalMcpHttpUrl(clientHost, settings.port);
+  const listenAddress = settings.allowCustomBind
+    ? (status?.listenAddress || settings.listenAddress)
+    : "127.0.0.1";
+  const advertisedHost = status?.clientHost ?? settings.clientHost;
+  const url = status
+    ? (status.url || "")
+    : buildExternalMcpHttpUrl(listenAddress, settings.port, advertisedHost);
+  const showClientHost = settings.allowCustomBind && (
+    isWildcardAddress(settings.listenAddress) || isWildcardAddress(addressDraft)
+  );
   const token = status?.bearerToken || "";
   const listening = Boolean(status?.listening);
   const statusLabel = listening
@@ -92,6 +109,8 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
   let errorText = "";
   if (portError) errorText = t("ai.externalMcp.http.invalidPort");
   else if (addressError) errorText = t("ai.externalMcp.http.invalidAddress");
+  else if (clientHostError) errorText = t("ai.externalMcp.http.invalidClientHost");
+  else if (status?.errorCode === "client_host_required") errorText = t("ai.externalMcp.http.clientHostRequired");
   else if (status?.errorCode === "port_in_use") {
     errorText = t("ai.externalMcp.http.portInUse", { port: String(status.port ?? settings.port) });
   } else if (status?.errorCode === "invalid_address") errorText = t("ai.externalMcp.http.invalidAddress");
@@ -107,6 +126,17 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
     setPortError(false);
     setPortDraft(String(port));
     if (port !== settings.port) onChange({ ...settings, port });
+  };
+
+  const commitClientHost = () => {
+    const clientHost = clientHostDraft.trim();
+    if (clientHost && (!isIpAddress(clientHost) || isWildcardAddress(clientHost))) {
+      setClientHostError(true);
+      return;
+    }
+    setClientHostError(false);
+    setClientHostDraft(clientHost);
+    if (clientHost !== settings.clientHost) onChange({ ...settings, clientHost });
   };
 
   const commitAddress = () => {
@@ -184,6 +214,25 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
                 setAddressError(false);
               }}
               onBlur={commitAddress}
+              className="w-36 rounded-md border border-border/60 bg-background px-2 py-1 font-mono text-sm"
+            />
+          </SettingRow>
+        ) : null}
+        {showClientHost ? (
+          <SettingRow
+            label={t("ai.externalMcp.http.clientHost")}
+            description={t("ai.externalMcp.http.clientHost.description")}
+          >
+            <input
+              type="text"
+              aria-label={t("ai.externalMcp.http.clientHost")}
+              placeholder={t("ai.externalMcp.http.clientHost.placeholder")}
+              value={clientHostDraft}
+              onChange={(event) => {
+                setClientHostDraft(event.currentTarget.value);
+                setClientHostError(false);
+              }}
+              onBlur={commitClientHost}
               className="w-36 rounded-md border border-border/60 bg-background px-2 py-1 font-mono text-sm"
             />
           </SettingRow>

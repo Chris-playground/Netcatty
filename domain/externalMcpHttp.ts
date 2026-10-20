@@ -8,10 +8,13 @@ function formatHostForUrl(host: string): string {
   return host;
 }
 
-export function buildExternalMcpHttpUrl(listenAddress: string, port: number): string {
-  const host = listenAddress === "0.0.0.0" || listenAddress === "::"
-    ? DEFAULT_EXTERNAL_MCP_HTTP_HOST
-    : listenAddress;
+function isWildcardBind(address: string): boolean {
+  return address === "0.0.0.0" || address === "::";
+}
+
+export function buildExternalMcpHttpUrl(listenAddress: string, port: number, clientHost = ""): string {
+  const host = isWildcardBind(listenAddress) ? clientHost.trim() : listenAddress;
+  if (!host || isWildcardBind(host)) return "";
   return `http://${formatHostForUrl(host)}:${port}${EXTERNAL_MCP_HTTP_PATH}`;
 }
 

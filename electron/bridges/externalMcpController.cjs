@@ -31,6 +31,8 @@ const {
   DEFAULT_EXTERNAL_MCP_HTTP_PORT,
   buildClientUrl,
   describeListenError,
+  isWildcardBind,
+  normalizeClientHost,
   normalizeHttpPort,
   normalizeListenAddress,
   resolveEffectiveListenAddress,
@@ -101,6 +103,7 @@ function createExternalMcpController(options = {}) {
   let httpPort = DEFAULT_EXTERNAL_MCP_HTTP_PORT;
   let httpAllowCustomBind = false;
   let httpListenAddress = "0.0.0.0";
+  let httpClientHost = "";
   let httpListening = false;
   let httpError = null;
   let httpErrorCode = null;
@@ -213,17 +216,25 @@ function createExternalMcpController(options = {}) {
     else if (httpEnabled && httpListening) httpState = "running";
     else if (httpEnabled && enabled) httpState = "starting";
     const listenAddress = effectiveHttpListenAddress();
+    const url = buildClientUrl(listenAddress, httpPort, httpClientHost);
+    let error = httpError;
+    let errorCode = httpErrorCode;
+    if (!errorCode && isWildcardBind(listenAddress) && !url) {
+      errorCode = "client_host_required";
+      error = "Enter the IP clients should connect to. 0.0.0.0 is not a reachable address.";
+    }
     return {
       enabled: httpEnabled,
       listening: httpListening,
       port: httpPort,
       listenAddress,
       allowCustomBind: httpAllowCustomBind,
-      url: buildClientUrl(listenAddress, httpPort),
+      clientHost: httpClientHost,
+      url,
       bearerToken: httpEnabled && enabled && lastKnownToken ? lastKnownToken : null,
       state: httpState,
-      error: httpError,
-      errorCode: httpErrorCode,
+      error,
+      errorCode,
     };
   }
 
@@ -577,6 +588,12 @@ function createExternalMcpController(options = {}) {
       } else if (!normalizedAddress.ok && (httpAllowCustomBind || config.httpAllowCustomBind)) {
         httpError = normalizedAddress.error;
         httpErrorCode = normalizedAddress.errorCode;
+      }
+    }
+    if (config.httpClientHost != null) {
+      const normalizedClientHost = normalizeClientHost(config.httpClientHost);
+      if (normalizedClientHost.ok && normalizedClientHost.address !== httpClientHost) {
+        httpClientHost = normalizedClientHost.address;
       }
     }
     if (config.rotateHttpToken === true && isEnabled()) {

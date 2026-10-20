@@ -20,9 +20,10 @@ test("HTTP client URL stays on loopback unless a specific listen address is set"
     buildExternalMcpHttpUrl("127.0.0.1", 47391),
     "http://127.0.0.1:47391/mcp",
   );
+  assert.equal(buildExternalMcpHttpUrl("0.0.0.0", 47391), "");
   assert.equal(
-    buildExternalMcpHttpUrl("0.0.0.0", 47391),
-    "http://127.0.0.1:47391/mcp",
+    buildExternalMcpHttpUrl("0.0.0.0", 47391, "172.22.0.1"),
+    "http://172.22.0.1:47391/mcp",
   );
   assert.equal(
     buildExternalMcpHttpUrl("172.22.0.1", 47391),

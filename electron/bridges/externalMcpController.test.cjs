@@ -258,12 +258,19 @@ describe("externalMcpController", () => {
     assert.equal(controller.getStatus().http.url, "http://127.0.0.1:47391/mcp");
     assert.equal(controller.getStatus().http.bearerToken, "tok-1");
 
+    controller.setConfig({ httpAllowCustomBind: true, httpListenAddress: "0.0.0.0" });
+    await controller.whenHttpSettled();
+    assert.equal(controller.getStatus().http.url, null);
+    assert.equal(controller.getStatus().http.errorCode, "client_host_required");
+    controller.setConfig({ httpClientHost: "172.22.0.1" });
+    assert.equal(controller.getStatus().http.url, "http://172.22.0.1:47391/mcp");
+
     await controller.setEnabled(false);
     await controller.whenHttpSettled();
     assert.equal(listening, false);
     assert.equal(controller.getStatus().http.listening, false);
     assert.equal(controller.getStatus().http.bearerToken, null);
-    assert.deepEqual(events, ["start", "stop"]);
+    assert.deepEqual(events, ["start", "start", "stop"]);
   });
 
   it("routes HTTP dispatch through the bridge handler and rotates the shared external token", async () => {

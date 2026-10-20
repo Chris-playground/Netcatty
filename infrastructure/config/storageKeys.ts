@@ -237,6 +237,8 @@ export const STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_PORT = 'netcatty_ai_external_mcp_h
 export const STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_ALLOW_CUSTOM_BIND = 'netcatty_ai_external_mcp_http_allow_custom_bind_v1';
 /** IP address used only when custom bind is enabled. */
 export const STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_LISTEN_ADDRESS = 'netcatty_ai_external_mcp_http_listen_address_v1';
+/** Address copied into client configs when the listener is a wildcard bind. */
+export const STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_CLIENT_HOST = 'netcatty_ai_external_mcp_http_client_host_v1';
 /** AI panel diagnostic hide list (comma-separated part names). */
 export const STORAGE_KEY_AI_PANEL_DIAGNOSTIC_HIDE = 'netcatty.aiDebug.hide';
 /** AI panel React profiler toggle. */

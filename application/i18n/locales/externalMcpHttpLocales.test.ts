@@ -17,6 +17,11 @@ const KEYS = [
   "ai.externalMcp.http.allowCustomBind.description",
   "ai.externalMcp.http.listenAddress",
   "ai.externalMcp.http.listenAddress.placeholder",
+  "ai.externalMcp.http.clientHost",
+  "ai.externalMcp.http.clientHost.description",
+  "ai.externalMcp.http.clientHost.placeholder",
+  "ai.externalMcp.http.clientHostRequired",
+  "ai.externalMcp.http.invalidClientHost",
   "ai.externalMcp.http.warning",
   "ai.externalMcp.http.url",
   "ai.externalMcp.http.token",
@@ -45,6 +50,8 @@ test("External MCP HTTP strings exist in every locale", () => {
   }
   assert.match(zhTW["ai.externalMcp.http.port"], /連接埠/);
   assert.match(zhTW["ai.externalMcp.http.listenAddress"], /位址/);
+  assert.match(zhTW["ai.externalMcp.http.clientHost"], /位址/);
+  assert.doesNotMatch(zhTW["ai.externalMcp.http.clientHost"], /地址/);
   assert.doesNotMatch(zhTW["ai.externalMcp.http.port"], /端口/);
   assert.doesNotMatch(zhTW["ai.externalMcp.http.listenAddress"], /地址/);
   assert.match(zhTW["ai.externalMcp.http.wslHint"], /鏡像網路/);

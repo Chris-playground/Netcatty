@@ -97,7 +97,6 @@ function readBody(req) {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
         fail(Object.assign(new Error("Payload too large"), { statusCode: 413 }));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -325,6 +324,9 @@ function createExternalMcpHttpServer(deps = {}) {
       try {
         raw = await readBody(req);
       } catch (error) {
+        if (error.statusCode === 413) {
+          res.once("finish", () => req.destroy());
+        }
         sendJson(res, error.statusCode || 400, jsonRpcError(error.statusCode === 413 ? "Payload too large" : "Invalid request body"));
         return;
       }

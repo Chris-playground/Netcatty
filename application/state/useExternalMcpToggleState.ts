@@ -4,6 +4,7 @@ import {
   STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED,
   STORAGE_KEY_AI_EXTERNAL_MCP_FOCUS_ON_HOST_OPEN,
   STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_ALLOW_CUSTOM_BIND,
+  STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_CLIENT_HOST,
   STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_ENABLED,
   STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_LISTEN_ADDRESS,
   STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_PORT,
@@ -114,6 +115,7 @@ export type ExternalMcpHttpSettings = {
   port: number;
   allowCustomBind: boolean;
   listenAddress: string;
+  clientHost: string;
 };
 
 type ExternalMcpConfig = {
@@ -124,6 +126,7 @@ type ExternalMcpConfig = {
   httpPort?: number;
   httpAllowCustomBind?: boolean;
   httpListenAddress?: string;
+  httpClientHost?: string;
 };
 
 type ExternalMcpBridge = {
@@ -320,24 +323,43 @@ export function writeExternalMcpHttpListenAddress(listenAddress: string): string
   return normalized;
 }
 
+export function normalizeExternalMcpHttpClientHost(value: string | null): string {
+  return (value ?? '').trim();
+}
+
+export function readExternalMcpHttpClientHost(): string {
+  return normalizeExternalMcpHttpClientHost(
+    localStorageAdapter.readString(STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_CLIENT_HOST),
+  );
+}
+
+export function writeExternalMcpHttpClientHost(clientHost: string): string {
+  const normalized = normalizeExternalMcpHttpClientHost(clientHost);
+  localStorageAdapter.writeString(STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_CLIENT_HOST, normalized);
+  emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_HTTP_CLIENT_HOST);
+  return normalized;
+}
+
 export function readExternalMcpHttpSettings(): ExternalMcpHttpSettings {
   return {
     enabled: readExternalMcpHttpEnabled(),
     port: readExternalMcpHttpPort(),
     allowCustomBind: readExternalMcpHttpAllowCustomBind(),
     listenAddress: readExternalMcpHttpListenAddress(),
+    clientHost: readExternalMcpHttpClientHost(),
   };
 }
 
 function httpConfigFromSettings(settings: ExternalMcpHttpSettings): Pick<
   ExternalMcpConfig,
-  'httpEnabled' | 'httpPort' | 'httpAllowCustomBind' | 'httpListenAddress'
+  'httpEnabled' | 'httpPort' | 'httpAllowCustomBind' | 'httpListenAddress' | 'httpClientHost'
 > {
   return {
     httpEnabled: settings.enabled,
     httpPort: settings.port,
     httpAllowCustomBind: settings.allowCustomBind,
     httpListenAddress: settings.listenAddress,
+    httpClientHost: settings.clientHost,
   };
 }
 
@@ -368,6 +390,7 @@ export function createExternalMcpStartupSyncPlan({
     port: DEFAULT_EXTERNAL_MCP_HTTP_PORT,
     allowCustomBind: false,
     listenAddress: '0.0.0.0',
+    clientHost: '',
   },
 }: {
   enabled: boolean;

@@ -435,6 +435,7 @@ describe("external MCP HTTP settings", () => {
         port: 47391,
         allowCustomBind: false,
         listenAddress: "0.0.0.0",
+        clientHost: "",
       });
       assert.equal(readExternalMcpHttpEnabled(), false);
       writeExternalMcpHttpEnabled(true);
