@@ -94,6 +94,65 @@ describe("external MCP streamable HTTP server", () => {
     assert.equal(active.calls.length, 0);
   });
 
+  it("rejects a request whose token was rotated while the body was incomplete", async () => {
+    let token = TOKEN;
+    let releaseAuth = () => {};
+    const authSeen = new Promise((resolve) => {
+      releaseAuth = resolve;
+    });
+    let tokenReads = 0;
+    active = await startServer({
+      getToken: () => {
+        tokenReads += 1;
+        if (tokenReads === 1) releaseAuth();
+        return token;
+      },
+    });
+    const payload = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {},
+    });
+    const result = await new Promise((resolve, reject) => {
+      const target = new URL(active.url);
+      const req = http.request({
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "Content-Length": Buffer.byteLength(payload),
+          Authorization: `Bearer ${TOKEN}`,
+        },
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      });
+      req.on("error", reject);
+      req.write(payload.slice(0, 8));
+      authSeen.then(() => {
+        token = "rotated-token";
+        req.end(payload.slice(8));
+      }).catch(reject);
+    });
+    await Promise.race([
+      authSeen,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("auth was not checked")), 2000)),
+    ]);
+    assert.equal(result.status, 401);
+    assert.ok(tokenReads >= 2);
+    assert.equal(active.calls.length, 0);
+  });
+
   it("rejects a rebinding Host and a foreign Origin before any tool dispatch", async () => {
     active = await startServer();
     const body = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };

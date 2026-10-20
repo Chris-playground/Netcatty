@@ -330,6 +330,13 @@ function createExternalMcpHttpServer(deps = {}) {
         sendJson(res, error.statusCode || 400, jsonRpcError(error.statusCode === 413 ? "Payload too large" : "Invalid request body"));
         return;
       }
+      // Auth ran before the body so a half-open POST could not stall the
+      // socket forever. Recheck after the body arrives so a token rotated
+      // while this request was incomplete cannot still dispatch.
+      if (!tokensEqual(presented, getToken())) {
+        sendJson(res, 401, jsonRpcError("Unauthorized", -32001));
+        return;
+      }
       let body;
       try {
         body = raw ? JSON.parse(raw) : undefined;
