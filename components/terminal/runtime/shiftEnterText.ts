@@ -109,10 +109,15 @@ export type ShiftEnterSubmittedInput = {
   lineEnding: "\r\n" | "\r" | "\n";
 };
 
+/** ESC immediately before a terminating CR is the legacy Alt+Enter line break. */
+function isAltEnterLineBreak(text: string): boolean {
+  return /\u001b\r\n?$/.test(text);
+}
+
 export function getShiftEnterSubmittedInput(
   text: string,
 ): ShiftEnterSubmittedInput | null {
-  if (isShiftEnterLineContinuationText(text)) return null;
+  if (isShiftEnterLineContinuationText(text) || isAltEnterLineBreak(text)) return null;
   const match = text.match(/^([^\r\n]*)(\r\n|\r|\n)$/);
   if (!match) return null;
   return {
