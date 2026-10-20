@@ -610,8 +610,8 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                     className={rowClass}
                     onClick={() => handleItemSelect(item)}
                   >
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
-                      <Zap size={16} />
+                    <div className="shrink-0 flex items-center justify-center bg-primary text-primary-foreground h-5 w-5 rounded-[5px]">
+                      <Zap className="h-3 w-3" />
                     </div>
                     <span className="min-w-0 truncate text-sm font-medium">{item.title}</span>
                   </div>
