@@ -416,7 +416,15 @@ async function* iterateSse(response, signal) {
   else signal?.addEventListener("abort", cancelReader, { once: true });
   try {
     while (!signal?.aborted) {
-      const next = await reader.read();
+      let next;
+      try {
+        next = await reader.read();
+      } catch (error) {
+        if (signal?.aborted || error?.name === "AbortError") return;
+        // undici reports a dead server as "terminated" or a closed socket.
+        // That text is not a user-facing chat error.
+        throw openCodeV2UserError("ai.opencode.v2.sessionFailed");
+      }
       if (signal?.aborted) break;
       const text = decoder.decode(next.value || new Uint8Array(), { stream: !next.done });
       for (const event of parser.push(text)) yield event;
@@ -1014,6 +1022,7 @@ async function runOpenCodeV2Turn({
     if (files.length) promptBody.files = files;
 
     let streamError = null;
+    let turnSettled = false;
     // The live /api/event stream does not replay. Wait until the server has
     // accepted the subscriber, then start reading, and only then post the prompt.
     const subscription = await client.openEventStream(streamAbort.signal);
@@ -1025,13 +1034,22 @@ async function runOpenCodeV2Turn({
           if (result.content) hasContent = true;
           if (result.error) {
             failed = true;
+            turnSettled = true;
             break;
           }
-          if (result.idle) break;
+          if (result.idle) {
+            turnSettled = true;
+            break;
+          }
+        }
+        if (!turnSettled && !signal?.aborted && !streamAbort.signal.aborted) {
+          streamError = openCodeV2UserError("ai.opencode.v2.sessionFailed");
         }
       } catch (error) {
-        if (signal?.aborted || error?.name === "AbortError") return;
-        streamError = error;
+        if (signal?.aborted || streamAbort.signal.aborted || error?.name === "AbortError") return;
+        streamError = isOpenCodeV2UserMessage(error?.message)
+          ? error
+          : openCodeV2UserError("ai.opencode.v2.sessionFailed");
       }
     })();
 

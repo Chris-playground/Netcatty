@@ -568,6 +568,108 @@ test("runOpenCodeV2Turn reports a rejected prompt without waiting on the event s
   ]);
 });
 
+test("runOpenCodeV2Turn maps a mid-stream server disconnect to a localized failure", async () => {
+  const encoder = new TextEncoder();
+  const disconnect = new TypeError("terminated");
+  disconnect.cause = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+  let sent = false;
+  const sse = new ReadableStream({
+    pull(controller) {
+      if (!sent) {
+        sent = true;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: "session.text.delta",
+          data: { sessionID: "ses_1", delta: "Hel" },
+        })}\n\n`));
+        return;
+      }
+      controller.error(disconnect);
+    },
+  });
+  const fetchImpl = async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/session" && init.method === "POST") return jsonResponse({ data: { id: "ses_1" } });
+    if (path === "/api/event") {
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (path.endsWith("/prompt")) return jsonResponse({ data: { id: "msg_1" } });
+    return new Response(null, { status: 204 });
+  };
+  const events = [];
+  const result = await runOpenCodeV2Turn({
+    prompt: "hello",
+    emitter: {
+      sessionId: (id) => events.push(["session", id]),
+      text: (text) => events.push(["text", text]),
+      emitDone: () => events.push(["done"]),
+      emitError: (message) => events.push(["error", message]),
+    },
+    openCodeV2Factory: async () => ({
+      client: createOpenCodeV2Client({
+        baseUrl: "http://127.0.0.1:4096",
+        username: "opencode",
+        password: "s3cret",
+        fetchImpl,
+      }),
+      server: { close() {} },
+    }),
+  });
+  assert.equal(result.sessionId, "ses_1");
+  assert.deepEqual(events, [
+    ["session", "ses_1"],
+    ["text", "Hel"],
+    ["error", "ai.opencode.v2.sessionFailed"],
+  ]);
+  assert.equal(JSON.stringify(events).includes("terminated"), false);
+  assert.equal(JSON.stringify(events).includes("other side closed"), false);
+});
+
+test("runOpenCodeV2Turn maps an event stream that ends before the turn finishes", async () => {
+  const encoder = new TextEncoder();
+  const sse = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        type: "session.text.delta",
+        data: { sessionID: "ses_1", delta: "Hel" },
+      })}\n\n`));
+      controller.close();
+    },
+  });
+  const fetchImpl = async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/session" && init.method === "POST") return jsonResponse({ data: { id: "ses_1" } });
+    if (path === "/api/event") {
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (path.endsWith("/prompt")) return jsonResponse({ data: { id: "msg_1" } });
+    return new Response(null, { status: 204 });
+  };
+  const events = [];
+  await runOpenCodeV2Turn({
+    prompt: "hello",
+    emitter: {
+      sessionId: (id) => events.push(["session", id]),
+      text: (text) => events.push(["text", text]),
+      emitDone: () => events.push(["done"]),
+      emitError: (message) => events.push(["error", message]),
+    },
+    openCodeV2Factory: async () => ({
+      client: createOpenCodeV2Client({
+        baseUrl: "http://127.0.0.1:4096",
+        username: "opencode",
+        password: "s3cret",
+        fetchImpl,
+      }),
+      server: { close() {} },
+    }),
+  });
+  assert.deepEqual(events, [
+    ["session", "ses_1"],
+    ["text", "Hel"],
+    ["error", "ai.opencode.v2.sessionFailed"],
+  ]);
+});
+
 test("listOpenCodeModels stays on the 1.x factory for OpenCode 1.x", async () => {
   resetOpenCodeListServerPool();
   let v1 = false;
