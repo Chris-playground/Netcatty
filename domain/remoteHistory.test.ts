@@ -11,6 +11,10 @@ import {
   isNetcattyManagedStartupHistoryCommand,
 } from './remoteHistory.ts';
 import { buildDockerExecShellCommand, buildDockerLogsCommand } from './systemManager/dockerShell.ts';
+import {
+  buildContainerLogsCommand,
+  buildKubectlLogsCommand,
+} from './systemManager/containerRuntime.ts';
 import { buildTmuxAttachCommand } from './systemManager/tmuxShell.ts';
 
 test('parseBashHistory: plain lines', () => {
@@ -199,6 +203,17 @@ test('isNetcattyAiHistoryCommand: detects AI PTY marker lines', () => {
 test('isNetcattyManagedStartupHistoryCommand: detects Docker and tmux terminal launch commands', () => {
   assert.equal(isNetcattyManagedStartupHistoryCommand(buildDockerExecShellCommand('587abcdef123')), true);
   assert.equal(isNetcattyManagedStartupHistoryCommand(buildDockerLogsCommand('587abcdef123')), true);
+  assert.equal(isNetcattyManagedStartupHistoryCommand(buildContainerLogsCommand('podman', '587abcdef123')), true);
+  assert.equal(
+    isNetcattyManagedStartupHistoryCommand(buildKubectlLogsCommand('kind-dev', 'default', 'api-0')),
+    true,
+  );
+  assert.equal(
+    isNetcattyManagedStartupHistoryCommand(
+      "printf '\\033[H\\033[2J\\033[3J'; _nc_docker_err=$(docker inspect 587abcdef123 2>&1 >/dev/null);",
+    ),
+    true,
+  );
   assert.equal(isNetcattyManagedStartupHistoryCommand(buildTmuxAttachCommand('my-session')), true);
   assert.equal(isNetcattyManagedStartupHistoryCommand(buildTmuxAttachCommand('my-session', 2)), true);
   assert.equal(isNetcattyManagedStartupHistoryCommand('docker ps -a'), false);
