@@ -345,8 +345,11 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             <ToggleRow
               label={t("hostDetails.x11Forwarding")}
               hint={t("hostDetails.x11Forwarding.desc")}
-              enabled={!!form.x11Forwarding}
-              onToggle={() => update("x11Forwarding", !form.x11Forwarding)}
+              enabled={!!(form.x11Forwarding ?? effectiveGroupDefaults?.x11Forwarding)}
+              onToggle={() => update(
+                "x11Forwarding",
+                !(form.x11Forwarding ?? effectiveGroupDefaults?.x11Forwarding),
+              )}
             />
           </HostDetailsSection>
         )}
