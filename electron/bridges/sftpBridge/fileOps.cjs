@@ -666,8 +666,13 @@ function createFileOpsApi(ctx) {
             };
           }
         } catch { /* optional */ }
-        // Transport-managed / session-backed: close channel + return lease only.
-        if (client.__netcattyRefHolder || client.__netcattyTransportManaged || client.__netcattySessionBacked) {
+        // Alias handles share the login channel. Closing the transfer id must
+        // not end that channel or the SFTP page listing dies with the upload.
+        if (client.__netcattySharedChannelAlias) {
+          client.__netcattyDisposed = true;
+          client.sftp = null;
+          try { await client.end?.(); } catch { /* alias end only detaches */ }
+        } else if (client.__netcattyRefHolder || client.__netcattyTransportManaged || client.__netcattySessionBacked) {
           try {
             if (client.sftp && typeof client.sftp.end === "function") client.sftp.end();
             else if (client.sftp && typeof client.sftp.close === "function") client.sftp.close();

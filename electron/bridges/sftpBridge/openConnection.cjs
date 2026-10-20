@@ -77,6 +77,13 @@ function shouldRegisterFreshSftpTransport(options) {
   return allowsSharedSftpTransport(options);
 }
 
+function sftpChannelIsLive(sftp) {
+  return !!sftp
+    && typeof sftp.readdir === "function"
+    && typeof sftp.stat === "function"
+    && typeof sftp.open === "function";
+}
+
 /** Sudo is part of the requested connection contract; never downgrade it. */
 async function openRequiredSudoSftp({
   connectSudoSftp,
@@ -768,6 +775,51 @@ function createOpenConnectionApi(ctx) {
     }
     
     /**
+     * A live SFTP channel that was not parked in the SSH transport registry
+     * (single-channel bastion, or sudo elevation). Another open must borrow
+     * that channel. A second subsystem drops TERM-SSHD / similar logins, and
+     * a fresh SSH dial would ask for OTP again.
+     */
+    function findAuthenticatedChannelOwner(endpointKey) {
+      if (!endpointKey || !sftpClients || typeof sftpClients.values !== "function") return null;
+      for (const client of sftpClients.values()) {
+        if (!client || client.__netcattyDisposed || client.__netcattySharedChannelAlias) continue;
+        if (client.__netcattyTransportManaged) continue;
+        if (client.__netcattyEndpointKey !== endpointKey) continue;
+        if (!client.__netcattySingleChannelSsh && !client.__netcattySudoMode) continue;
+        if (!sftpChannelIsLive(client.sftp)) continue;
+        return client;
+      }
+      return null;
+    }
+
+    function adoptAuthenticatedSftpChannel(endpoint, connId) {
+      const source = findAuthenticatedChannelOwner(buildEndpointKey(endpoint));
+      if (!source || typeof createSessionBackedSftpClient !== "function") return null;
+      const alias = createSessionBackedSftpClient(connId, source.client, {
+        singleChannelSsh: true,
+      });
+      alias.sftp = source.sftp;
+      alias.__netcattyFileProtocol = source.__netcattyFileProtocol || "sftp";
+      alias.__netcattySudoMode = !!source.__netcattySudoMode;
+      // Keep uploads on this channel. A disposable subsystem would either drop
+      // the single-channel login or bypass sudo elevation.
+      alias.__netcattySingleChannelSsh = true;
+      alias.__netcattySharedChannelAlias = true;
+      alias.__netcattyEndpointKey = source.__netcattyEndpointKey;
+      alias.__netcattyTransportManaged = false;
+      alias.end = async () => {
+        alias.__netcattyDisposed = true;
+        alias.sftp = null;
+      };
+      sftpClients.set(connId, alias);
+      return {
+        sftpId: connId,
+        fileProtocol: alias.__netcattyFileProtocol === "scp" ? "scp" : "sftp",
+      };
+    }
+
+    /**
      * Open a new SFTP connection
      * Supports jump host connections when options.jumpHosts is provided
      */
@@ -777,6 +829,23 @@ function createOpenConnectionApi(ctx) {
         sftpSudo: Boolean(options.sudo),
       });
       let pendingDialCoordination = options._pendingDialCoordination || null;
+
+      // Do this before dial coordination. An in-flight single-channel login is
+      // the dial leader and never registers a transport; joining it waits
+      // forever and never shows keyboard-interactive.
+      if (options.reuseTransport !== false && !pendingDialCoordination) {
+        const adopted = adoptAuthenticatedSftpChannel(reuseEndpoint, connId);
+        if (adopted) {
+          sendSftpProgress(
+            event.sender,
+            connId,
+            options.hostname,
+            "connected",
+            "reused authenticated SFTP session",
+          );
+          return adopted;
+        }
+      }
 
       const openOnSharedTransport = async (transport, detail = "reusing shared SSH transport") => {
         if (
@@ -870,6 +939,20 @@ function createOpenConnectionApi(ctx) {
               : await waitForTransportDial(coordination);
             return await openOnSharedTransport(transport, "reused coordinated transport");
           } catch (coordinationErr) {
+            // The leader may have published a live channel and then rejected
+            // this dial (single-channel bastion, or sudo which is not parked).
+            // Adopt that channel before failing the transfer or dialing again.
+            const adopted = adoptAuthenticatedSftpChannel(reuseEndpoint, connId);
+            if (adopted) {
+              sendSftpProgress(
+                event.sender,
+                connId,
+                options.hostname,
+                "connected",
+                "reused authenticated SFTP session",
+              );
+              return adopted;
+            }
             if (
               coordination.role === "join"
               && coordinationErr?.code !== "ERR_SFTP_SINGLE_CHANNEL_BASTION"
@@ -1399,6 +1482,21 @@ function createOpenConnectionApi(ctx) {
           client.client.__netcattySingleChannelSsh = peerSingleChannelSsh;
         }
         sftpClients.set(connId, client);
+
+        // Publish the live channel before rejecting waiters. A single-channel
+        // login cannot join the transport registry; leaving the dial pending
+        // makes the next SFTP-page transfer wait forever with no OTP prompt.
+        if (pendingDialCoordination && !client.__netcattyTransportManaged) {
+          const unshared = new Error(
+            peerSingleChannelSsh || options.singleChannelSsh === true
+              ? "This host allows one SSH channel. Reuse the authenticated SFTP session instead of opening another."
+              : "SFTP connection was not added to the shared SSH transport registry",
+          );
+          if (peerSingleChannelSsh || options.singleChannelSsh === true) {
+            unshared.code = "ERR_SFTP_SINGLE_CHANNEL_BASTION";
+          }
+          failTransportDial(pendingDialCoordination, unshared);
+        }
     
         // Store jump connections for cleanup when SFTP is closed (legacy path
         // only — transport-managed connections park chain on the registry).

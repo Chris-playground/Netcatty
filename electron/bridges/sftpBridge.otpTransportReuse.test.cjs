@@ -199,7 +199,7 @@ function makeSftpHandlers(files, dirs) {
   };
 }
 
-function startOtpOnlyServer() {
+function startOtpOnlyServer(serverOptions = {}) {
   return new Promise((resolve, reject) => {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const files = new Map();
@@ -209,6 +209,7 @@ function startOtpOnlyServer() {
 
     const sshServer = new Server({
       hostKeys: [privateKey.export({ type: "pkcs1", format: "pem" })],
+      ...(serverOptions.ident ? { ident: serverOptions.ident } : {}),
     }, (client) => {
       client.on("authentication", (ctx) => {
         if (ctx.method === "keyboard-interactive") {
@@ -250,6 +251,7 @@ function startOtpOnlyServer() {
       files,
       dirs,
       getKeyboardInteractiveRounds: () => keyboardInteractiveRounds,
+      getConnectionCount: () => sockets.size,
       close: () => new Promise((done) => {
         // Include clients still waiting for authentication, before registration.
         for (const socket of sockets) socket.destroy();
@@ -464,4 +466,185 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     true,
     "drifted dial must still register a transport-managed client",
   );
+});
+
+test("single-channel OTP SFTP reuses the authenticated channel instead of hanging (#3310)", { timeout: 20000 }, async (t) => {
+  // TERM-SSHD allows one session channel. The SFTP page login succeeds, but
+  // that connection is intentionally not parked as a shareable transport.
+  // A transfer must reuse the live channel (no second OTP) and must not wait
+  // forever on the login dial.
+  const server = await startOtpOnlyServer({ ident: "TERM-SSHD" });
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => {
+    pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  });
+
+  const pendingOpens = [];
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  transferBridge.init({ sftpClients });
+
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try {
+        await sftpBridge.closeSftp(null, { sftpId });
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
+    }
+    pool.discardAllTransports("test-end");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  t.after(async () => {
+    await server.close();
+    await Promise.allSettled(pendingOpens);
+  });
+
+  const options = BASE_OPTIONS(server.port);
+  const browseSender = createSender();
+  const browseOpen = sftpBridge.openSftp(
+    { sender: browseSender },
+    { ...options, sessionId: "sftp-browse-single-channel" },
+  );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {});
+  await waitFor(
+    () => answerOtpPrompts(browseSender),
+    { message: "single-channel SFTP login must surface the OTP prompt" },
+  );
+  const browse = await browseOpen;
+  assert.equal(server.getKeyboardInteractiveRounds(), 1);
+  assert.equal(server.getConnectionCount(), 1);
+  const browseClient = sftpClients.get(browse.sftpId);
+  assert.equal(browseClient?.__netcattySingleChannelSsh, true);
+  assert.notEqual(browseClient?.__netcattyTransportManaged, true);
+
+  const transferSender = createSender();
+  const transferOpen = sftpBridge.openSftp(
+    { sender: transferSender },
+    { ...options },
+  );
+  pendingOpens.push(transferOpen);
+  let transferOpenSettled = false;
+  transferOpen.then(
+    () => { transferOpenSettled = true; },
+    () => { transferOpenSettled = true; },
+  );
+  const transferPrompted = () => transferSender.sent.some(
+    (entry) => entry.channel === "netcatty:keyboard-interactive",
+  );
+  await waitFor(() => transferOpenSettled || transferPrompted(), {
+    timeoutMs: 4000,
+    message: "single-channel transfer open must not wait forever for another OTP",
+  });
+  assert.equal(transferPrompted(), false, "transfer must reuse the authenticated channel");
+  const transfer = await transferOpen;
+  const transferClient = sftpClients.get(transfer.sftpId);
+  assert.equal(transferClient?.__netcattySharedChannelAlias, true);
+  assert.equal(server.getKeyboardInteractiveRounds(), 1);
+  assert.equal(server.getConnectionCount(), 1, "transfer must not dial a second SSH connection");
+
+  const tempRoot = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("otp-single-channel-upload")}-`);
+  t.after(() => {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+  const localFile = path.join(tempRoot, "upload.txt");
+  const payload = Buffer.from("single-channel otp upload\n");
+  fs.writeFileSync(localFile, payload);
+  const streamResult = await transferBridge.startTransfer(
+    { sender: { send() {} } },
+    {
+      transferId: "otp-single-channel-stream-1",
+      sourcePath: localFile,
+      targetPath: "/home/otpuser/single-channel-upload.txt",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: transfer.sftpId,
+      targetEncoding: "utf-8",
+      totalBytes: payload.length,
+    },
+  );
+  assert.equal(streamResult?.error, undefined, `upload must finish: ${streamResult?.error}`);
+  assert.equal(
+    Buffer.from(server.files.get("/home/otpuser/single-channel-upload.txt") || Buffer.alloc(0)).toString("utf-8"),
+    payload.toString("utf-8"),
+  );
+  assert.equal(server.getKeyboardInteractiveRounds(), 1);
+
+  await sftpBridge.closeSftp(null, { sftpId: transfer.sftpId });
+  assert.equal(sftpClients.has(transfer.sftpId), false);
+  const browseChannel = await sftpBridge.requireSftpChannel(browseClient);
+  assert.equal(typeof browseChannel?.stat, "function", "closing the transfer alias must keep the login channel");
+  await new Promise((resolve, reject) => {
+    browseChannel.stat("/home/otpuser/single-channel-upload.txt", (err) => (err ? reject(err) : resolve()));
+  });
+
+  // Without the live channel, a later open must surface OTP instead of
+  // joining the login dial forever.
+  sftpClients.delete(browse.sftpId);
+  const freshSender = createSender();
+  const freshOpen = sftpBridge.openSftp(
+    { sender: freshSender },
+    { ...options, sessionId: "sftp-single-channel-redial" },
+  );
+  pendingOpens.push(freshOpen);
+  freshOpen.catch(() => {});
+  await waitFor(
+    () => freshSender.sent.some((entry) => entry.channel === "netcatty:keyboard-interactive"),
+    { timeoutMs: 4000, message: "a required new connection must surface OTP instead of hanging" },
+  );
+  assert.ok(answerOtpPrompts(freshSender));
+  const fresh = await freshOpen;
+  assert.ok(fresh.sftpId);
+  assert.equal(server.getKeyboardInteractiveRounds(), 2);
+});
+
+test("sudo SFTP-page transfer reuses the elevated channel instead of dialing again", async (t) => {
+  pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => {
+    pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  });
+  const sftpClients = new Map();
+  sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  const options = {
+    hostname: "sudo.example",
+    hostId: "host-sudo-otp",
+    port: 22,
+    username: "root",
+    authMethod: "password",
+    sudo: true,
+    verifyHostKeys: false,
+    fileProtocol: "sftp",
+    useSshAgent: false,
+  };
+  const endpoint = pool.buildConnectionReuseEndpoint(options, { sftpSudo: true });
+  let channelEnded = false;
+  const channel = {
+    readdir() {},
+    stat() {},
+    open() {},
+    end() { channelEnded = true; },
+  };
+  sftpClients.set("browse-sudo", {
+    client: {},
+    sftp: channel,
+    __netcattyEndpointKey: pool.buildEndpointKey(endpoint),
+    __netcattySudoMode: true,
+    __netcattyFileProtocol: "sftp",
+    __netcattyTransportManaged: false,
+  });
+
+  const opened = await sftpBridge.openSftp({ sender: createSender() }, options);
+  const alias = sftpClients.get(opened.sftpId);
+  assert.equal(alias?.__netcattySharedChannelAlias, true);
+  assert.equal(alias?.sftp, channel, "upload must keep the already-elevated SFTP channel");
+  assert.equal(opened.fileProtocol, "sftp");
+
+  await sftpBridge.closeSftp(null, { sftpId: opened.sftpId });
+  assert.equal(sftpClients.has(opened.sftpId), false);
+  assert.equal(channelEnded, false, "closing the transfer must not drop the sudo login channel");
+  assert.equal(sftpClients.has("browse-sudo"), true);
 });
