@@ -32,10 +32,14 @@ function thumbnailSizeForDisplay(display) {
 
 function largestThumbnailSize(displays) {
   if (!displays.length) return { width: 1920, height: 1080 };
-  return displays.reduce((best, display) => {
+  let width = 1;
+  let height = 1;
+  for (const display of displays) {
     const size = thumbnailSizeForDisplay(display);
-    return size.width * size.height > best.width * best.height ? size : best;
-  }, thumbnailSizeForDisplay(displays[0]));
+    width = Math.max(width, size.width);
+    height = Math.max(height, size.height);
+  }
+  return { width, height };
 }
 
 function pushThumbnail(images, image) {

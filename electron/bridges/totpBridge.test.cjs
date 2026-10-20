@@ -81,6 +81,28 @@ test("screen capture scans each unmatched source once", async () => {
   assert.deepEqual(images.map((image) => image.bitmap.toString()), ["left", "right"]);
 });
 
+test("screen capture uses the largest width and height across orientations", async () => {
+  let thumbnailSize;
+  await captureScreenBitmaps({
+    screen: {
+      getAllDisplays: () => [
+        { id: 1, size: { width: 3840, height: 2160 }, scaleFactor: 1 },
+        { id: 2, size: { width: 2160, height: 3840 }, scaleFactor: 1 },
+      ],
+    },
+    desktopCapturer: {
+      getSources: async (options) => {
+        thumbnailSize = options.thumbnailSize;
+        return [
+          { id: "landscape", display_id: "1", thumbnail: thumbnail("landscape") },
+          { id: "portrait", display_id: "2", thumbnail: thumbnail("portrait") },
+        ];
+      },
+    },
+  });
+  assert.deepEqual(thumbnailSize, { width: 3840, height: 3840 });
+});
+
 test("screen capture keeps a matched display and still scans an unmatched source", async () => {
   const images = await captureScreenBitmaps({
     screen: {
