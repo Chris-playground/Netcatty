@@ -125,3 +125,35 @@ test("legacy SSH session without connRef still ends its own connection + chain",
   assert.equal(chain[0].ended, 1);
   assert.equal(chain[1].ended, 1);
 });
+
+test("renderer destruction closes its SSH shell through normal close while other shell and SFTP leases survive", () => {
+  const EventEmitter = require("node:events");
+  const { trackRendererSessionLifetime } = require("./rendererSessionLifetime.cjs");
+  const { borrowTransport, returnTransport } = require("./sshConnectionPool.cjs");
+  const sessions = new Map();
+  terminalBridge.init({ sessions, electronModule: {} });
+  const conn = makeConn();
+  const owner = makeSession(conn, null);
+  const transport = createConnectionRef(owner, conn, []);
+  const copy = makeSession(conn, null);
+  acquireConnectionRef(copy, transport);
+  const sftpHolder = {};
+  borrowTransport(transport, { kind: "sftp", holder: sftpHolder });
+  sessions.set("owner", owner);
+  sessions.set("copy", copy);
+  const contents = new EventEmitter();
+  contents.id = 7;
+  trackRendererSessionLifetime(sessions, "copy", contents, terminalBridge.closeSession);
+  contents.emit("destroyed");
+  assert.equal(copy.stream.closed, 1);
+  assert.equal(owner.stream.closed, 0);
+  assert.equal(conn.ended, 0);
+  assert.equal(transport.count, 2);
+  assert.equal(sessions.has("copy"), false);
+  assert.equal(sessions.has("owner"), true);
+  terminalBridge.closeSession({}, { sessionId: "owner" });
+  assert.equal(transport.count, 1, "SFTP lease survives the last shell closing");
+  assert.equal(conn.ended, 0);
+  returnTransport(sftpHolder);
+  assert.equal(transport.state, "idle");
+});
