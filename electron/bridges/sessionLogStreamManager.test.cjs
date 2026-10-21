@@ -10,6 +10,7 @@ const {
   forgetSessionLog,
   getSessionLogToken,
   forgetInactiveSessionLog,
+  withSessionLogRestart,
   registerProgrammaticCommandLogRewrite,
   registerSudoAutofillInput,
   startStream,
@@ -1116,3 +1117,51 @@ test("conditional log invalidation clears only the observed inactive stream toke
   assert.equal(forgetInactiveSessionLog(sessionId, first.token), false, "a new finalized log survives");
   assert.equal(await prepareSessionLog(sessionId), newPath);
 });
+
+for (const outcome of ["success", "throw", "failure", "different-session", "new-active", "new-finalized", "manual"]) {
+  test(`fallback restart wrapper preserves the correct saved log (${outcome})`, async (t) => {
+    const directory = path.join(TEMP_ROOT, `fallback-${outcome}-${Date.now()}`);
+    const sessionId = `fallback-${outcome}`;
+    const oldPath = path.join(directory, "old.txt");
+    const newPath = path.join(directory, "new.txt");
+    const event = { sender: { id: 9 } };
+    const payload = { sessionId, sessionLog: { enabled: false } };
+    t.after(async () => {
+      await stopStream(sessionId, getSessionLogToken(sessionId));
+      forgetSessionLog(sessionId);
+      fs.rmSync(directory, { recursive: true, force: true });
+    });
+    startStreamToFile(sessionId, { filePath: oldPath, format: "txt", stopRequiresToken: outcome === "manual" });
+    appendData(sessionId, "previous output\n");
+    if (outcome !== "manual") await stopStream(sessionId);
+    const previousToken = getSessionLogToken(sessionId);
+    const start = withSessionLogRestart(async (receivedEvent, receivedPayload) => {
+      assert.equal(receivedEvent, event);
+      assert.equal(receivedPayload, payload);
+      assert.equal(await prepareSessionLog(sessionId), oldPath, "pending starts retain the old target");
+      if (outcome === "throw") throw new Error("authentication failed");
+      if (outcome === "failure") return { sessionId, success: false, error: "connection refused" };
+      if (outcome === "different-session") return { sessionId: "different" };
+      if (outcome.startsWith("new-")) {
+        startStreamToFile(sessionId, { filePath: newPath, format: "txt" });
+        appendData(sessionId, "new output\n");
+        if (outcome === "new-finalized") await stopStream(sessionId);
+      }
+      return { sessionId };
+    });
+    if (outcome === "throw") await assert.rejects(start(event, payload), /authentication failed/);
+    else {
+      const result = await start(event, payload);
+      assert.equal(result.sessionId, outcome === "different-session" ? "different" : sessionId);
+    }
+    if (outcome === "success") {
+      assert.equal(await prepareSessionLog(sessionId), null);
+    } else {
+      const newLog = outcome.startsWith("new-");
+      assert.equal(await prepareSessionLog(sessionId), newLog ? newPath : oldPath);
+      if (newLog) assert.notEqual(getSessionLogToken(sessionId), previousToken);
+      else assert.equal(getSessionLogToken(sessionId), previousToken);
+      assert.equal(hasStream(sessionId), outcome === "manual" || outcome === "new-active");
+    }
+  });
+}

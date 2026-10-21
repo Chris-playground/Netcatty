@@ -1621,7 +1621,9 @@ function registerHandlers(ipcMain, options = {}) {
       });
     });
   } else {
-    ipcMain.handle("netcatty:start", startSSHSessionWrapper);
+    ipcMain.handle("netcatty:start", options.manageSessionLogRestart === true
+      ? sessionLogStreamManager.withSessionLogRestart(startSSHSessionWrapper)
+      : startSSHSessionWrapper);
     ipcMain.handle("netcatty:ssh:exec", execCommand);
     ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
     ipcMain.handle("netcatty:ssh:remoteInfo", getSessionRemoteInfo);

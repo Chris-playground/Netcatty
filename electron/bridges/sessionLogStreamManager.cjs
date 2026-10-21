@@ -569,6 +569,21 @@ function forgetInactiveSessionLog(sessionId, expectedToken) {
   return sessionLogs.delete(sessionId);
 }
 
+/** Main-process fallback starts do not pass through the worker's lifecycle
+ * guard. Retire their prior inactive log only after a successful same-id start.
+ */
+function withSessionLogRestart(handler) {
+  return async (event, payload) => {
+    const sessionId = payload?.sessionId;
+    const previousToken = getSessionLogToken(sessionId);
+    const result = await handler(event, payload);
+    if (sessionId && result?.sessionId === sessionId && result.success !== false && !result.error) {
+      forgetInactiveSessionLog(sessionId, previousToken);
+    }
+    return result;
+  };
+}
+
 function hasSessionLog(sessionId) {
   return sessionLogs.has(sessionId);
 }
@@ -617,6 +632,7 @@ module.exports = {
   forgetSessionLog,
   getSessionLogToken,
   forgetInactiveSessionLog,
+  withSessionLogRestart,
   hasSessionLog,
   hasStream,
   getActiveLogPaths,
