@@ -15,6 +15,7 @@ const tempDirBridge = require("./tempDirBridge.cjs");
 const {
   DOWNLOAD_TRANSFER_CONCURRENCY,
   TRANSFER_CHUNK_SIZE,
+  SMALL_UPLOAD_SHARED_MAX_BYTES,
   UPLOAD_TRANSFER_CONCURRENCY,
 } = require("./transferLimits.cjs");
 
@@ -6122,7 +6123,7 @@ test("fastPut fallback fails closed when prior isolated write OPEN gate never se
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE, 62);
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 62);
   const localPath = path.join(tempDir, "upload.bin");
   const targetPath = "/tmp/upload-fastput-gate-timeout.bin";
   const remoteFiles = new Map([[targetPath, Buffer.from("old")]]);
@@ -6263,7 +6264,7 @@ test("later same-path upload fails promptly after prior write OPEN gate is poiso
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE, 63);
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 63);
   const localPath = path.join(tempDir, "upload.bin");
   const targetPath = "/tmp/upload-inplace-gate-fail-closed.bin";
   const remoteFiles = new Map([[targetPath, Buffer.from("old")]]);
@@ -6655,7 +6656,7 @@ test("path gate poison clears after late original OPEN settles past successor", 
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE, 66);
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 66);
   const localPath = path.join(tempDir, "upload.bin");
   const targetPath = "/tmp/upload-inplace-gate-poison-clear.bin";
   const remoteFiles = new Map([[targetPath, Buffer.from("old")]]);
@@ -7035,7 +7036,7 @@ test("path gate poison clears after owning isolated transport ends", async (t) =
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE, 67);
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 67);
   const localPath = path.join(tempDir, "upload.bin");
   const targetPath = "/tmp/upload-inplace-gate-transport-clear.bin";
   const remoteFiles = new Map([[targetPath, Buffer.from("old")]]);
@@ -13096,7 +13097,7 @@ test("a closed disposable upload channel falls back once to the healthy shared c
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-disposable-upload-fallback-"));
   t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
   const localPath = path.join(tempDir, "fresh.bin");
-  const payload = Buffer.from("disposable-fallback");
+  const payload = Buffer.concat([Buffer.from("disposable-fallback"), Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES)]);
   await fs.promises.writeFile(localPath, payload);
   const targetPath = "/tmp/fresh.bin";
   const remoteFiles = new Map();
