@@ -520,10 +520,11 @@ const attachCsvProxyJumpChains = (
       ...existingHosts.filter((candidate) => csvJumpEndpointMatches(hop, candidate)),
     ];
     if (endpointMatches.length > 0) return pickCsvJumpCandidate(endpointMatches, group).id;
-    const labelMatches = matchable.filter((candidate) => csvJumpLabelMatches(hop, candidate));
+    const labelMatches = [
+      ...matchable.filter((candidate) => csvJumpLabelMatches(hop, candidate)),
+      ...existingHosts.filter((candidate) => csvJumpLabelMatches(hop, candidate)),
+    ];
     if (labelMatches.length > 0) return pickCsvJumpCandidate(labelMatches, group).id;
-    const existingLabel = existingHosts.filter((candidate) => csvJumpLabelMatches(hop, candidate));
-    if (existingLabel.length > 0) return pickCsvJumpCandidate(existingLabel, group).id;
 
     const inlineKey = `${hop.hostname.toLowerCase()}|${csvJumpPort(hop.port)}|${(hop.username ?? "").toLowerCase()}`;
     const existingInline = inlineHosts.find((host) => (

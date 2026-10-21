@@ -790,6 +790,23 @@ test("CSV import prefers a same-group existing hop over a cross-group imported m
   assert.deepEqual(app?.hostChain, { hostIds: [existing.id] });
 });
 
+test("CSV import prefers a same-group existing label hop over a cross-group imported label", () => {
+  const existing = chainHost("vault-jump", "Bastion", "vault-bastion.internal", "alice");
+  existing.group = "Prod";
+  const imported = importVaultHostsFromText("csv", [
+    "Groups,Label,Hostname,Username,ProxyJump",
+    "Other,Bastion,other-bastion.internal,alice,",
+    "Prod,App,app.example.com,root,alice@Bastion",
+  ].join("\n"), { existingHosts: [existing] });
+
+  const app = imported.hosts.find((host) => host.hostname === "app.example.com");
+  const importedBastion = imported.hosts.find((host) => host.hostname === "other-bastion.internal");
+  assert.equal(importedBastion?.group, "Other");
+  assert.equal(importedBastion?.label, "Bastion");
+  assert.notEqual(importedBastion?.id, existing.id);
+  assert.deepEqual(app?.hostChain, { hostIds: [existing.id] });
+});
+
 test("CSV import warns and ignores a ProxyJump value that is not a jump host", () => {
   const imported = importVaultHostsFromText("csv", [
     "Hostname,Username,ProxyJump",
