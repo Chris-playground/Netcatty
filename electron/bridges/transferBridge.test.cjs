@@ -12000,6 +12000,229 @@ test("unfingerprinted upload retry restarts when the local source keeps its size
   assert.deepEqual(remote, rewritten);
 });
 
+async function dropLocalUploadPastHeadSample(sourcePath, transferId, totalBytes, failAt) {
+  const sender = createSender();
+  const dropping = createFastSftp({
+    open(_path, _flags, callback) {
+      callback(null, Buffer.from("drop-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, position, callback) {
+      if (position >= failAt) {
+        setTimeout(
+          () => callback(new Error("SFTP channel closed")),
+          Math.floor(failAt / TRANSFER_CHUNK_SIZE) * 250 + 50,
+        );
+        return;
+      }
+      setTimeout(() => callback(null), Math.floor(position / TRANSFER_CHUNK_SIZE) * 250);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      throw new Error("serial WriteStream must not run");
+    },
+  });
+  transferBridge.init({
+    sftpClients: new Map([["target", {
+      __netcattySudoMode: true,
+      sftp: dropping,
+      stat: async () => ({ size: 0 }),
+      rename: async () => {},
+      delete: async () => {},
+    }]]),
+  });
+  const failed = await transferBridge.startTransfer({ sender }, {
+    transferId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes,
+    resumable: true,
+    checkpointBytes: 0,
+  });
+  assert.match(failed.error || "", /channel closed|pipelined upload failed/i);
+  const published = sender.sent
+    .filter((entry) => entry.channel === "netcatty:transfer:progress")
+    .map((entry) => Number(entry.payload?.checkpointBytes) || 0);
+  const checkpoint = published.reduce((max, value) => Math.max(max, value), 0);
+  assert.ok(checkpoint > 256 * 1024, `published checkpoint ${checkpoint} must pass the head sample`);
+  return checkpoint;
+}
+
+test("unfingerprinted upload retry restarts when a same-size same-mtime rewrite hits the prefix", async (t) => {
+  // Restoring mtime hides a same-size rewrite from the stat check. The edit
+  // sits past the 256 KiB head sample, in the 64 KiB just before the checkpoint,
+  // which is the prefix resume would keep. Writes are staggered past the
+  // progress throttle so that checkpoint is actually published.
+  const headBytes = 256 * 1024;
+  const windowBytes = 64 * 1024;
+  const failAt = headBytes + windowBytes;
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-prefix-mtime-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const transferId = `prefix-mtime-${crypto.randomUUID()}`;
+  const sourcePath = path.join(tempDir, "source.bin");
+  const original = Buffer.alloc(failAt + TRANSFER_CHUNK_SIZE + 17);
+  for (let index = 0; index < original.length; index += 1) original[index] = (index * 5) % 251;
+  await fs.promises.writeFile(sourcePath, original);
+  const stamp = new Date(Math.floor(Date.now() / 1000) * 1000);
+  await fs.promises.utimes(sourcePath, stamp, stamp);
+
+  const checkpoint = await dropLocalUploadPastHeadSample(
+    sourcePath,
+    transferId,
+    original.length,
+    failAt,
+  );
+  const editAt = checkpoint - 1;
+  assert.ok(editAt >= headBytes);
+  assert.ok(checkpoint - editAt <= windowBytes);
+
+  const before = await fs.promises.stat(sourcePath);
+  const rewritten = Buffer.from(original);
+  rewritten[editAt] = rewritten[editAt] === 9 ? 10 : 9;
+  await fs.promises.writeFile(sourcePath, rewritten);
+  await fs.promises.utimes(sourcePath, before.atime, before.mtime);
+  const after = await fs.promises.stat(sourcePath);
+  assert.equal(after.size, before.size);
+  assert.equal(after.mtimeMs, before.mtimeMs);
+
+  let remote = Buffer.from(original.subarray(0, checkpoint + 40));
+  let minWritePosition = Infinity;
+  const concurrentSftp = createFastSftp({
+    open(_path, flags, callback) {
+      if (flags === "w") remote = Buffer.alloc(0);
+      callback(null, Buffer.from("resume-handle"));
+    },
+    setstat(_path, attrs, callback) {
+      if (attrs && Number.isFinite(attrs.size)) remote = remote.subarray(0, attrs.size);
+      callback(null);
+    },
+    write(_handle, buffer, offset, length, position, callback) {
+      minWritePosition = Math.min(minWritePosition, position);
+      const chunk = buffer.subarray(offset, offset + length);
+      if (remote.length < position) {
+        remote = Buffer.concat([remote, Buffer.alloc(position - remote.length)]);
+      }
+      remote = Buffer.concat([
+        remote.subarray(0, position),
+        chunk,
+        remote.subarray(Math.min(remote.length, position + chunk.length)),
+      ]);
+      callback(null);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      throw new Error("serial WriteStream must not run");
+    },
+  });
+  transferBridge.init({
+    sftpClients: new Map([["target", {
+      __netcattySudoMode: true,
+      sftp: concurrentSftp,
+      stat: async () => ({ size: remote.length }),
+      rename: async () => {},
+      delete: async () => {},
+    }]]),
+  });
+
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: rewritten.length,
+    resumable: true,
+    checkpointBytes: checkpoint,
+  });
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(minWritePosition, 0);
+  assert.deepEqual(remote, rewritten);
+});
+
+test("unfingerprinted upload retry keeps a checkpoint past the head sample when the source is unchanged", async (t) => {
+  const failAt = (256 + 64) * 1024;
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-prefix-same-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+  const transferId = `prefix-same-${crypto.randomUUID()}`;
+  const sourcePath = path.join(tempDir, "source.bin");
+  const original = Buffer.alloc(failAt + TRANSFER_CHUNK_SIZE + 17, 7);
+  await fs.promises.writeFile(sourcePath, original);
+  const checkpoint = await dropLocalUploadPastHeadSample(
+    sourcePath,
+    transferId,
+    original.length,
+    failAt,
+  );
+
+  let remote = Buffer.from(original.subarray(0, checkpoint + 40));
+  let minWritePosition = Infinity;
+  const concurrentSftp = createFastSftp({
+    open(_path, flags, callback) {
+      if (flags === "w") remote = Buffer.alloc(0);
+      callback(null, Buffer.from("resume-handle"));
+    },
+    setstat(_path, attrs, callback) {
+      if (attrs && Number.isFinite(attrs.size)) remote = remote.subarray(0, attrs.size);
+      callback(null);
+    },
+    write(_handle, buffer, offset, length, position, callback) {
+      minWritePosition = Math.min(minWritePosition, position);
+      const chunk = buffer.subarray(offset, offset + length);
+      if (remote.length < position) {
+        remote = Buffer.concat([remote, Buffer.alloc(position - remote.length)]);
+      }
+      remote = Buffer.concat([
+        remote.subarray(0, position),
+        chunk,
+        remote.subarray(Math.min(remote.length, position + chunk.length)),
+      ]);
+      callback(null);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      throw new Error("serial WriteStream must not run");
+    },
+  });
+  transferBridge.init({
+    sftpClients: new Map([["target", {
+      __netcattySudoMode: true,
+      sftp: concurrentSftp,
+      stat: async () => ({ size: remote.length }),
+      rename: async () => {},
+      delete: async () => {},
+    }]]),
+  });
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: original.length,
+    resumable: true,
+    checkpointBytes: checkpoint,
+  });
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(minWritePosition, checkpoint);
+  assert.deepEqual(remote, original);
+});
+
 test("local resume after hard quit clamps checkpoint to durable staged file size", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-local-crash-"));
   t.after(async () => { await fs.promises.rm(tempDir, { recursive: true, force: true }); });
