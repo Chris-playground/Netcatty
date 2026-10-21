@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <a href="https://trendshift.io/repositories/18391?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-18391" target="_blank" rel="noopener noreferrer">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/18391/daily?language=TypeScript" alt="binaricat/Netcatty | Trendshift" width="250" height="55"/>
+  </a>
+</p>
+
+<p align="center">
   以 Electron、React 與 xterm.js 打造，介面精緻、功能完整的 SSH 工作區。<br/>
   🔥 內建 AI Agent · 分割終端 · Vault 檢視 · SFTP 工作流 · 自訂主題 —— 全部整合在一起。
 </p>
