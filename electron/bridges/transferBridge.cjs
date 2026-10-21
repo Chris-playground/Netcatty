@@ -1969,20 +1969,27 @@ async function truncateRemoteStagedToCheckpoint(client, stagedRemote, checkpoint
     const stat = await client.stat(encoded);
     const size = Math.max(0, Number(stat?.size) || 0);
     if (size <= checkpoint) return;
-    // Prefer native truncate when available (ssh2-sftp-client).
-    if (typeof client.truncate === "function") {
-      await client.truncate(encoded, checkpoint);
+    // ssh2's SFTP has no ftruncate, and ssh2-sftp-client has no truncate.
+    // SETSTAT { size } is what actually shortens a remote file. client.sftp is
+    // the raw ssh2 channel, same as the mode/mtime setstat calls above.
+    const sftp = client.sftp;
+    if (sftp && typeof sftp.setstat === "function") {
+      await new Promise((resolve, reject) => {
+        sftp.setstat(encoded, { size: checkpoint }, (err) => (err ? reject(err) : resolve()));
+      });
       return;
     }
-    if (typeof client.sftp?.ftruncate === "function" && typeof client.sftp?.open === "function") {
+    if (sftp && typeof sftp.fsetstat === "function" && typeof sftp.open === "function") {
       await new Promise((resolve, reject) => {
-        client.sftp.open(encoded, "r+", (openErr, handle) => {
+        sftp.open(encoded, "r+", (openErr, handle) => {
           if (openErr) return reject(openErr);
-          client.sftp.ftruncate(handle, checkpoint, (truncErr) => {
-            client.sftp.close(handle, () => {
-              if (truncErr) reject(truncErr);
-              else resolve();
-            });
+          sftp.fsetstat(handle, { size: checkpoint }, (statErr) => {
+            const finish = (err) => (err ? reject(err) : resolve());
+            if (typeof sftp.close === "function") {
+              sftp.close(handle, () => finish(statErr));
+              return;
+            }
+            finish(statErr);
           });
         });
       });

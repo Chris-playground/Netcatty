@@ -11720,6 +11720,16 @@ test("retry after a dropped upload resumes writes at the checkpoint", async (t) 
       }
       callback(null, Buffer.from("resume-handle"));
     },
+    // ssh2 SFTP trims with SETSTAT size. It has no ftruncate, and
+    // ssh2-sftp-client has no truncate.
+    setstat(_path, attrs, callback) {
+      if (attrs && Number.isFinite(attrs.size)) {
+        trimmedTo = attrs.size;
+        remote = remote.subarray(0, attrs.size);
+        rememberSize();
+      }
+      callback(null);
+    },
     write(_handle, buffer, offset, length, position, callback) {
       minWritePosition = Math.min(minWritePosition, position);
       const chunk = buffer.subarray(offset, offset + length);
@@ -11745,14 +11755,12 @@ test("retry after a dropped upload resumes writes at the checkpoint", async (t) 
     __netcattySudoMode: true, // shared concurrent path only
     sftp: concurrentSftp,
     stat: async () => ({ size: remote.length }),
-    truncate: async (_path, size) => {
-      trimmedTo = size;
-      remote = remote.subarray(0, size);
-      rememberSize();
-    },
     rename: async () => {},
     delete: async () => {},
   };
+  assert.equal(typeof client.truncate, "undefined");
+  assert.equal(typeof concurrentSftp.ftruncate, "undefined");
+  assert.equal(typeof concurrentSftp.setstat, "function");
   transferBridge.init({ sftpClients: new Map([["target", client]]) });
 
   const result = await transferBridge.startTransfer({ sender: createSender() }, {
@@ -11771,6 +11779,84 @@ test("retry after a dropped upload resumes writes at the checkpoint", async (t) 
   assert.equal(minWritePosition, checkpoint);
   assert.equal(trimmedTo, checkpoint);
   assert.ok(smallestRemote >= checkpoint, `stage shrank below the checkpoint: ${smallestRemote}`);
+  assert.deepEqual(remote, payload);
+});
+
+test("retry trim falls back to fsetstat when setstat is missing", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-drop-fsetstat-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const transferId = `drop-fsetstat-${crypto.randomUUID()}`;
+  const sourcePath = path.join(tempDir, "source.bin");
+  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 3 + 9, 41);
+  await fs.promises.writeFile(sourcePath, payload);
+  const checkpoint = TRANSFER_CHUNK_SIZE * 2;
+  let remote = Buffer.from(payload.subarray(0, checkpoint + 40));
+  let minWritePosition = Infinity;
+  let trimmedTo = null;
+  const concurrentSftp = createFastSftp({
+    open(_path, flags, callback) {
+      if (flags === "w") remote = Buffer.alloc(0);
+      callback(null, Buffer.from("fsetstat-handle"));
+    },
+    fsetstat(_handle, attrs, callback) {
+      if (attrs && Number.isFinite(attrs.size)) {
+        trimmedTo = attrs.size;
+        remote = remote.subarray(0, attrs.size);
+      }
+      callback(null);
+    },
+    write(_handle, buffer, offset, length, position, callback) {
+      minWritePosition = Math.min(minWritePosition, position);
+      const chunk = buffer.subarray(offset, offset + length);
+      if (remote.length < position) {
+        remote = Buffer.concat([remote, Buffer.alloc(position - remote.length)]);
+      }
+      remote = Buffer.concat([
+        remote.subarray(0, position),
+        chunk,
+        remote.subarray(Math.min(remote.length, position + chunk.length)),
+      ]);
+      callback(null);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      throw new Error("serial WriteStream must not run");
+    },
+  });
+  delete concurrentSftp.setstat;
+  const client = {
+    __netcattySudoMode: true,
+    sftp: concurrentSftp,
+    stat: async () => ({ size: remote.length }),
+    rename: async () => {},
+    delete: async () => {},
+  };
+  assert.equal(typeof client.truncate, "undefined");
+  assert.equal(typeof concurrentSftp.ftruncate, "undefined");
+  assert.equal(typeof concurrentSftp.setstat, "undefined");
+  assert.equal(typeof concurrentSftp.fsetstat, "function");
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: true,
+    checkpointBytes: checkpoint,
+  });
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(minWritePosition, checkpoint);
+  assert.equal(trimmedTo, checkpoint);
   assert.deepEqual(remote, payload);
 });
 
