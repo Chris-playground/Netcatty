@@ -28,8 +28,16 @@ const SFTP_REQUEST_TIMEOUT_MS = 30_000;
 // channel pool caps - they must never fall back to serial body streams.
 const FAST_DOWNLOAD_CHANNELS_PER_SESSION = 1;
 
+// A file that fits in one READ fanout window (64 x 32KB) cannot hog the
+// session the way a multi-GB download can, so it skips the per-session slot
+// above and reads on the shared browse channel. Without this, folder downloads
+// of small files ran strictly one file at a time regardless of the transfer
+// concurrency setting.
+const SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES = DOWNLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE;
+
 module.exports = {
   DOWNLOAD_TRANSFER_CONCURRENCY,
+  SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES,
   FAST_DOWNLOAD_CHANNELS_PER_SESSION,
   SFTP_OPEN_TIMEOUT_MS,
   SFTP_REQUEST_TIMEOUT_MS,

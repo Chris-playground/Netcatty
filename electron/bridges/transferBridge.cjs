@@ -27,6 +27,7 @@ const { openBoundedSftpChannel } = require("./boundedSftpOpen.cjs");
 const {
   DOWNLOAD_TRANSFER_CONCURRENCY,
   FAST_DOWNLOAD_CHANNELS_PER_SESSION,
+  SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES,
   SFTP_OPEN_TIMEOUT_MS,
   SFTP_REQUEST_TIMEOUT_MS,
   TRANSFER_CHUNK_SIZE,
@@ -1839,6 +1840,9 @@ function markDisposableUploadChannel(channel) {
   }
   return channel;
 }
+
+// Mutable only for tests that exercise slot/isolated behaviour with tiny files.
+let smallDownloadSlotExemptBytes = SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES;
 
 async function openIsolatedSftpChannel(client, signal = null) {
   // The dedicated one-channel login already holds its only session channel.
@@ -5254,13 +5258,21 @@ async function downloadFile(
 
   // One session-wide fast-path slot for isolated + shared READ fanout (#1507).
   // Wait (cancelable) instead of degrading to serial createReadStream (#2719).
+  // Small files (one fanout window) skip the slot and the isolated channel and
+  // read on the shared browse channel, so folder downloads run in parallel.
+  const smallDownload = Number(fileSize) > 0
+    && Number(fileSize) <= smallDownloadSlotExemptBytes
+    && typeof sftp.open === "function"
+    && typeof sftp.read === "function";
   let holdSessionSlot = false;
   try {
-    await acquireSessionFastDownloadSlot(client, transfer);
-    holdSessionSlot = true;
+    if (!smallDownload) {
+      await acquireSessionFastDownloadSlot(client, transfer);
+      holdSessionSlot = true;
+    }
 
     // Prefer an isolated SFTP channel so cancellation cannot kill the browse session.
-    if (!client.__netcattySudoMode) {
+    if (!client.__netcattySudoMode && !smallDownload) {
       const fastSftp = await acquireIsolatedDownloadChannel(client, transfer);
       if (transfer.cancelled) {
         if (fastSftp) {
@@ -7850,4 +7862,7 @@ module.exports = {
   _assertLocalDownloadMatchesRemotePrefixForTests: assertLocalDownloadMatchesRemotePrefix,
   _hashRemotePrefixForTests: hashRemotePrefix,
   _remoteOpenPathMatchesStagedForTests: remoteOpenPathMatchesStaged,
+  _setSmallDownloadSlotExemptBytesForTests: (bytes) => {
+    smallDownloadSlotExemptBytes = bytes == null ? SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES : Math.max(0, Number(bytes) || 0);
+  },
 };
