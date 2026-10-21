@@ -6,6 +6,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import type { TransferTask } from "../../../domain/models";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
+import { latchTransferPauseTree, releaseTransferPauseTree } from "./transferPauseLatch";
 import { useSftpTransfers } from "./useSftpTransfers";
 
 type Frame = { id: number; callback: (time: number) => void; cancelled: boolean };
@@ -115,10 +116,17 @@ test("lifecycle frames keep the final completion, pause, cancel, and error statu
       { status: "completed" },
     ];
     for (const stage of stages) {
-      sftpTransferCenterStore.publishOwner(ownerId, [makeTask(taskId, stage.status, stage.error)]);
-      assert.notEqual(view.ops?.transfers.find((row) => row.id === taskId)?.status, stage.status);
-      assert.equal(queue.frames.filter((frame) => !frame.cancelled).length, 1);
-      assert.equal(await queue.flush(), 1);
+      await act(async () => {
+        sftpTransferCenterStore.publishOwner(ownerId, [makeTask(taskId, stage.status, stage.error)]);
+      });
+      const paintsNow = stage.status !== "transferring";
+      if (paintsNow) {
+        assert.equal(queue.frames.filter((frame) => !frame.cancelled).length, 0);
+      } else {
+        assert.notEqual(view.ops?.transfers.find((row) => row.id === taskId)?.status, stage.status);
+        assert.equal(queue.frames.filter((frame) => !frame.cancelled).length, 1);
+        assert.equal(await queue.flush(), 1);
+      }
       const painted = view.ops?.transfers.find((row) => row.id === taskId);
       assert.equal(painted?.status, stage.status);
       assert.equal(painted?.error, stage.error);
@@ -129,6 +137,62 @@ test("lifecycle frames keep the final completion, pause, cancel, and error statu
     }
   } finally {
     sftpTransferCenterStore.dismiss(taskId);
+    await view.unmount();
+    queue.restore();
+  }
+});
+
+test("parent pause paints while a child frame is pending and a stale publish cannot reopen it", async () => {
+  const ownerId = "lifecycle-flush-parent-pause";
+  const queue = installFrameQueue();
+  const view = mount(ownerId);
+  const parentId = "folder-parent";
+  const childId = "folder-child";
+  const parent = (status: TransferTask["status"]): TransferTask => ({
+    ...makeTask(parentId, status),
+    isDirectory: true,
+    progressMode: "files",
+    lifecycleEpoch: 4,
+  });
+  const child = (status: TransferTask["status"]): TransferTask => ({
+    ...makeTask(childId, status),
+    parentTaskId: parentId,
+    lifecycleEpoch: 4,
+  });
+  try {
+    await view.render();
+    sftpTransferCenterStore.publishOwner(ownerId, [parent("transferring"), child("transferring")]);
+    assert.equal(view.ops?.transfers.length, 0, "child lifecycle churn stays on the pending frame");
+    assert.equal(queue.frames.filter((frame) => !frame.cancelled).length, 1);
+
+    // Pause lands while that frame is still queued. Latch afterwards: the
+    // control-epoch guard drops a panel publish that arrives already latched,
+    // and Resume is the equal-epoch republish that happens only after unlatch.
+    await act(async () => {
+      sftpTransferCenterStore.publishOwner(ownerId, [parent("paused"), child("paused")]);
+    });
+    assert.equal(view.ops?.transfers.find((row) => row.id === parentId)?.status, "paused");
+    assert.equal(view.ops?.transfers.find((row) => row.id === childId)?.status, "paused");
+    assert.equal(queue.frames.filter((frame) => !frame.cancelled).length, 0, "pause cancels the pre-pause frame");
+
+    latchTransferPauseTree(parentId, [childId]);
+    await act(async () => {
+      sftpTransferCenterStore.publishOwner(ownerId, [parent("transferring"), child("paused")]);
+    });
+    await queue.flush();
+    assert.equal(sftpTransferCenterStore.getTask(parentId)?.status, "paused");
+    assert.equal(sftpTransferCenterStore.getTask(childId)?.status, "paused");
+    const paintedParent = view.ops?.transfers.find((row) => row.id === parentId);
+    assert.equal(paintedParent?.status, "paused");
+    assert.equal(
+      view.ops?.transfers.filter((row) => (
+        !row.parentTaskId && ["pending", "queued", "transferring", "pausing"].includes(row.status)
+      )).length,
+      0,
+    );
+  } finally {
+    releaseTransferPauseTree(parentId, [childId]);
+    sftpTransferCenterStore.dismiss(parentId);
     await view.unmount();
     queue.restore();
   }
