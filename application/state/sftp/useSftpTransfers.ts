@@ -249,6 +249,30 @@ export const useSftpTransfers = ({
   //
   // Do not pre-assign transfersRef before publishing the same array reference —
   // identity equality skips the store merge (avoids store↔listener loops).
+  // Lifecycle writers (child add/start/complete) fire several times per file.
+  // Repainting the whole SFTP view synchronously on each one saturates the
+  // renderer on folders with many small files, which then throttles the
+  // transfer itself. transfersRef/store stay authoritative; React state
+  // catches up once per frame.
+  const stateFlushHandleRef = useRef<{ cancel: () => void } | null>(null);
+  const scheduleTransfersStateFlush = useCallback(() => {
+    if (stateFlushHandleRef.current) return;
+    const flush = () => {
+      stateFlushHandleRef.current = null;
+      setTransfersState(transfersRef.current);
+    };
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      const id = window.requestAnimationFrame(flush);
+      stateFlushHandleRef.current = { cancel: () => window.cancelAnimationFrame(id) };
+    } else {
+      const id = setTimeout(flush, 16);
+      stateFlushHandleRef.current = { cancel: () => clearTimeout(id) };
+    }
+  }, []);
+  useEffect(() => () => {
+    stateFlushHandleRef.current?.cancel();
+    stateFlushHandleRef.current = null;
+  }, []);
   const setTransfers = useCallback((update: SetStateAction<TransferTask[]>) => {
     const prev = transfersRef.current;
     const next = typeof update === "function"
@@ -258,8 +282,8 @@ export const useSftpTransfers = ({
     sftpTransferCenterStore.publishOwner(ownerId, next);
     const canonical = sftpTransferCenterStore.getOwnerTasks(ownerId);
     transfersRef.current = canonical;
-    setTransfersState(canonical);
-  }, [ownerId]);
+    scheduleTransfersStateFlush();
+  }, [ownerId, scheduleTransfersStateFlush]);
 
   // Coalesce progress-only patches to one paint per animation frame. Without
   // this, each stream tick maps the full transfer list + publishOwner + store
@@ -2126,9 +2150,9 @@ export const useSftpTransfers = ({
     return sftpTransferCenterStore.subscribe(() => {
       const ownerRows = sftpTransferCenterStore.getSnapshot().tasks.filter((task) => task.ownerId === ownerId);
       transfersRef.current = ownerRows;
-      setTransfersState(ownerRows);
+      scheduleTransfersStateFlush();
     });
-  }, [ownerId]);
+  }, [ownerId, scheduleTransfersStateFlush]);
 
   useEffect(() => sftpTransferCenterStore.subscribeProgress(() => {
     const liveById = new Map(sftpTransferCenterStore.getSnapshot().tasks.map((task) => [task.id, task]));
