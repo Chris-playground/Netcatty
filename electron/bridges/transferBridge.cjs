@@ -3172,6 +3172,16 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
       // drop). ssh2 never answers a request issued after close, and the
       // end/close events above will not fire again, so OPEN — read or write —
       // would wait forever and leave the task frozen at "Transferring".
+      // No OPEN was sent. A write must release the path gate the same way a
+      // pre-OPEN failure does: the generic write-error path keeps a generated
+      // stage gate held, and a resumable upload skips the bounded fastPut
+      // wait, so every later strategy on this path would wait forever.
+      if (isWriteOpen) {
+        settle(reject, sftpChannelClosedError(null, sftp));
+        completeSharedWriteDrain();
+        releasePathGate();
+        return;
+      }
       onOpenChannelClosed();
       return;
     }
