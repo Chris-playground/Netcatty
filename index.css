@@ -680,21 +680,13 @@ html[data-theme-transition] *::after {
   box-shadow: 0 4px 12px hsl(var(--foreground) / 0.06);
 }
 
-@keyframes session-activity-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-
-  50% {
-    transform: scale(1.1);
-    opacity: 0.18;
-  }
-}
-
+/* Unread activity remains visible until acknowledged without keeping the
+   compositor animating after terminal output stops. The 8px status dot plus
+   its 2px gap and 1px outline fits inside the existing 20px tab content line.
+   Keep the dot's connection-status color; the extra outline marks unread output. */
 .session-activity-dot {
-  animation: session-activity-breathe 1.4s ease-in-out infinite;
+  outline: 1px solid color-mix(in srgb, var(--top-tabs-fg, hsl(var(--foreground))) 75%, transparent);
+  outline-offset: 2px;
 }
 
 @keyframes coding-cli-icon-pulse {
