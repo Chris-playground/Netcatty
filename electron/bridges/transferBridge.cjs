@@ -861,9 +861,17 @@ function raceLocalStreamOpenAgainstAbort(openPromise, signal) {
 
 // Local source reads go through asarSafeFs so real files named *.asar are not
 // mistaken for asar archives by Electron's fs wrapper (#3450).
+// Test seam: replace the local prefix stream for one byte length so a retry
+// re-hash can be held open until Cancel aborts it.
+let localPrefixHashStreamOverrideForTests = null;
+
 async function hashLocalPrefix(filePath, bytes, options) {
   if (!Number.isFinite(bytes) || bytes < 0) return Promise.resolve(null);
   if (bytes === 0) return Promise.resolve(EMPTY_SHA256_HEX);
+  const override = localPrefixHashStreamOverrideForTests;
+  if (override && Number(override.bytes) === bytes) {
+    return hashReadable(override.create(options), options);
+  }
   const stream = await raceLocalStreamOpenAgainstAbort(
     openLocalReadStream(filePath, { start: 0, end: bytes - 1 }),
     options?.signal,
@@ -1586,7 +1594,13 @@ let sftpClients = null;
 // being resumed. SHA-256 cannot rewind, so a checkpoint trimmed below the
 // covered offset drops the digest and restarts at 0. Kept in memory because
 // Retry is same-process — a relaunch with no fingerprint already restarts at 0.
+// Entries stay only while that task can still resume from the checkpoint.
 const localUploadAcknowledgedPrefix = new Map();
+const UPLOAD_PREFIX_SESSION_LOSS = /SFTP (channel closed|session lost)|ECONNRESET|EPIPE|Not connected|No response from server|Keepalive timeout|connection (lost|closed|reset)/i;
+
+function forgetLocalUploadAcknowledgedPrefix(transferId) {
+  if (transferId) localUploadAcknowledgedPrefix.delete(String(transferId));
+}
 
 function resetLocalUploadAcknowledgedPrefix(transferId, size) {
   if (!transferId) return;
@@ -1627,16 +1641,28 @@ function localUploadAcknowledgedOffset(transferId) {
   return entry.digestOffset;
 }
 
-async function localUploadAcknowledgedPrefixMatches(transferId, sourcePath, checkpoint, sourceSize) {
+function localUploadPrefixFailureKeepsCheckpoint(transferId, message) {
+  return localUploadAcknowledgedOffset(transferId) > 0
+    && UPLOAD_PREFIX_SESSION_LOSS.test(String(message || ""));
+}
+
+async function localUploadAcknowledgedPrefixMatches(transferId, sourcePath, checkpoint, sourceSize, options) {
   const entry = transferId ? localUploadAcknowledgedPrefix.get(String(transferId)) : null;
   const offset = Math.floor(Number(checkpoint) || 0);
   if (!entry || entry.broken || !entry.digest || !entry.savedHash) return false;
   if (!(offset > 0) || entry.digestOffset !== offset) return false;
   if (!Number.isFinite(Number(sourceSize)) || Number(sourceSize) !== entry.size) return false;
   try {
-    const digest = await hashLocalPrefix(sourcePath, offset);
+    const digest = await hashLocalPrefix(sourcePath, offset, { signal: options?.signal });
     return digest === entry.digest;
-  } catch {
+  } catch (error) {
+    if (
+      options?.signal?.aborted
+      || error?.code === "ABORT_ERR"
+      || error?.message === "Transfer cancelled"
+    ) {
+      throw error;
+    }
     return false;
   }
 }
@@ -6360,7 +6386,7 @@ async function startTransferNow(event, payload, onProgress) {
       directoryEntryIdentity: transfer.directoryEntryIdentity,
     });
     cleanupTransfer();
-    localUploadAcknowledgedPrefix.delete(transferId);
+    forgetLocalUploadAcknowledgedPrefix(transferId);
   };
 
   const sendError = (error) => {
@@ -6386,6 +6412,9 @@ async function startTransferNow(event, payload, onProgress) {
     }
     cleanupTransfer();
     const cancelled = /cancel/i.test(message);
+    if (cancelled || !localUploadPrefixFailureKeepsCheckpoint(transferId, message)) {
+      forgetLocalUploadAcknowledgedPrefix(transferId);
+    }
     if (cancelled) {
       sender.send("netcatty:transfer:cancelled", { transferId, error: message });
       broadcastGlobalTransferEvent({
@@ -6486,13 +6515,21 @@ async function startTransferNow(event, payload, onProgress) {
       : null;
     const claimedUnfingerprintedUpload = unfingerprintedLocalUpload
       && transfer.checkpointBytes > 0;
-    const localSourceUnchanged = claimedUnfingerprintedUpload
-      && await localUploadAcknowledgedPrefixMatches(
+    let localSourceUnchanged = false;
+    if (claimedUnfingerprintedUpload) {
+      // Start the read before the preflight race so Cancel aborts the same
+      // signal hashLocalPrefix is watching. The extra catch keeps a late
+      // hash rejection from surfacing once the race has already settled.
+      const verifyPromise = localUploadAcknowledgedPrefixMatches(
         transferId,
         sourcePath,
         transfer.checkpointBytes,
         localSourceSize,
+        { signal: transfer.signal },
       );
+      void verifyPromise.catch(() => {});
+      localSourceUnchanged = await runCancelablePreflight(() => verifyPromise);
+    }
     // Start a fresh digest when this attempt will write from byte 0. A matching
     // resume rewinds the running hash to the stored offset so later chunks append.
     if (unfingerprintedLocalUpload) {
@@ -7222,6 +7259,7 @@ async function startTransferNow(event, payload, onProgress) {
         } catch { }
       }
       cleanupTransfer();
+      forgetLocalUploadAcknowledgedPrefix(transferId);
       sender.send("netcatty:transfer:cancelled", { transferId });
       broadcastGlobalTransferEvent({ type: "cancelled", transferId, endedAt: Date.now() });
     } else {
@@ -7815,6 +7853,9 @@ async function prioritizeTransfer(_event, payload) {
 async function cleanupTransferArtifacts(_event, payload) {
   const transferId = payload?.transferId;
   if (!transferId) return { success: false };
+  // Dismiss, clear, and fresh-id retry all come through here. The digest is
+  // only useful while this task id can still resume.
+  forgetLocalUploadAcknowledgedPrefix(transferId);
   const stageNames = new Set([
     path.basename(payload.targetPath || "transfer"),
     path.basename(payload.sourcePath || "transfer"),
@@ -8226,4 +8267,10 @@ module.exports = {
   _setSmallDownloadSlotExemptBytesForTests: (bytes) => {
     smallDownloadSlotExemptBytes = bytes == null ? SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES : Math.max(0, Number(bytes) || 0);
   },
+  _setLocalPrefixHashStreamOverrideForTests: (override) => {
+    localPrefixHashStreamOverrideForTests = override;
+  },
+  _hasLocalUploadAcknowledgedPrefixForTests: (transferId) => (
+    localUploadAcknowledgedPrefix.has(String(transferId))
+  ),
 };

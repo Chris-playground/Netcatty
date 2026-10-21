@@ -12310,6 +12310,123 @@ test("unfingerprinted upload retry restarts when a same-size same-mtime rewrite 
   assert.deepEqual(remote, rewritten);
 });
 
+test("cancelling an unfingerprinted prefix re-hash aborts the read", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-prefix-cancel-"));
+  const transferId = `prefix-cancel-${crypto.randomUUID()}`;
+  const sourcePath = path.join(tempDir, "source.bin");
+  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 2 + 17, 5);
+  await fs.promises.writeFile(sourcePath, payload);
+  const checkpoint = TRANSFER_CHUNK_SIZE * 2;
+  await failUploadAfterAcknowledgedPrefix(sourcePath, transferId, payload.length, checkpoint);
+  assert.equal(transferBridge._hasLocalUploadAcknowledgedPrefixForTests(transferId), true);
+
+  let stalled = null;
+  transferBridge._setLocalPrefixHashStreamOverrideForTests({
+    bytes: checkpoint,
+    create(options) {
+      const stream = new PassThrough();
+      stream.write(Buffer.alloc(16, 1));
+      stalled = { stream, signal: options?.signal };
+      return stream;
+    },
+  });
+  let pending;
+  t.after(async () => {
+    transferBridge._setLocalPrefixHashStreamOverrideForTests(null);
+    stalled?.stream.destroy();
+    await transferBridge.cancelTransfer(null, { transferId }).catch(() => {});
+    await pending?.catch(() => {});
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  pending = transferBridge.startTransfer({ sender: createSender() }, {
+    transferId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: true,
+    checkpointBytes: checkpoint,
+  });
+  const started = await waitUntil(() => stalled, 2000);
+  assert.ok(started);
+  await transferBridge.cancelTransfer(null, { transferId });
+  const result = await Promise.race([
+    pending,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("prefix hash ignored cancel")), 1000);
+    }),
+  ]);
+  assert.ok(stalled.signal, "prefix re-hash must observe the transfer abort signal");
+  assert.match(result.error || "", /cancel/i);
+  assert.equal(stalled.stream.destroyed, true);
+  assert.equal(transferBridge._hasLocalUploadAcknowledgedPrefixForTests(transferId), false);
+});
+
+test("unfingerprinted upload digest is kept only while a checkpoint can be resumed", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-prefix-retain-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+  const sourcePath = path.join(tempDir, "source.bin");
+  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 2 + 9, 4);
+  await fs.promises.writeFile(sourcePath, payload);
+
+  const deniedId = `prefix-denied-${crypto.randomUUID()}`;
+  const denied = createFastSftp({
+    open(_path, _flags, callback) {
+      callback(null, Buffer.from("denied-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, position, callback) {
+      if (position > 0) {
+        callback(new Error("Permission denied"));
+        return;
+      }
+      callback(null);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      throw new Error("serial WriteStream must not run");
+    },
+  });
+  transferBridge.init({
+    sftpClients: new Map([["target", {
+      __netcattySudoMode: true,
+      sftp: denied,
+      stat: async () => ({ size: 0 }),
+      rename: async () => {},
+      delete: async () => {},
+    }]]),
+  });
+  const deniedResult = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: deniedId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: true,
+    checkpointBytes: 0,
+  });
+  assert.match(deniedResult.error || "", /permission denied/i);
+  assert.equal(transferBridge._hasLocalUploadAcknowledgedPrefixForTests(deniedId), false);
+
+  const retainedId = `prefix-retained-${crypto.randomUUID()}`;
+  await failUploadAfterAcknowledgedPrefix(sourcePath, retainedId, payload.length, TRANSFER_CHUNK_SIZE);
+  assert.equal(transferBridge._hasLocalUploadAcknowledgedPrefixForTests(retainedId), true);
+  await transferBridge.cleanupTransferArtifacts(null, {
+    transferId: retainedId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+  });
+  assert.equal(transferBridge._hasLocalUploadAcknowledgedPrefixForTests(retainedId), false);
+});
+
 test("local resume after hard quit clamps checkpoint to durable staged file size", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-local-crash-"));
   t.after(async () => { await fs.promises.rm(tempDir, { recursive: true, force: true }); });
