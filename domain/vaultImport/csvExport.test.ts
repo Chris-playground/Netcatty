@@ -774,6 +774,22 @@ test("CSV import drops inline hops created only for a rejected self-referential 
   assert.ok(imported.issues.some((issue) => issue.level === "warning" && /circular/i.test(issue.message)));
 });
 
+test("CSV import prefers a same-group existing hop over a cross-group imported match", () => {
+  const existing = chainHost("vault-jump", "Bastion", "bastion.example.com", "alice");
+  existing.group = "Prod";
+  const imported = importVaultHostsFromText("csv", [
+    "Groups,Hostname,Username,ProxyJump",
+    "Other,bastion.example.com,alice,",
+    "Prod,app.example.com,root,alice@bastion.example.com",
+  ].join("\n"), { existingHosts: [existing] });
+
+  const app = imported.hosts.find((host) => host.hostname === "app.example.com");
+  const importedBastion = imported.hosts.find((host) => host.hostname === "bastion.example.com");
+  assert.equal(importedBastion?.group, "Other");
+  assert.notEqual(importedBastion?.id, existing.id);
+  assert.deepEqual(app?.hostChain, { hostIds: [existing.id] });
+});
+
 test("CSV import warns and ignores a ProxyJump value that is not a jump host", () => {
   const imported = importVaultHostsFromText("csv", [
     "Hostname,Username,ProxyJump",

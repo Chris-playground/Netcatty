@@ -515,10 +515,11 @@ const attachCsvProxyJumpChains = (
   const matchable: CsvJumpCandidate[] = [...hosts];
 
   const resolveHop = (hop: ParsedJumpHost, group: string | undefined): string | null => {
-    const endpointMatches = matchable.filter((candidate) => csvJumpEndpointMatches(hop, candidate));
+    const endpointMatches = [
+      ...matchable.filter((candidate) => csvJumpEndpointMatches(hop, candidate)),
+      ...existingHosts.filter((candidate) => csvJumpEndpointMatches(hop, candidate)),
+    ];
     if (endpointMatches.length > 0) return pickCsvJumpCandidate(endpointMatches, group).id;
-    const existingEndpoint = existingHosts.filter((candidate) => csvJumpEndpointMatches(hop, candidate));
-    if (existingEndpoint.length > 0) return pickCsvJumpCandidate(existingEndpoint, group).id;
     const labelMatches = matchable.filter((candidate) => csvJumpLabelMatches(hop, candidate));
     if (labelMatches.length > 0) return pickCsvJumpCandidate(labelMatches, group).id;
     const existingLabel = existingHosts.filter((candidate) => csvJumpLabelMatches(hop, candidate));
