@@ -1580,6 +1580,44 @@ function logTransferDiag(transfer, event, extra = {}) {
 // Shared references
 let sftpClients = null;
 
+// Size + mtime of a local upload source, captured when that attempt starts.
+// A dropped upload never pauses, so Retry has a checkpoint and no SHA-256.
+// Same-size rewrites still change mtime; without this baseline the staged
+// prefix would be appended to a different file. Kept in memory because Retry
+// is same-process — a relaunch with no fingerprint already restarts at 0.
+const localUploadSourceIdentity = new Map();
+
+function rememberLocalUploadSourceIdentity(transferId, stat) {
+  if (!transferId || !stat) return;
+  const size = Number(stat.size);
+  const mtimeMs = Number(stat.mtimeMs);
+  if (!Number.isFinite(size) || size < 0 || !Number.isFinite(mtimeMs)) return;
+  localUploadSourceIdentity.set(String(transferId), { size, mtimeMs });
+}
+
+function localUploadSourceIdentityMatches(transferId, stat) {
+  if (!transferId || !stat) return false;
+  const remembered = localUploadSourceIdentity.get(String(transferId));
+  if (!remembered) return false;
+  return Number(stat.size) === remembered.size && Number(stat.mtimeMs) === remembered.mtimeMs;
+}
+
+async function currentLocalUploadSourceStat(transfer, sourcePath) {
+  const cached = transfer?.sourceSoftIdentity;
+  const cachedSize = Number(cached?.size);
+  const cachedMtime = Number(cached?.mtimeMs);
+  if (Number.isFinite(cachedSize) && Number.isFinite(cachedMtime)) {
+    return { size: cachedSize, mtimeMs: cachedMtime };
+  }
+  try {
+    const st = await statLocal(sourcePath);
+    if (!Number.isFinite(st?.size) || !Number.isFinite(st?.mtimeMs)) return null;
+    return { size: Number(st.size), mtimeMs: Number(st.mtimeMs) };
+  } catch {
+    return null;
+  }
+}
+
 // Active transfers storage
 const activeTransfers = new Map();
 const admittedTransferQueue = [];
@@ -6214,6 +6252,7 @@ async function startTransferNow(event, payload, onProgress) {
       directoryEntryIdentity: transfer.directoryEntryIdentity,
     });
     cleanupTransfer();
+    localUploadSourceIdentity.delete(transferId);
   };
 
   const sendError = (error) => {
@@ -6326,13 +6365,27 @@ async function startTransferNow(event, payload, onProgress) {
       || transfer.downloadCheckpointBytes > 0
       || transfer.uploadCheckpointBytes > 0;
     // A dropped upload never pauses, so it has a checkpoint and no SHA-256.
-    // Do not discard that checkpoint here: the new connection stats and trims
-    // the same .part below. meta: identities and every other resume still
-    // restart, because they cannot prove the staged prefix.
-    const verifyUploadStageOnNewConnection = sourceType === "local"
+    // Keep it only when this local source still matches the size and mtime
+    // recorded at attempt start. The new connection stats and trims the same
+    // .part below. A same-size rewrite, a missing baseline, meta: identities,
+    // and every other direction restart, because they cannot prove the prefix.
+    const unfingerprintedLocalUpload = sourceType === "local"
       && targetType === "sftp"
-      && !transfer.sourceFingerprint
+      && !transfer.sourceFingerprint;
+    const localSourceStat = unfingerprintedLocalUpload
+      ? await currentLocalUploadSourceStat(transfer, sourcePath)
+      : null;
+    const claimedUnfingerprintedUpload = unfingerprintedLocalUpload
       && transfer.checkpointBytes > 0;
+    const localSourceUnchanged = claimedUnfingerprintedUpload
+      && localUploadSourceIdentityMatches(transferId, localSourceStat);
+    // Record at start, not on later checkpoints: a mid-upload rewrite must
+    // not become the baseline. A rejected resume records the file about to
+    // be sent from byte 0 so a later drop of that attempt can resume.
+    if (unfingerprintedLocalUpload && localSourceStat && !localSourceUnchanged) {
+      rememberLocalUploadSourceIdentity(transferId, localSourceStat);
+    }
+    const verifyUploadStageOnNewConnection = localSourceUnchanged;
     if (
       transfer.resumable
       && hasSavedCheckpoint

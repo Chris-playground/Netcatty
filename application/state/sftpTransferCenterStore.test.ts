@@ -142,6 +142,40 @@ for (const [label, error, expectResume] of [
   });
 }
 
+test("panel Retry after a dropped download or remote copy keeps the owner restart", async () => {
+  for (const direction of ["download", "remote-to-remote"] as const) {
+    const controllerRetries: string[] = [];
+    const dedicatedTasks: TransferTask[] = [];
+    const store = createSftpTransferCenterStore();
+    store.registerOwner("panel-a", {
+      pause: async () => {},
+      resume: async () => {},
+      cancel: async () => {},
+      retry: async (id) => { controllerRetries.push(id); },
+      prioritize: async () => {},
+      dismiss: () => {},
+    });
+    store.setDedicatedResumeHandler(async (task) => {
+      dedicatedTasks.push(task);
+      return { success: true };
+    });
+    store.publishOwner("panel-a", [{
+      ...makeTask("dropped", "failed"),
+      direction,
+      totalBytes: 100,
+      checkpointBytes: 37,
+      transferredBytes: 37,
+      error: "SFTP channel closed",
+      endTime: Date.now(),
+    }]);
+
+    await store.retry("dropped");
+
+    assert.deepEqual(controllerRetries, ["dropped"], direction);
+    assert.equal(dedicatedTasks.length, 0, direction);
+  }
+});
+
 test("resume without an owner uses a live backend transfer session when available", async (t) => {
   const resumeCalls: string[] = [];
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");

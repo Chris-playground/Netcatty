@@ -19,5 +19,8 @@ test("canRetryFromCheckpoint only for a top-level file that lost its connection 
   assert.equal(canRetryFromCheckpoint(failed({ parentTaskId: "dir" })), false);
   assert.equal(canRetryFromCheckpoint(failed({ status: "cancelled" })), false);
   assert.equal(canRetryFromCheckpoint(failed({ retryable: false })), false);
+  assert.equal(canRetryFromCheckpoint(failed({ direction: "download" })), false, "downloads keep the owner retry");
+  assert.equal(canRetryFromCheckpoint(failed({ direction: "remote-to-remote" })), false, "remote copies keep the owner retry");
+  assert.equal(canRetryFromCheckpoint(failed({ direction: "local-copy" })), false);
   assert.equal(canRetryFromCheckpoint(undefined), false);
 });
