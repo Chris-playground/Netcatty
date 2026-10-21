@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { performSessionLogAction } from './sessionLogActions';
 import { STORAGE_KEY_SESSION_LOG_APPLICATION } from '../../infrastructure/config/storageKeys';
@@ -67,4 +68,15 @@ test('session log actions resolve and flush the selected session, remember apps 
     else Reflect.deleteProperty(globalThis, 'localStorage');
     dom.window.close();
   }
+});
+
+// The integration boundary must translate backend errors, including ordinary
+// Error instances. Raw filesystem/app-launch details belong only in diagnostics.
+test('terminal log action errors use the translated toast instead of raw backend text', () => {
+  const source = readFileSync(new URL('../../components/Terminal.tsx', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('  const handleSessionLogAction ='),
+    source.indexOf('  const handleToggleSessionLog ='));
+  assert.match(handler, /logger\.error\("\[Terminal\] Failed to open or reveal session log:", err\)/);
+  assert.match(handler, /toast\.error\(t\('terminal\.toolbar\.openSessionLogFailed'\)\)/);
+  assert.doesNotMatch(handler, /err\.message/);
 });

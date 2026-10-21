@@ -14,7 +14,8 @@ opens, independently of SFTP file associations. Choosing the system default
 clears this preference. Text, raw, and HTML logs retain their original format.
 
 The last log remains accessible after recording stops or a session disconnects.
-After reconnecting, a stopped log from the old connection is not reused.
+After a successful reconnect, a stopped log from the old connection is not reused.
+If reconnecting fails, the previous saved log remains available.
 Manual recording that is still active remains the current log. If the current session has no saved log,
 or the file was moved or deleted, the action reports an error rather than
 opening an unrelated file. The shortcut does not enable logging automatically.

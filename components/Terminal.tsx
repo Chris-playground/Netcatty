@@ -4132,7 +4132,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     try {
       await performSessionLogAction(sessionRef.current ?? sessionId, action);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('terminal.toolbar.openSessionLogFailed'));
+      logger.error("[Terminal] Failed to open or reveal session log:", err);
+      toast.error(t('terminal.toolbar.openSessionLogFailed'));
     }
   }, [sessionId, t]);
 

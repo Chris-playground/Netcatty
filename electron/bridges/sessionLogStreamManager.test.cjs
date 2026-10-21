@@ -8,6 +8,8 @@ const {
   hasSessionLog,
   prepareSessionLog,
   forgetSessionLog,
+  getSessionLogToken,
+  forgetInactiveSessionLog,
   registerProgrammaticCommandLogRewrite,
   registerSudoAutofillInput,
   startStream,
@@ -1085,4 +1087,32 @@ test("forgetting a session prevents late finalization from restoring its old pat
   await stopping;
   assert.equal(hasSessionLog(sessionId), false);
   assert.equal(await prepareSessionLog(sessionId), null);
+});
+
+test("conditional log invalidation clears only the observed inactive stream token", async (t) => {
+  const directory = path.join(TEMP_ROOT, `conditional-forget-${Date.now()}`);
+  const sessionId = "conditional-forget";
+  const oldPath = path.join(directory, "old.txt");
+  const newPath = path.join(directory, "new.txt");
+  t.after(async () => {
+    await stopStream(sessionId);
+    forgetSessionLog(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  assert.equal(getSessionLogToken(sessionId), null);
+  assert.equal(forgetInactiveSessionLog(sessionId, null), false);
+  const first = startStreamToFile(sessionId, { filePath: oldPath, format: "txt" });
+  assert.equal(getSessionLogToken(sessionId), first.token);
+  assert.equal(forgetInactiveSessionLog(sessionId, first.token), false, "active recording survives");
+  await stopStream(sessionId);
+  assert.equal(getSessionLogToken(sessionId), first.token, "finalization preserves record identity");
+  assert.equal(forgetInactiveSessionLog(sessionId, Symbol("wrong")), false);
+  assert.equal(forgetInactiveSessionLog(sessionId, first.token), true);
+  assert.equal(await prepareSessionLog(sessionId), null);
+  const second = startStreamToFile(sessionId, { filePath: newPath, format: "txt" });
+  assert.notEqual(second.token, first.token);
+  assert.equal(forgetInactiveSessionLog(sessionId, first.token), false);
+  await stopStream(sessionId);
+  assert.equal(forgetInactiveSessionLog(sessionId, first.token), false, "a new finalized log survives");
+  assert.equal(await prepareSessionLog(sessionId), newPath);
 });

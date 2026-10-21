@@ -556,6 +556,19 @@ function forgetSessionLog(sessionId) {
   sessionLogs.delete(sessionId);
 }
 
+function getSessionLogToken(sessionId) {
+  return sessionLogs.get(sessionId)?.startToken ?? null;
+}
+
+/** Drop only the inactive target observed before an asynchronous reconnect.
+ * A continuing manual stream or a newly-created/finalized log must survive.
+ */
+function forgetInactiveSessionLog(sessionId, expectedToken) {
+  if (!expectedToken || activeStreams.has(sessionId)
+    || getSessionLogToken(sessionId) !== expectedToken) return false;
+  return sessionLogs.delete(sessionId);
+}
+
 function hasSessionLog(sessionId) {
   return sessionLogs.has(sessionId);
 }
@@ -602,6 +615,8 @@ module.exports = {
   stopStream,
   prepareSessionLog,
   forgetSessionLog,
+  getSessionLogToken,
+  forgetInactiveSessionLog,
   hasSessionLog,
   hasStream,
   getActiveLogPaths,
