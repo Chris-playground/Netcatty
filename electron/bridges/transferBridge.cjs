@@ -652,26 +652,75 @@ async function resolveLocalResumeCheckpoint(filePath, claimedCheckpoint) {
   }
 }
 
+function isMissingRemoteStageError(error) {
+  const message = error?.message || String(error);
+  return error?.code === "ENOENT"
+    || error?.code === 2
+    || /no such file|ENOENT|not found|does not exist/i.test(message);
+}
+
+async function statRemoteStageSize(client, sftpId, filePath, encoding) {
+  if (isSftpChannelEnded(client?.sftp)) {
+    throw new Error("SFTP channel closed");
+  }
+  const stat = isScpModeClient(client)
+    ? await getScpBackendForClient(client).stat(filePath, { encoding })
+    : await client.stat(encodePathForSession(sftpId, filePath, encoding));
+  return Math.max(0, Number(stat?.size) || 0);
+}
+
 async function resolveRemoteResumeCheckpoint(client, sftpId, filePath, encoding, claimedCheckpoint) {
   const claimed = Math.max(0, Number(claimedCheckpoint) || 0);
   if (!claimed) return 0;
   try {
-    const stat = isScpModeClient(client)
-      ? await getScpBackendForClient(client).stat(filePath, { encoding })
-      : await client.stat(encodePathForSession(sftpId, filePath, encoding));
-    return Math.min(claimed, Math.max(0, Number(stat?.size) || 0));
+    const size = await statRemoteStageSize(client, sftpId, filePath, encoding);
+    return Math.min(claimed, size);
   } catch (error) {
-    const message = error?.message || String(error);
     // Missing remote .part after kill/crash — start over instead of blocking forever.
-    if (
-      error?.code === "ENOENT"
-      || error?.code === 2
-      || /no such file|ENOENT|not found|does not exist/i.test(message)
-    ) {
-      return 0;
-    }
+    if (isMissingRemoteStageError(error)) return 0;
+    const message = error?.message || String(error);
     throw new Error(`Resume safety check failed for remote temporary file: ${message}`);
   }
+}
+
+/**
+ * A connection-drop retry has a checkpoint but no pause-time SHA-256. Keep that
+ * checkpoint only when the staged .part on *this* connection covers it. A longer
+ * in-flight tail is trimmed here; a shorter or missing .part restarts from 0
+ * instead of appending onto bytes that do not match the checkpoint.
+ */
+async function reconcileUnfingerprintedUploadCheckpoint(client, sftpId, filePath, encoding, claimedCheckpoint) {
+  const claimed = Math.max(0, Number(claimedCheckpoint) || 0);
+  if (!claimed) return 0;
+  let size;
+  try {
+    size = await statRemoteStageSize(client, sftpId, filePath, encoding);
+  } catch (error) {
+    if (isMissingRemoteStageError(error)) return 0;
+    const message = error?.message || String(error);
+    throw new Error(`Resume safety check failed for remote temporary file: ${message}`);
+  }
+  if (size < claimed) return 0;
+  if (size === claimed) return claimed;
+  // Longer .part is an in-flight tail, not a prefix we can append to. Trim it
+  // on this connection. If that fails, leave the stage untouched — do not fall
+  // back to an OPEN "w" that discards the matching prefix.
+  const stagedRemote = { sftpId, path: filePath, encoding };
+  if (isSftpChannelEnded(client?.sftp)) {
+    throw new Error("SFTP channel closed");
+  }
+  await truncateRemoteStagedToCheckpoint(client, stagedRemote, claimed);
+  let trimmed;
+  try {
+    trimmed = await statRemoteStageSize(client, sftpId, filePath, encoding);
+  } catch (error) {
+    const message = error?.message || String(error);
+    throw new Error(`Resume safety check failed for remote temporary file: ${message}`);
+  }
+  if (trimmed !== claimed) {
+    throw new Error("Resume safety check failed for remote temporary file: could not trim the staged upload to the checkpoint");
+  }
+  return claimed;
 }
 
 async function hashReadable(readable, options = {}) {
@@ -943,6 +992,10 @@ function sourceFingerprintDigest(fingerprint) {
 
 function isLegacyFullSourceFingerprint(fingerprint) {
   return /^sha256:[a-f0-9]{64}$/i.test(String(fingerprint || ""));
+}
+
+function hasFullSourceFingerprint(fingerprint) {
+  return /^sha256:(?:p\d+:)?[a-f0-9]{64}$/i.test(String(fingerprint || ""));
 }
 
 async function computeSourceFingerprint(
@@ -6265,6 +6318,14 @@ async function startTransferNow(event, payload, onProgress) {
     const hasSavedCheckpoint = transfer.checkpointBytes > 0
       || transfer.downloadCheckpointBytes > 0
       || transfer.uploadCheckpointBytes > 0;
+    // A dropped upload never pauses, so it has a checkpoint and no SHA-256.
+    // Do not discard that checkpoint here: the new connection stats and trims
+    // the same .part below. meta: identities and every other resume still
+    // restart, because they cannot prove the staged prefix.
+    const verifyUploadStageOnNewConnection = sourceType === "local"
+      && targetType === "sftp"
+      && !transfer.sourceFingerprint
+      && transfer.checkpointBytes > 0;
     if (
       transfer.resumable
       && hasSavedCheckpoint
@@ -6272,6 +6333,7 @@ async function startTransferNow(event, payload, onProgress) {
         !transfer.sourceFingerprint
         || String(transfer.sourceFingerprint).startsWith("meta:")
       )
+      && !verifyUploadStageOnNewConnection
     ) {
       // Older builds persisted only size/mtime/sparse samples. They cannot prove
       // that the untransferred suffix still belongs to the same source. Restart
@@ -6334,13 +6396,30 @@ async function startTransferNow(event, payload, onProgress) {
           transfer.stagedRemote = usesStage
             ? { client, sftpId: targetSftpId, path: uploadTargetPath, encoding: targetEncoding }
             : null;
+          let claimedCheckpoint = transfer.checkpointBytes;
+          if (
+            usesStage
+            && transfer.resumable
+            && claimedCheckpoint > 0
+            && !hasFullSourceFingerprint(transfer.sourceFingerprint)
+          ) {
+            claimedCheckpoint = await runCancelablePreflight(() => (
+              reconcileUnfingerprintedUploadCheckpoint(
+                client,
+                targetSftpId,
+                uploadTargetPath,
+                targetEncoding,
+                claimedCheckpoint,
+              )
+            ));
+          }
           transfer.checkpointBytes = usesStage && transfer.resumable
             ? await runCancelablePreflight(() => resolveRemoteResumeCheckpoint(
                   client,
                   targetSftpId,
                   uploadTargetPath,
                   targetEncoding,
-                  transfer.checkpointBytes,
+                  claimedCheckpoint,
                 ))
             : 0;
           sendProgress(transfer.checkpointBytes, fileSize, { force: true });

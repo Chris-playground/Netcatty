@@ -11685,6 +11685,95 @@ test("upload recovery without a full source identity restarts from zero", async 
   assert.equal(minWritePosition, 0);
 });
 
+test("retry after a dropped upload resumes writes at the checkpoint", async (t) => {
+  // Connection loss fails the task without pause, so no full SHA-256 is stored.
+  // Retry keeps the id and the checkpoint. The staged .part is at least that
+  // long, plus an in-flight tail pause never trimmed. Writes must start at the
+  // checkpoint; a .part that does not cover it still restarts from 0.
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-drop-retry-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const transferId = `drop-retry-${crypto.randomUUID()}`;
+  const sourcePath = path.join(tempDir, "source.bin");
+  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 4 + 17);
+  for (let index = 0; index < payload.length; index += 1) payload[index] = (index * 3) % 251;
+  await fs.promises.writeFile(sourcePath, payload);
+
+  const checkpoint = TRANSFER_CHUNK_SIZE * 2;
+  const tail = 80;
+  let remote = Buffer.from(payload.subarray(0, checkpoint + tail));
+  let minWritePosition = Infinity;
+  let smallestRemote = remote.length;
+  let trimmedTo = null;
+  const rememberSize = () => {
+    if (remote.length < smallestRemote) smallestRemote = remote.length;
+  };
+  const concurrentSftp = createFastSftp({
+    open(_path, flags, callback) {
+      // OPEN "w" truncates the existing stage, which is what shrank the .part
+      // to the first chunk in the real-app retry.
+      if (flags === "w") {
+        remote = Buffer.alloc(0);
+        rememberSize();
+      }
+      callback(null, Buffer.from("resume-handle"));
+    },
+    write(_handle, buffer, offset, length, position, callback) {
+      minWritePosition = Math.min(minWritePosition, position);
+      const chunk = buffer.subarray(offset, offset + length);
+      if (remote.length < position) {
+        remote = Buffer.concat([remote, Buffer.alloc(position - remote.length)]);
+      }
+      remote = Buffer.concat([
+        remote.subarray(0, position),
+        chunk,
+        remote.subarray(position + chunk.length),
+      ]);
+      rememberSize();
+      callback(null);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      throw new Error("serial WriteStream must not run");
+    },
+  });
+  const client = {
+    __netcattySudoMode: true, // shared concurrent path only
+    sftp: concurrentSftp,
+    stat: async () => ({ size: remote.length }),
+    truncate: async (_path, size) => {
+      trimmedTo = size;
+      remote = remote.subarray(0, size);
+      rememberSize();
+    },
+    rename: async () => {},
+    delete: async () => {},
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId,
+    sourcePath,
+    targetPath: "/root/source.bin",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: true,
+    checkpointBytes: checkpoint,
+  });
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(minWritePosition, checkpoint);
+  assert.equal(trimmedTo, checkpoint);
+  assert.ok(smallestRemote >= checkpoint, `stage shrank below the checkpoint: ${smallestRemote}`);
+  assert.deepEqual(remote, payload);
+});
+
 test("local resume after hard quit clamps checkpoint to durable staged file size", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-local-crash-"));
   t.after(async () => { await fs.promises.rm(tempDir, { recursive: true, force: true }); });
