@@ -560,6 +560,7 @@ const attachCsvProxyJumpChains = (
     const resolvedIds: string[] = [];
     const unresolved: string[] = [];
     const inlineCountBefore = inlineHosts.length;
+    let chainRejected = false;
     for (const spec of specs) {
       const jump = parseJumpHostSpec(spec);
       if (!jump) {
@@ -567,6 +568,7 @@ const attachCsvProxyJumpChains = (
           level: "warning",
           message: `CSV row ${entry.row}: ProxyJump hop "${spec}" was ignored because it is not a valid jump host.`,
         });
+        chainRejected = true;
         continue;
       }
       const inlineCount = inlineHosts.length;
@@ -576,23 +578,26 @@ const attachCsvProxyJumpChains = (
           level: "warning",
           message: `CSV row ${entry.row}: ProxyJump hop "${spec}" was ignored because it is not a valid jump host.`,
         });
+        chainRejected = true;
         continue;
       }
       if (inlineHosts.length > inlineCount) unresolved.push(jump.hostname);
       if (!resolvedIds.includes(resolvedId)) resolvedIds.push(resolvedId);
     }
 
-    if (resolvedIds.includes(host.id)) {
+    if (chainRejected || resolvedIds.includes(host.id)) {
       if (inlineHosts.length > inlineCountBefore) {
         const droppedIds = new Set(inlineHosts.splice(inlineCountBefore).map((item) => item.id));
         for (let index = matchable.length - 1; index >= 0; index -= 1) {
           if (droppedIds.has(matchable[index].id)) matchable.splice(index, 1);
         }
       }
-      issues.push({
-        level: "warning",
-        message: `CSV: detected circular reference in ProxyJump for "${host.label}", skipping chain.`,
-      });
+      if (resolvedIds.includes(host.id)) {
+        issues.push({
+          level: "warning",
+          message: `CSV: detected circular reference in ProxyJump for "${host.label}", skipping chain.`,
+        });
+      }
       continue;
     }
     if (resolvedIds.length > 0) host.hostChain = { hostIds: resolvedIds };

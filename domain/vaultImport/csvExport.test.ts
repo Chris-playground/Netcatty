@@ -818,6 +818,19 @@ test("CSV import warns and ignores a ProxyJump value that is not a jump host", (
   assert.ok(imported.issues.some((issue) => issue.level === "warning" && issue.message.includes("ProxyJump")));
 });
 
+test("CSV import rejects a ProxyJump chain that contains a malformed hop", () => {
+  const imported = importVaultHostsFromText("csv", [
+    "Hostname,Username,ProxyJump",
+    "app.example.com,root,\"bastion.example.com,not a hop\"",
+  ].join("\n"));
+
+  assert.deepEqual(imported.hosts.map((host) => host.hostname), ["app.example.com"]);
+  assert.equal(imported.hosts[0]?.hostChain, undefined);
+  assert.ok(imported.issues.some((issue) => (
+    issue.level === "warning" && issue.message.includes("not a hop")
+  )));
+});
+
 test("CSV import warns and ignores a malformed LocalShell value", () => {
   const csv = [
     "Groups,Label,Tags,Notes,Hostname/IP,Protocol,Port,Username,Password,KeyPath,Passphrase,Proxy,LocalShell",
