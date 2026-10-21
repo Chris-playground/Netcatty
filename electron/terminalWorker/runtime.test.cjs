@@ -1532,3 +1532,38 @@ test("runtime contains throws from fire-and-forget send listeners", () => {
     { sessionId: "s1", data: "pwd\r" },
   ]);
 });
+
+test("a same-id restart with auto-save disabled forgets the prior saved-log target", async (t) => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const manager = require("../bridges/sessionLogStreamManager.cjs");
+  const directory = path.join(__dirname, `.tmp-runtime-session-log-${Date.now()}`);
+  const filePath = path.join(directory, "old.txt");
+  const sessionId = "runtime-log-reconnect";
+  t.after(async () => {
+    await manager.cleanupAll();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  manager.startStreamToFile(sessionId, { filePath, format: "txt" });
+  manager.appendData(sessionId, "previous connection\n");
+  await manager.stopStream(sessionId);
+  assert.equal(await manager.prepareSessionLog(sessionId), filePath);
+  const parentPort = createParentPort();
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:start", async (_event, payload) => {
+        assert.equal(manager.hasSessionLog(payload.sessionId), false);
+        return { sessionId: payload.sessionId };
+      });
+    },
+  });
+  runtime.start();
+  parentPort.emitMessage({
+    kind: "request", requestId: "restart-no-log", channel: "netcatty:start",
+    payload: { sessionId, sessionLog: { enabled: false } }, webContentsId: 7,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(parentPort.messages.some((message) => message.requestId === "restart-no-log" && message.result?.sessionId === sessionId));
+  assert.equal(await manager.prepareSessionLog(sessionId), null);
+});

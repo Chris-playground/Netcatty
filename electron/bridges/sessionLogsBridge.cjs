@@ -6,7 +6,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { dialog } = require("electron");
+const { dialog, shell } = require("electron");
 const {
   terminalDataToHtmlContent,
   terminalDataToPlainText,
@@ -791,12 +791,69 @@ async function getManualSessionLogStatus(event, payload = {}) {
   return { success: true, isLogging: sessionLogStreamManager.hasStream(sessionId) };
 }
 
+function validSessionLogId(sessionId) {
+  return typeof sessionId === "string" && sessionId.trim().length > 0;
+}
+
+async function prepareLocalSessionLog(_event, payload = {}) {
+  if (!validSessionLogId(payload?.sessionId)) {
+    return { success: false, error: "Missing sessionId" };
+  }
+  try {
+    const filePath = await require("./sessionLogStreamManager.cjs").prepareSessionLog(payload.sessionId);
+    return filePath
+      ? { success: true, filePath }
+      : { success: false, error: "No saved log is available for this session" };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/** Resolve only a main/worker-owned session target. Renderer paths, host labels
+ * and configured directories are deliberately not part of this operation.
+ */
+async function prepareSessionLog(event, payload = {}, terminalWorkerManager = null) {
+  const sessionId = payload?.sessionId;
+  if (!validSessionLogId(sessionId)) {
+    return { success: false, error: "Missing sessionId" };
+  }
+  const manager = require("./sessionLogStreamManager.cjs");
+  if (manager.hasSessionLog(sessionId)) {
+    return prepareLocalSessionLog(event, { sessionId });
+  }
+  if (!isTerminalWorkerRunning(terminalWorkerManager)) {
+    return { success: false, error: "No saved log is available for this session" };
+  }
+  try {
+    const result = await terminalWorkerManager.request(
+      "netcatty:sessionLog:prepareLocal", { sessionId }, {},
+    );
+    return result?.success && typeof result.filePath === "string" && result.filePath
+      ? { success: true, filePath: result.filePath }
+      : { success: false, error: result?.error || "No saved log is available for this session" };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+async function revealSessionLog(event, payload = {}, terminalWorkerManager = null) {
+  const result = await prepareSessionLog(event, payload, terminalWorkerManager);
+  if (!result.success) return result;
+  try {
+    shell.showItemInFolder(result.filePath);
+    return result;
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
 /**
  * Worker-side handlers only. The terminal utilityProcess has its own
  * sessionLogStreamManager instance; main queries these paths before clear-all.
  */
 function registerWorkerHandlers(ipcMain) {
   ipcMain.handle("netcatty:sessionLogs:getActivePaths", async () => getLocalActiveLogPaths());
+  ipcMain.handle("netcatty:sessionLog:prepareLocal", prepareLocalSessionLog);
 }
 
 /**
@@ -819,6 +876,31 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:sessionLog:manualStart", startManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStop", stopManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStatus", getManualSessionLogStatus);
+  ipcMain.handle("netcatty:sessionLog:prepare", (event, payload) => (
+    prepareSessionLog(event, payload, terminalWorkerManager)
+  ));
+  ipcMain.handle("netcatty:sessionLog:reveal", (event, payload) => (
+    revealSessionLog(event, payload, terminalWorkerManager)
+  ));
+
+  // Disconnected tabs may still open their last manual log. Once that session
+  // reconnects, it must not mask the new worker-owned automatic log instead.
+  const disconnectedSessions = new Set();
+  terminalWorkerManager?.onSessionClosed?.(({ sessionId, explicit }) => {
+    if (explicit) {
+      disconnectedSessions.delete(sessionId);
+      const manager = require("./sessionLogStreamManager.cjs");
+      if (!manager.hasStream(sessionId)) manager.forgetSessionLog(sessionId);
+    } else {
+      disconnectedSessions.add(sessionId);
+    }
+  });
+  terminalWorkerManager?.onSessionOwned?.(({ sessionId }) => {
+    if (!disconnectedSessions.delete(sessionId)) return;
+    const manager = require("./sessionLogStreamManager.cjs");
+    // Continuous manual recording intentionally survives terminal reconnects.
+    if (!manager.hasStream(sessionId)) manager.forgetSessionLog(sessionId);
+  });
 
   // In the default terminal-worker runtime, sessions run in a utilityProcess
   // and call appendData() on the worker's own sessionLogStreamManager module
@@ -850,6 +932,9 @@ module.exports = {
   startManualSessionLog,
   stopManualSessionLog,
   getManualSessionLogStatus,
+  prepareLocalSessionLog,
+  prepareSessionLog,
+  revealSessionLog,
   toLocalISOString,
   terminalDataToHtml,
   terminalPlainTextToHtml,

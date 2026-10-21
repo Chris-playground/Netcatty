@@ -6,6 +6,8 @@
 import {
   Check,
   ChevronRight,
+  ChevronDown,
+  FileSearch,
   Circle,
   Download,
   FileText,
@@ -25,6 +27,7 @@ import {
 } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import type { SessionLogAction } from '../../application/state/sessionLogActions';
 import { useToolbarItemLayout } from '../../application/state/useToolbarItemLayout';
 import type { ToolbarItemLayoutDefaults } from '../../domain/toolbarItemLayout';
 import { STORAGE_KEY_TERMINAL_TOOLBAR_LAYOUT } from '../../infrastructure/config/storageKeys';
@@ -51,6 +54,7 @@ export const TERMINAL_TOOLBAR_ITEM_IDS = [
   'compose',
   'search',
   'sessionLog',
+  'openSessionLog',
   'scripts',
   'history',
   'configureOsc7',
@@ -73,6 +77,7 @@ export const TERMINAL_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
     compose: 'show',
     search: 'show',
     sessionLog: 'show',
+    openSessionLog: 'show',
     scripts: 'show',
     history: 'collapse',
     configureOsc7: 'collapse',
@@ -114,6 +119,7 @@ export interface TerminalToolbarProps {
   // Manual session log
   showLogButton?: boolean;
   onToggleSessionLog?: () => void;
+  onSessionLogAction?: (action: SessionLogAction) => void;
   isSessionLogging?: boolean;
   isSessionLogDisabled?: boolean;
   // Compose bar
@@ -152,6 +158,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   onToggleSearch,
   showLogButton = false,
   onToggleSessionLog,
+  onSessionLogAction,
   isSessionLogging = false,
   isSessionLogDisabled = false,
   isComposeBarOpen,
@@ -248,6 +255,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       ids.push('ymodemSend', 'ymodemReceive');
     }
     if (showLogButton) ids.push('sessionLog');
+    if (onSessionLogAction) ids.push('openSessionLog');
     if (historySupported) ids.push('history');
     if (onConfigureOsc7 && !hidesSftp) ids.push('configureOsc7');
     if (onStartRecording) ids.push('recording');
@@ -264,6 +272,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     onSetTerminalEncoding,
     onStartRecording,
     showLogButton,
+    onSessionLogAction,
   ]);
 
   const itemLabels = useMemo(
@@ -278,6 +287,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       sessionLog: isSessionLogging
         ? t('terminal.toolbar.stopSessionLog')
         : t('terminal.toolbar.startSessionLog'),
+      openSessionLog: t('terminal.toolbar.openSessionLog'),
       scripts: t('terminal.toolbar.scripts'),
       history: t('terminal.toolbar.history'),
       configureOsc7: t('terminal.toolbar.configureOsc7'),
@@ -298,6 +308,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       compose: <TextCursorInput size={14} />,
       search: <Search size={14} />,
       sessionLog: <FileText size={14} />,
+      openSessionLog: <FileSearch size={14} />,
       scripts: <Zap size={14} />,
       history: <History size={14} />,
       configureOsc7: <FolderSync size={14} />,
@@ -631,6 +642,39 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
             <TooltipContent side="bottom">{t('terminal.toolbar.searchTerminal')}</TooltipContent>
           </Tooltip>
         );
+      case 'openSessionLog':
+        return (
+          <div key={id} className="flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="secondary" size="icon" className={buttonBase}
+                  aria-label={t('terminal.toolbar.openSessionLog')}
+                  onClick={() => onSessionLogAction?.('open')}>
+                  <FileSearch size={12} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.toolbar.openSessionLog')}</TooltipContent>
+            </Tooltip>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="secondary" size="icon" className={cn(buttonBase, 'w-4')}
+                  aria-label={t('terminal.toolbar.sessionLogActions')}>
+                  <ChevronDown size={10} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-56 p-1">
+                {(['reveal', 'chooseApplication', 'systemDefault'] as const).map(action => (
+                  <PopoverClose asChild key={action}>
+                    <button type="button" className={menuItemClass} onClick={() => onSessionLogAction?.(action)}>
+                      {t(`terminal.toolbar.sessionLog.${action}`)}
+                    </button>
+                  </PopoverClose>
+                ))}
+                <p className="px-2 py-1 text-xs text-muted-foreground">{t('terminal.toolbar.sessionLog.rememberApplication')}</p>
+              </PopoverContent>
+            </Popover>
+          </div>
+        );
       case 'sessionLog':
         return (
           <Tooltip key={id}>
@@ -902,6 +946,20 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
               <span className="flex-1 text-left truncate">{t('terminal.toolbar.searchTerminal')}</span>
             </button>
           </PopoverClose>
+        );
+      case 'openSessionLog':
+        return (
+          <React.Fragment key={id}>
+            {(['open', 'reveal', 'chooseApplication', 'systemDefault'] as const).map(action => (
+              <PopoverClose asChild key={action}>
+                <button type="button" className={menuItemClass} onClick={() => onSessionLogAction?.(action)}>
+                  <FileSearch size={12} className="shrink-0" />
+                  <span className="flex-1 text-left truncate">{t(action === 'open'
+                    ? 'terminal.toolbar.openSessionLog' : `terminal.toolbar.sessionLog.${action}`)}</span>
+                </button>
+              </PopoverClose>
+            ))}
+          </React.Fragment>
         );
       case 'sessionLog':
         return (

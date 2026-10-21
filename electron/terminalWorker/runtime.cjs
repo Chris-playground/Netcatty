@@ -526,6 +526,9 @@ function createTerminalWorkerRuntime(options = {}) {
         ? (sessionOutputGenerations.get(requestedSessionId) ?? 0)
         : null;
       if (requestedSessionId) {
+        // A reconnect may disable auto-save, so there may be no startStream()
+        // call to replace the previous connection's saved-log association.
+        require("../bridges/sessionLogStreamManager.cjs").forgetSessionLog(requestedSessionId);
         sessionRequestIds.set(requestedSessionId, message.requestId);
         sessionLifecycleTombstoneTimes.delete(requestedSessionId);
       }

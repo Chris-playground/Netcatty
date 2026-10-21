@@ -1,6 +1,14 @@
 import type { Messages } from '../types';
 
 export const zhCNTerminalMessages: Messages = {
+  'terminal.toolbar.openSessionLog': '打开会话日志',
+  'terminal.toolbar.sessionLogActions': '会话日志操作',
+  'terminal.toolbar.sessionLog.reveal': '在文件夹中显示会话日志',
+  'terminal.toolbar.sessionLog.chooseApplication': '选择应用打开…',
+  'terminal.toolbar.sessionLog.systemDefault': '使用系统默认应用打开',
+  'terminal.toolbar.sessionLog.rememberApplication': '所选应用将用于之后打开日志。',
+  'terminal.toolbar.openSessionLogFailed': '无法打开会话日志。',
+
   'terminal.menu.saveScreen': '保存当前屏幕',
   'terminal.saveScreen.failed': '保存终端屏幕失败。',
   // 多行粘贴确认对话框（#3398）

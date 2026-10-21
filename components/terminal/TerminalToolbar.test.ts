@@ -213,3 +213,13 @@ for (const host of [serialHost, pluginHost]) {
     assert.equal(renderToolbar(host).includes('aria-label="Open SFTP"'), false);
   });
 }
+
+test('saved log shortcut is a direct toolbar action independent of recording and connection status', () => {
+  for (const status of ['connected', 'disconnected'] as const) {
+    const markup = renderToolbar(sshHost, status, { onSessionLogAction: () => {} });
+    assert.match(markup, /aria-label="Open session log"/);
+    assert.match(markup, /aria-label="Session log actions"/);
+    assert.doesNotMatch(markup, /aria-label="Open session log"[^>]*disabled/);
+    assert.ok(markup.indexOf('aria-label="Open session log"') < markup.indexOf('aria-label="More actions"'));
+  }
+});

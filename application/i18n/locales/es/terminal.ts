@@ -1,6 +1,14 @@
 import type { Messages } from '../types';
 
 export const esTerminalMessages: Messages = {
+  'terminal.toolbar.openSessionLog': 'Abrir registro de sesión',
+  'terminal.toolbar.sessionLogActions': 'Acciones del registro',
+  'terminal.toolbar.sessionLog.reveal': 'Mostrar registro en carpeta',
+  'terminal.toolbar.sessionLog.chooseApplication': 'Abrir con una aplicación…',
+  'terminal.toolbar.sessionLog.systemDefault': 'Abrir con aplicación predeterminada',
+  'terminal.toolbar.sessionLog.rememberApplication': 'Se recuerda la aplicación elegida.',
+  'terminal.toolbar.openSessionLogFailed': 'No se pudo abrir el registro.',
+
   'terminal.menu.saveScreen': 'Guardar pantalla actual',
   'terminal.saveScreen.failed': 'No se pudo guardar la pantalla del terminal.',
   // Diálogo de confirmación de pegado multilínea (#3398)

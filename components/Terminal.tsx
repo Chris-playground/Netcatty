@@ -73,6 +73,7 @@ import {
 } from "../application/state/terminalAutoReconnect";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { readOptionalStoredStringValue, useStoredString } from "../application/state/useStoredString";
+import { performSessionLogAction, type SessionLogAction } from "../application/state/sessionLogActions";
 import { useSessionLogBackend } from "../application/state/useSessionLogBackend";
 import { useTerminalLayoutSuppressActive } from "../application/state/terminalLayoutSuppressStore";
 import { useAppearanceChromeStore } from "../application/state/appearanceChromeStore";
@@ -4127,6 +4128,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onClipboardImageUploadResult: handleClipboardImageUploadResult,
   });
 
+  const handleSessionLogAction = useCallback(async (action: SessionLogAction) => {
+    try {
+      await performSessionLogAction(sessionRef.current ?? sessionId, action);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('terminal.toolbar.openSessionLogFailed'));
+    }
+  }, [sessionId, t]);
+
   const handleToggleSessionLog = useCallback(async () => {
     const currentSessionId = sessionRef.current ?? sessionId;
     if (!currentSessionId) {
@@ -4283,6 +4292,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       isSearchOpen={isSearchOpen}
       onToggleSearch={handleToggleSearch}
       showLogButton
+      onSessionLogAction={handleSessionLogAction}
       onToggleSessionLog={handleToggleSessionLog}
       isSessionLogging={isSessionLogging}
       isSessionLogDisabled={status !== "connected" && !isSessionLogging}
@@ -4315,6 +4325,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleSendYmodem,
     handleSetTerminalEncoding,
     handleToggleSessionLog,
+    handleSessionLogAction,
     handleToggleSearch,
     handleToolbarRecordingToggle,
     host,

@@ -127,6 +127,8 @@ declare global {
     stopManualSessionLog?(payload: {
       sessionId: string;
     }): Promise<{ success: boolean; stopped: boolean; error?: string; filePath?: string }>;
+    prepareSessionLog?(payload: { sessionId: string }): Promise<{ success: boolean; filePath?: string; error?: string }>;
+    revealSessionLog?(payload: { sessionId: string }): Promise<{ success: boolean; error?: string }>;
     getManualSessionLogStatus?(payload: {
       sessionId: string;
     }): Promise<{ success: boolean; isLogging: boolean; error?: string }>;
