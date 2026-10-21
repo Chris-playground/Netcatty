@@ -757,6 +757,23 @@ test("CSV import warns and drops a circular ProxyJump chain", () => {
   assert.ok(imported.issues.some((issue) => issue.level === "warning" && /circular/i.test(issue.message)));
 });
 
+test("CSV import drops inline hops created only for a rejected self-referential ProxyJump", () => {
+  const imported = importVaultHostsFromText("csv", [
+    "Hostname,Username,ProxyJump",
+    "ok.example.com,root,kept-hop.example.com",
+    "app.example.com,root,\"new-hop.example.com,app.example.com\"",
+  ].join("\n"));
+
+  const hostnames = imported.hosts.map((host) => host.hostname).sort();
+  assert.deepEqual(hostnames, ["app.example.com", "kept-hop.example.com", "ok.example.com"]);
+  const app = imported.hosts.find((host) => host.hostname === "app.example.com");
+  const ok = imported.hosts.find((host) => host.hostname === "ok.example.com");
+  const kept = imported.hosts.find((host) => host.hostname === "kept-hop.example.com");
+  assert.equal(app?.hostChain, undefined);
+  assert.deepEqual(ok?.hostChain?.hostIds, kept ? [kept.id] : []);
+  assert.ok(imported.issues.some((issue) => issue.level === "warning" && /circular/i.test(issue.message)));
+});
+
 test("CSV import warns and ignores a ProxyJump value that is not a jump host", () => {
   const imported = importVaultHostsFromText("csv", [
     "Hostname,Username,ProxyJump",

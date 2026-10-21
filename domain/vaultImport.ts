@@ -557,6 +557,7 @@ const attachCsvProxyJumpChains = (
 
     const resolvedIds: string[] = [];
     const unresolved: string[] = [];
+    const inlineCountBefore = inlineHosts.length;
     for (const spec of specs) {
       const jump = parseJumpHostSpec(spec);
       if (!jump) {
@@ -580,6 +581,12 @@ const attachCsvProxyJumpChains = (
     }
 
     if (resolvedIds.includes(host.id)) {
+      if (inlineHosts.length > inlineCountBefore) {
+        const droppedIds = new Set(inlineHosts.splice(inlineCountBefore).map((item) => item.id));
+        for (let index = matchable.length - 1; index >= 0; index -= 1) {
+          if (droppedIds.has(matchable[index].id)) matchable.splice(index, 1);
+        }
+      }
       issues.push({
         level: "warning",
         message: `CSV: detected circular reference in ProxyJump for "${host.label}", skipping chain.`,
