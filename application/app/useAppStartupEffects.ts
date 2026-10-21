@@ -357,6 +357,9 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       // exactly the same outcome.
       let hasDirty = false;
       let reason: "editors" | "transfers" | undefined;
+      // Captured before pause. Only transferring/queued rows were active
+      // because of this prompt.
+      let tasksToResume: { id: string }[] = [];
       try {
         // Pending handoffs retain source contents; accepted handoffs clear them.
         hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
@@ -369,16 +372,18 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
             !task.parentTaskId && !["completed", "failed", "cancelled"].includes(task.status)
           ));
           if (unfinishedTasks.length > 0) {
+            const resumable = unfinishedTasks.filter((task) => (
+              task.status === "transferring" || task.status === "queued"
+            ));
             await Promise.allSettled(unfinishedTasks.map((task) => sftpTransferCenterStore.pause(task.id)));
             hasDirty = !window.confirm(t('sftp.transferCenter.quitConfirm', { count: unfinishedTasks.length }));
             if (hasDirty) {
-              // The user chose to stay: undo the pause we applied for the prompt
-              // and tell main this was already answered, so it does not raise a
-              // second (blocking) "unsaved editors" dialog.
+              // The user chose to stay. Main must hear that before any resume:
+              // resume can outlive the 5s dirty-check timeout, and a late reply
+              // lets the app quit anyway. The synchronous dialog is also skipped
+              // because this prompt was already answered.
               reason = "transfers";
-              await Promise.allSettled(unfinishedTasks
-                .filter((task) => task.status !== "paused")
-                .map((task) => sftpTransferCenterStore.resume(task.id)));
+              tasksToResume = resumable;
             }
           }
         }
@@ -392,6 +397,9 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         // bad state we'd rather log than bubble out of the listener and
         // disable the quit guard for the rest of the session.
         console.error('[App] reportDirtyEditorsResult failed:', err);
+      }
+      if (tasksToResume.length > 0) {
+        void Promise.allSettled(tasksToResume.map((task) => sftpTransferCenterStore.resume(task.id)));
       }
     });
     return unsub;
