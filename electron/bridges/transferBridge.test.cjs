@@ -10,11 +10,16 @@ const { EventEmitter } = require("node:events");
 const { PassThrough, Readable, Writable } = require("node:stream");
 
 const transferBridge = require("./transferBridge.cjs");
+// Most download tests here drive the session slot / isolated pool with tiny
+// fixture files. Keep them on that path; the small-file exemption has its own
+// test below that restores the production threshold.
+transferBridge._setSmallDownloadSlotExemptBytesForTests(0);
 const sftpBridge = require("./sftpBridge.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const {
   DOWNLOAD_TRANSFER_CONCURRENCY,
   TRANSFER_CHUNK_SIZE,
+  SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES,
   SMALL_UPLOAD_SHARED_MAX_BYTES,
   UPLOAD_TRANSFER_CONCURRENCY,
 } = require("./transferLimits.cjs");
@@ -13442,7 +13447,9 @@ test("connection loss mid-upload fails instead of hanging on the dead shared cha
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-dead-connection-upload-"));
   t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
   const localPath = path.join(tempDir, "fresh.bin");
-  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 4, 7);
+  // Above the small-upload cutoff so the upload opens an isolated channel
+  // (files that fit one fanout window go straight to the shared session).
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE * 4, 7);
   await fs.promises.writeFile(localPath, payload);
   let connected = true;
   let sharedOpensAfterLoss = 0;
@@ -13505,6 +13512,66 @@ test("connection loss mid-upload fails instead of hanging on the dead shared cha
   assert.equal(sharedOpensAfterLoss, 0, "no OPEN may be issued on the closed browse channel");
 });
 
+test("connection loss mid-upload fails a small upload that runs on the shared channel", async (t) => {
+  // Files that fit one fanout window skip the isolated channel. A reset still
+  // has to fail them: ssh2 errors the in-flight writes when the channel closes.
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-dead-connection-small-upload-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const localPath = path.join(tempDir, "small.bin");
+  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 4, 7);
+  assert.ok(payload.length <= SMALL_UPLOAD_SHARED_MAX_BYTES);
+  await fs.promises.writeFile(localPath, payload);
+  let connected = true;
+  let isolatedOpens = 0;
+  const shared = createFastSftp({});
+  shared.lstat = (_p, cb) => { const e = new Error("ENOENT"); e.code = 2; cb(e); };
+  shared.open = (_p, _f, cb) => { if (shared.readable !== false) cb(null, Buffer.from("h")); };
+  shared.close = (_h, cb) => { if (shared.readable !== false) cb(null); };
+  shared.write = (_h, _b, _o, _l, _p, cb) => {
+    if (shared.readable === false) return; // ssh2: never answered
+    connected = false;
+    shared.readable = false;
+    shared.emit("end");
+    shared.emit("close");
+    setImmediate(() => cb(new Error("No response from server")));
+  };
+  const client = {
+    sftp: shared,
+    stat: async () => {
+      if (!connected) return new Promise(() => {});
+      const e = new Error("ENOENT"); e.code = 2; throw e;
+    },
+    delete: async () => {},
+    rename: async () => {},
+    client: {
+      sftp(callback) {
+        isolatedOpens += 1;
+        if (!connected) throw new Error("Not connected");
+        callback(new Error("isolated channel must not be needed"));
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await Promise.race([
+    transferBridge.startTransfer({ sender: createSender() }, {
+      transferId: "dead-connection-small-upload",
+      sourcePath: localPath,
+      targetPath: "/tmp/small.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      resumable: true,
+    }),
+    new Promise((resolve) => setTimeout(() => resolve({ hung: true }), 5000)),
+  ]);
+
+  assert.notEqual(result.hung, true, "small shared-channel upload hung after connection loss");
+  assert.ok(result.error, "small upload must fail with an error after connection loss");
+  assert.equal(isolatedOpens, 0, "small upload must stay on the shared channel");
+});
+
 test("isolated channel ending before OPEN on a resumable stage does not stick the path gate", async (t) => {
   // The isolated subsystem can die before OPEN while the shared browse channel
   // stays healthy. markOpenIssued already ran, but no OPEN was sent. A generated
@@ -13514,8 +13581,10 @@ test("isolated channel ending before OPEN on a resumable stage does not stick th
   t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
   const localPath = path.join(tempDir, "fresh.bin");
   const laterLocalPath = path.join(tempDir, "later.bin");
-  const payload = Buffer.from("pre-open-stage");
-  const laterPayload = Buffer.from("later-upload");
+  // Both payloads exceed the small-upload cutoff so each upload tries the
+  // isolated channel first instead of going straight to the shared session.
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + 1, "pre-open-stage");
+  const laterPayload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + 1, "later-upload");
   await fs.promises.writeFile(localPath, payload);
   await fs.promises.writeFile(laterLocalPath, laterPayload);
   const targetPath = "/tmp/pre-open-stage.bin";
@@ -13767,4 +13836,179 @@ test("single-channel pipelined upload stays on the existing SFTP channel", async
 
   assert.equal(secondChannelOpens, 0);
   assert.equal(sharedPuts, 1);
+});
+
+test("small downloads skip the session fast slot and run in parallel on the shared channel", async (t) => {
+  transferBridge._setSmallDownloadSlotExemptBytesForTests(null);
+  t.after(() => transferBridge._setSmallDownloadSlotExemptBytesForTests(0));
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-small-download-parallel-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const payload = Buffer.alloc(3 * TRANSFER_CHUNK_SIZE, 5);
+  assert.ok(payload.length <= SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES);
+  let openHandles = 0;
+  let maxOpenHandles = 0;
+  let isolatedOpens = 0;
+  const pendingReads = [];
+  const shared = createFastSftp({
+    open(_p, flags, callback) {
+      assert.equal(flags, "r");
+      openHandles += 1;
+      maxOpenHandles = Math.max(maxOpenHandles, openHandles);
+      callback(null, Buffer.from("h"));
+    },
+    read(_h, buffer, offset, length, position, callback) {
+      // Hold reads until both downloads have opened their handles.
+      pendingReads.push(() => {
+        const n = Math.max(0, Math.min(length, payload.length - position));
+        payload.copy(buffer, offset, position, position + n);
+        callback(null, n);
+      });
+    },
+    close(_h, callback) { openHandles -= 1; callback(null); },
+  });
+  const client = {
+    sftp: shared,
+    stat: async () => ({ size: payload.length, isDirectory: false, mtime: 1 }),
+    client: { sftp(callback) { isolatedOpens += 1; callback(new Error("isolated channel not expected")); } },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", client]]) });
+  const start = (id) => transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: id,
+    sourcePath: `/tmp/${id}.bin`,
+    targetPath: path.join(tempDir, `${id}.bin`),
+    sourceType: "sftp",
+    targetType: "local",
+    sourceSftpId: "source",
+    totalBytes: payload.length,
+    skipAdmission: true,
+  });
+  const a = start("small-a");
+  const b = start("small-b");
+  assert.ok(await waitUntil(() => maxOpenHandles >= 2, 2000), "both small downloads must be in flight together");
+  assert.equal(transferBridge._getSessionFastDownloadWaiterCountForTests(client), 0);
+  const drain = setInterval(() => { while (pendingReads.length) pendingReads.shift()(); }, 1);
+  t.after(() => clearInterval(drain));
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(ra.error, undefined, ra.error);
+  assert.equal(rb.error, undefined, rb.error);
+  assert.equal(isolatedOpens, 0);
+  assert.deepEqual(await fs.promises.readFile(path.join(tempDir, "small-a.bin")), payload);
+  assert.deepEqual(await fs.promises.readFile(path.join(tempDir, "small-b.bin")), payload);
+});
+
+test("small download retries once on a fresh channel when the shared channel has ended", async (t) => {
+  transferBridge._setSmallDownloadSlotExemptBytesForTests(null);
+  t.after(() => transferBridge._setSmallDownloadSlotExemptBytesForTests(0));
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-small-download-fresh-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const payload = Buffer.from("fresh-channel-bytes");
+  assert.ok(payload.length <= SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES);
+  let sharedOpens = 0;
+  let isolatedOpens = 0;
+  const shared = createFastSftp({
+    // Ended browse channel still exposes open/read, so the small-file path
+    // selects it. #3814 treats readable === false as a dead channel.
+    readable: false,
+    open() {
+      sharedOpens += 1;
+      throw new Error("ended shared channel must not accept OPEN");
+    },
+    read() {
+      throw new Error("ended shared channel must not accept READ");
+    },
+  });
+  const fresh = createFastSftp({
+    fastGet(_remotePath, localPath, _options, done) {
+      fs.promises.writeFile(localPath, payload).then(() => done(), done);
+    },
+  });
+  const client = {
+    sftp: shared,
+    stat: async () => ({ size: payload.length, isDirectory: false, mtime: 1 }),
+    client: {
+      sftp(callback) {
+        isolatedOpens += 1;
+        callback(null, fresh);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", client]]) });
+  const targetPath = path.join(tempDir, "fresh.bin");
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: "small-stale-shared",
+    sourcePath: "/tmp/fresh.bin",
+    targetPath,
+    sourceType: "sftp",
+    targetType: "local",
+    sourceSftpId: "source",
+    totalBytes: payload.length,
+    skipAdmission: true,
+  });
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(sharedOpens, 0);
+  assert.equal(isolatedOpens, 1);
+  assert.deepEqual(await fs.promises.readFile(targetPath), payload);
+});
+
+test("small download does not open a fresh channel for ENOENT or EACCES", async (t) => {
+  transferBridge._setSmallDownloadSlotExemptBytesForTests(null);
+  t.after(() => transferBridge._setSmallDownloadSlotExemptBytesForTests(0));
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-small-download-file-status-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  let isolatedOpens = 0;
+  const client = {
+    sftp: createFastSftp({
+      open(_remotePath, _flags, callback) {
+        const error = new Error("No such file");
+        error.code = "ENOENT";
+        callback(error);
+      },
+      read() {
+        throw new Error("read must not run after ENOENT");
+      },
+    }),
+    stat: async () => ({ size: 4, isDirectory: false, mtime: 1 }),
+    client: {
+      sftp(callback) {
+        isolatedOpens += 1;
+        callback(new Error("fresh channel must not open for ENOENT"));
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", client]]) });
+  const missing = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: "small-enoent",
+    sourcePath: "/tmp/missing.bin",
+    targetPath: path.join(tempDir, "missing.bin"),
+    sourceType: "sftp",
+    targetType: "local",
+    sourceSftpId: "source",
+    totalBytes: 4,
+    skipAdmission: true,
+  });
+  assert.match(missing.error || "", /No such file|ENOENT/);
+  assert.equal(isolatedOpens, 0);
+
+  client.sftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      const error = new Error("Permission denied");
+      error.code = "EACCES";
+      callback(error);
+    },
+    read() {
+      throw new Error("read must not run after EACCES");
+    },
+  });
+  const denied = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: "small-eacces",
+    sourcePath: "/tmp/denied.bin",
+    targetPath: path.join(tempDir, "denied.bin"),
+    sourceType: "sftp",
+    targetType: "local",
+    sourceSftpId: "source",
+    totalBytes: 4,
+    skipAdmission: true,
+  });
+  assert.match(denied.error || "", /Permission denied|EACCES/);
+  assert.equal(isolatedOpens, 0);
 });
