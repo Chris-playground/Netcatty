@@ -871,18 +871,6 @@ async function hashLocalPrefix(filePath, bytes, options) {
   return hashReadable(stream, options);
 }
 
-async function hashLocalRange(filePath, start, end, options) {
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || start < 0) {
-    return null;
-  }
-  if (end === start) return EMPTY_SHA256_HEX;
-  const stream = await raceLocalStreamOpenAgainstAbort(
-    openLocalReadStream(filePath, { start, end: end - 1 }),
-    options?.signal,
-  );
-  return hashReadable(stream, options);
-}
-
 async function hashLocalFile(filePath, options = {}) {
   const stream = await raceLocalStreamOpenAgainstAbort(
     openLocalReadStream(filePath),
@@ -1592,106 +1580,105 @@ function logTransferDiag(transfer, event, extra = {}) {
 // Shared references
 let sftpClients = null;
 
-// Size, mtime, and a short content sample of a local upload source.
-// A dropped upload never pauses, so Retry has a checkpoint and no SHA-256.
-// Same-size rewrites can restore mtime; the head sample plus a small window
-// ending at the published checkpoint catch an edit in the bytes resume would
-// keep. Kept in memory because Retry is same-process — a relaunch with no
-// fingerprint already restarts at 0. This is not a whole-file hash.
-const LOCAL_UPLOAD_HEAD_SAMPLE_BYTES = 256 * 1024;
-const LOCAL_UPLOAD_PREFIX_WINDOW_BYTES = 64 * 1024;
-const localUploadSourceIdentity = new Map();
+// Incremental SHA-256 of the bytes actually acknowledged and written to the
+// remote .part, in contiguous order. Retry re-reads the local prefix and
+// resumes only when that digest and the source size still match the offset
+// being resumed. SHA-256 cannot rewind, so a checkpoint trimmed below the
+// covered offset drops the digest and restarts at 0. Kept in memory because
+// Retry is same-process — a relaunch with no fingerprint already restarts at 0.
+const localUploadAcknowledgedPrefix = new Map();
 
-function rememberLocalUploadSourceIdentity(transferId, stat) {
-  if (!transferId || !stat) return;
-  const size = Number(stat.size);
-  const mtimeMs = Number(stat.mtimeMs);
-  if (!Number.isFinite(size) || size < 0 || !Number.isFinite(mtimeMs)) return;
-  const sample = typeof stat.sample === "string" && stat.sample.startsWith("sha256:")
-    ? stat.sample
-    : null;
-  // Without the head sample a later retry cannot prove the prefix.
-  if (!sample && size > 0) return;
-  localUploadSourceIdentity.set(String(transferId), {
-    size,
-    mtimeMs,
-    sample,
-    prefixWindow: null,
-    prefixWindowGeneration: 0,
-    prefixWindowPending: null,
+function resetLocalUploadAcknowledgedPrefix(transferId, size) {
+  if (!transferId) return;
+  const safeSize = Number(size);
+  localUploadAcknowledgedPrefix.set(String(transferId), {
+    size: Number.isFinite(safeSize) && safeSize >= 0 ? safeSize : null,
+    hash: crypto.createHash("sha256"),
+    offset: 0,
+    savedHash: null,
+    digest: null,
+    digestOffset: 0,
+    broken: false,
   });
 }
 
-function scheduleLocalUploadPrefixWindow(transferId, sourcePath, checkpoint) {
-  const remembered = localUploadSourceIdentity.get(String(transferId));
-  if (!remembered || !sourcePath) return;
-  const end = Math.floor(Number(checkpoint) || 0);
-  const coverage = Math.min(LOCAL_UPLOAD_HEAD_SAMPLE_BYTES, remembered.size);
-  // The head sample already covers [0, coverage). A later zeroed progress
-  // event must not drop the window captured for the real checkpoint.
-  if (!(end > coverage)) return;
-  if (remembered.prefixWindow?.end === end && remembered.prefixWindow.digest) return;
-  const generation = remembered.prefixWindowGeneration + 1;
-  remembered.prefixWindowGeneration = generation;
-  const windowBytes = Math.min(LOCAL_UPLOAD_PREFIX_WINDOW_BYTES, end);
-  const start = end - windowBytes;
-  remembered.prefixWindowPending = hashLocalRange(sourcePath, start, end).then((digest) => {
-    const current = localUploadSourceIdentity.get(String(transferId));
-    if (!current || current.prefixWindowGeneration !== generation || !digest) return;
-    current.prefixWindow = { end, digest: `sha256:${digest}` };
-  }).catch(() => {});
+function noteAcknowledgedUploadBytes(transferId, position, bytes) {
+  const entry = transferId ? localUploadAcknowledgedPrefix.get(String(transferId)) : null;
+  if (!entry || entry.broken || !Buffer.isBuffer(bytes) || bytes.length === 0) return;
+  const at = Math.floor(Number(position) || 0);
+  if (at !== entry.offset) {
+    entry.broken = true;
+    entry.digest = null;
+    entry.savedHash = null;
+    return;
+  }
+  entry.hash.update(bytes);
+  entry.offset += bytes.length;
+  // Snapshot without finalizing the running hash. digestOffset is the only
+  // checkpoint this digest can resume.
+  entry.savedHash = entry.hash.copy();
+  entry.digest = entry.savedHash.copy().digest("hex");
+  entry.digestOffset = entry.offset;
 }
 
-async function flushLocalUploadPrefixWindow(transferId) {
-  const remembered = transferId ? localUploadSourceIdentity.get(String(transferId)) : null;
-  if (!remembered?.prefixWindowPending) return;
-  try {
-    await remembered.prefixWindowPending;
-  } catch {
-    // A missed window makes the next retry restart from 0.
-  }
+function localUploadAcknowledgedOffset(transferId) {
+  const entry = transferId ? localUploadAcknowledgedPrefix.get(String(transferId)) : null;
+  if (!entry || entry.broken || !entry.digest || !(entry.digestOffset > 0)) return 0;
+  return entry.digestOffset;
 }
 
-async function localUploadSourceIdentityMatches(transferId, stat, sourcePath, checkpoint) {
-  if (!transferId || !stat) return false;
-  const remembered = localUploadSourceIdentity.get(String(transferId));
-  if (!remembered) return false;
-  if (Number(stat.size) !== remembered.size || Number(stat.mtimeMs) !== remembered.mtimeMs) {
-    return false;
-  }
-  if (!remembered.sample || stat.sample !== remembered.sample) return false;
-  const end = Math.floor(Number(checkpoint) || 0);
-  const coverage = Math.min(LOCAL_UPLOAD_HEAD_SAMPLE_BYTES, remembered.size);
-  if (end <= coverage) return true;
-  await flushLocalUploadPrefixWindow(transferId);
-  const windowBytes = Math.min(LOCAL_UPLOAD_PREFIX_WINDOW_BYTES, end);
-  const start = end - windowBytes;
-  if (!remembered.prefixWindow || remembered.prefixWindow.end !== end || !remembered.prefixWindow.digest) {
-    return false;
-  }
+async function localUploadAcknowledgedPrefixMatches(transferId, sourcePath, checkpoint, sourceSize) {
+  const entry = transferId ? localUploadAcknowledgedPrefix.get(String(transferId)) : null;
+  const offset = Math.floor(Number(checkpoint) || 0);
+  if (!entry || entry.broken || !entry.digest || !entry.savedHash) return false;
+  if (!(offset > 0) || entry.digestOffset !== offset) return false;
+  if (!Number.isFinite(Number(sourceSize)) || Number(sourceSize) !== entry.size) return false;
   try {
-    const digest = await hashLocalRange(sourcePath, start, end);
-    return remembered.prefixWindow.digest === `sha256:${digest}`;
+    const digest = await hashLocalPrefix(sourcePath, offset);
+    return digest === entry.digest;
   } catch {
     return false;
   }
 }
 
-async function currentLocalUploadSourceStat(transfer, sourcePath) {
-  const cached = transfer?.sourceSoftIdentity;
-  const cachedSize = Number(cached?.size);
-  const cachedMtime = Number(cached?.mtimeMs);
-  if (Number.isFinite(cachedSize) && Number.isFinite(cachedMtime)) {
-    return {
-      size: cachedSize,
-      mtimeMs: cachedMtime,
-      sample: typeof cached.sample === "string" ? cached.sample : null,
-    };
+function rewindLocalUploadAcknowledgedPrefix(transferId) {
+  const entry = transferId ? localUploadAcknowledgedPrefix.get(String(transferId)) : null;
+  if (!entry || entry.broken || !entry.savedHash) return;
+  entry.hash = entry.savedHash.copy();
+  entry.offset = entry.digestOffset;
+}
+
+// Keep the running hash aligned with the offset about to be written. A smaller
+// checkpoint than digestOffset cannot reuse this digest.
+function adoptAcknowledgedPrefixOffset(transferId, checkpoint, sourceSize) {
+  const entry = transferId ? localUploadAcknowledgedPrefix.get(String(transferId)) : null;
+  const offset = Math.max(0, Math.floor(Number(checkpoint) || 0));
+  if (!entry) return offset;
+  const size = Number(sourceSize);
+  const sizeOk = !Number.isFinite(entry.size) || !Number.isFinite(size) || entry.size === size;
+  if (
+    offset > 0
+    && sizeOk
+    && !entry.broken
+    && entry.digest
+    && entry.savedHash
+    && entry.digestOffset === offset
+  ) {
+    entry.hash = entry.savedHash.copy();
+    entry.offset = entry.digestOffset;
+    return offset;
   }
+  resetLocalUploadAcknowledgedPrefix(transferId, Number.isFinite(size) ? size : entry.size);
+  return 0;
+}
+
+async function currentLocalUploadSourceSize(transfer, sourcePath) {
+  const cachedSize = Number(transfer?.sourceSoftIdentity?.size);
+  if (Number.isFinite(cachedSize) && cachedSize >= 0) return cachedSize;
   try {
     const st = await statLocal(sourcePath);
-    if (!Number.isFinite(st?.size) || !Number.isFinite(st?.mtimeMs)) return null;
-    return { size: Number(st.size), mtimeMs: Number(st.mtimeMs), sample: null };
+    if (!Number.isFinite(st?.size) || st.size < 0) return null;
+    return Number(st.size);
   } catch {
     return null;
   }
@@ -4872,16 +4859,31 @@ async function runPausableConcurrentRanges({
           active += 1;
 
           void copyRange(position, length)
-            .then(() => {
+            .then((written) => {
               // After force-settle, abandoned ranges must not publish progress
               // or advance checkpoints into the caller's truncate/fallback window.
               if (settled) return;
               transferred += length;
-              completedRanges.set(position, position + length);
+              // Uploads return the bytes just acknowledged so the prefix digest
+              // follows the contiguous checkpoint. Downloads store the end offset.
+              if (Buffer.isBuffer(written)) {
+                completedRanges.set(position, { end: position + length, bytes: written });
+              } else {
+                completedRanges.set(position, position + length);
+              }
               while (completedRanges.has(contiguousCheckpoint)) {
-                const nextCheckpoint = completedRanges.get(contiguousCheckpoint);
+                const next = completedRanges.get(contiguousCheckpoint);
                 completedRanges.delete(contiguousCheckpoint);
-                contiguousCheckpoint = nextCheckpoint;
+                if (typeof next === "number") {
+                  contiguousCheckpoint = next;
+                } else {
+                  noteAcknowledgedUploadBytes(
+                    transfer.transferId,
+                    contiguousCheckpoint,
+                    next.bytes,
+                  );
+                  contiguousCheckpoint = next.end;
+                }
               }
               publishContiguousCheckpoint(false);
             })
@@ -4977,6 +4979,16 @@ async function uploadFileConcurrent(
   // Mutable: may shrink after path-gate wait if a stale truncating OPEN wiped
   // the stage while we were waiting (Codex P2 on 294b7a4b).
   let checkpoint = Math.max(0, Math.min(transfer.checkpointBytes || 0, fileSize));
+  // A fallback strategy may have moved the resume offset. The prefix digest
+  // only matches its own offset; anything else restarts at 0 before OPEN
+  // chooses r+ vs w. Fingerprinted resumes do not consult this digest.
+  if (!transfer.sourceFingerprint) {
+    const alignedPrefix = adoptAcknowledgedPrefixOffset(transfer.transferId, checkpoint, fileSize);
+    if (alignedPrefix !== checkpoint) {
+      checkpoint = alignedPrefix;
+      transfer.checkpointBytes = alignedPrefix;
+    }
+  }
   let channelError = null;
   const onChannelError = (error) => {
     channelError = channelError || error;
@@ -5038,6 +5050,9 @@ async function uploadFileConcurrent(
             transfer.staleOpenTruncatedStage = false;
             checkpoint = 0;
             transfer.checkpointBytes = 0;
+            if (localUploadAcknowledgedPrefix.has(String(transfer.transferId))) {
+              resetLocalUploadAcknowledgedPrefix(transfer.transferId, fileSize);
+            }
             try {
               sendProgress(0, fileSize, { force: true, checkpointBytes: 0 });
             } catch { /* best-effort */ }
@@ -5061,6 +5076,18 @@ async function uploadFileConcurrent(
               size = Number(st?.size);
             }
             if (Number.isFinite(size) && size >= 0 && size < checkpoint) {
+              const prefix = localUploadAcknowledgedPrefix.get(String(transfer.transferId));
+              // The prefix digest cannot be rewound to a shorter stage.
+              // Fingerprinted resumes keep the durable shorter offset.
+              if (!transfer.sourceFingerprint && prefix && prefix.digestOffset > size) {
+                checkpoint = 0;
+                transfer.checkpointBytes = 0;
+                resetLocalUploadAcknowledgedPrefix(transfer.transferId, fileSize);
+                try {
+                  sendProgress(0, fileSize, { force: true, checkpointBytes: 0 });
+                } catch { /* best-effort */ }
+                return;
+              }
               checkpoint = size;
               transfer.checkpointBytes = size;
               try {
@@ -5084,11 +5111,13 @@ async function uploadFileConcurrent(
         concurrency: UPLOAD_TRANSFER_CONCURRENCY,
         copyRange: async (position, length) => {
           // Size-based resume: read the source range at `position` and WRITE it.
-          // No per-chunk content digest (FileZilla / WinSCP style).
+          // The returned buffer is the prefix-digest input, hashed only after
+          // the write is acknowledged and only in contiguous order.
           const buffer = Buffer.allocUnsafe(length);
           await readLocalRange(localHandle, buffer, position, length);
           if (transfer.cancelled) throw new Error("Transfer cancelled");
           await writeSftpRange(sftp, remoteHandle, buffer, position, length);
+          return buffer;
         },
         sendProgress,
         abortChannel,
@@ -5925,9 +5954,6 @@ async function startTransferNow(event, payload, onProgress) {
           windowBps: speed,
         });
       }
-      if (sourceType === "local" && targetType === "sftp" && !transfer.sourceFingerprint) {
-        scheduleLocalUploadPrefixWindow(transferId, sourcePath, transfer.checkpointBytes);
-      }
       const progressPayload = {
         transferId,
         parentTaskId: transfer.parentTaskId,
@@ -6122,10 +6148,11 @@ async function startTransferNow(event, payload, onProgress) {
    * head sample; hard reconnect after restart still uses full fingerprint in
    * startTransferNow.
    */
+  const SOFT_RESUME_SAMPLE_BYTES = 256 * 1024;
   const readSourceSoftIdentity = async () => {
     if (sourceType === "local") {
       const st = await statLocal(sourcePath);
-      const sampleBytes = Math.min(LOCAL_UPLOAD_HEAD_SAMPLE_BYTES, Math.max(0, st.size));
+      const sampleBytes = Math.min(SOFT_RESUME_SAMPLE_BYTES, Math.max(0, st.size));
       const sample = sampleBytes > 0
         ? await hashLocalPrefix(sourcePath, sampleBytes, { signal: transfer.signal })
         : null;
@@ -6333,7 +6360,7 @@ async function startTransferNow(event, payload, onProgress) {
       directoryEntryIdentity: transfer.directoryEntryIdentity,
     });
     cleanupTransfer();
-    localUploadSourceIdentity.delete(transferId);
+    localUploadAcknowledgedPrefix.delete(transferId);
   };
 
   const sendError = (error) => {
@@ -6445,32 +6472,35 @@ async function startTransferNow(event, payload, onProgress) {
     const hasSavedCheckpoint = transfer.checkpointBytes > 0
       || transfer.downloadCheckpointBytes > 0
       || transfer.uploadCheckpointBytes > 0;
-    // A dropped upload never pauses, so it has a checkpoint and no SHA-256.
-    // Keep it only when this local source still matches the size, mtime, and
-    // content sample recorded for that attempt. The new connection stats and
-    // trims the same .part below. A rewrite (even one that restores mtime),
+    // A dropped upload never pauses, so it has a checkpoint and no full-file
+    // SHA-256. Keep that checkpoint only when the local bytes in [0, offset)
+    // still hash to the digest of the bytes acknowledged on the .part, and
+    // the source size is unchanged. The new connection stats and trims the
+    // same .part below. A rewrite, a smaller offset than the digest covers,
     // a missing baseline, meta: identities, and every other direction restart.
     const unfingerprintedLocalUpload = sourceType === "local"
       && targetType === "sftp"
       && !transfer.sourceFingerprint;
-    const localSourceStat = unfingerprintedLocalUpload
-      ? await currentLocalUploadSourceStat(transfer, sourcePath)
+    const localSourceSize = unfingerprintedLocalUpload
+      ? await currentLocalUploadSourceSize(transfer, sourcePath)
       : null;
     const claimedUnfingerprintedUpload = unfingerprintedLocalUpload
       && transfer.checkpointBytes > 0;
     const localSourceUnchanged = claimedUnfingerprintedUpload
-      && await localUploadSourceIdentityMatches(
+      && await localUploadAcknowledgedPrefixMatches(
         transferId,
-        localSourceStat,
         sourcePath,
         transfer.checkpointBytes,
+        localSourceSize,
       );
-    // Record size, mtime, and the head sample at start. The prefix window is
-    // filled when progress publishes a checkpoint past that sample, so a
-    // mid-upload rewrite does not replace the baseline. A rejected resume
-    // records the file about to be sent from byte 0.
-    if (unfingerprintedLocalUpload && localSourceStat && !localSourceUnchanged) {
-      rememberLocalUploadSourceIdentity(transferId, localSourceStat);
+    // Start a fresh digest when this attempt will write from byte 0. A matching
+    // resume rewinds the running hash to the stored offset so later chunks append.
+    if (unfingerprintedLocalUpload) {
+      if (localSourceUnchanged) {
+        rewindLocalUploadAcknowledgedPrefix(transferId);
+      } else {
+        resetLocalUploadAcknowledgedPrefix(transferId, localSourceSize);
+      }
     }
     const verifyUploadStageOnNewConnection = localSourceUnchanged;
     if (
@@ -6569,11 +6599,23 @@ async function startTransferNow(event, payload, onProgress) {
                   claimedCheckpoint,
                 ))
             : 0;
+          if (unfingerprintedLocalUpload) {
+            const aligned = adoptAcknowledgedPrefixOffset(
+              transferId,
+              transfer.checkpointBytes,
+              localSourceSize ?? fileSize,
+            );
+            if (aligned !== transfer.checkpointBytes) {
+              transfer.checkpointBytes = aligned;
+              transfer.downloadCheckpointBytes = 0;
+              transfer.uploadCheckpointBytes = 0;
+            }
+          }
           sendProgress(transfer.checkpointBytes, fileSize, { force: true });
-          // Resume is size-based only (WinSCP/FileZilla): the durable .part size
-          // is the checkpoint. Do not re-hash [0, checkpoint) on both ends —
-          // that blocked large-file resume for seconds-to-minutes with no bytes
-          // moving.
+          // The .part size is reconciled above. Compare the local prefix to the
+          // digest of bytes already acknowledged — do not hash the remote prefix.
+          // Hashing both ends blocked large-file resume for seconds-to-minutes
+          // with no bytes moving.
           await uploadFile(
             sourcePath,
             encodedUploadPath,
@@ -7106,8 +7148,24 @@ async function startTransferNow(event, payload, onProgress) {
 
     return { transferId, totalBytes: fileSize };
   } catch (err) {
-    if (sourceType === "local" && targetType === "sftp" && !transfer.sourceFingerprint) {
-      await flushLocalUploadPrefixWindow(transferId);
+    const failureMessage = err?.message || String(err);
+    if (
+      sourceType === "local"
+      && targetType === "sftp"
+      && !transfer.sourceFingerprint
+      && !transfer.cancelled
+      && !/superseded/i.test(failureMessage)
+      && failureMessage !== "Transfer cancelled"
+    ) {
+      const covered = localUploadAcknowledgedOffset(transferId);
+      if (covered > 0) {
+        try {
+          sendProgress(covered, Number(transfer.totalBytes) || covered, {
+            force: true,
+            checkpointBytes: covered,
+          });
+        } catch { /* best-effort */ }
+      }
     }
     logTransferDiag(transfer, transfer.cancelled ? "cancelled" : "error", {
       transferred: transfer.diagLastTransferred,
