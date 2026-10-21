@@ -79,6 +79,11 @@ function createDirectoryListingGate(concurrency = DEFAULT_SFTP_DIRECTORY_LISTING
   };
 }
 
+/** Observed at queue time so a mid-walk rejection is not unhandled. */
+type QueuedFileBatch =
+  | { ok: true; errors: number }
+  | { ok: false; error: unknown };
+
 type DirectoryDiscoveryProgress = {
   discoveredFiles: number;
   nextEntryIndex: number;
@@ -91,8 +96,11 @@ type DirectoryDiscoveryProgress = {
    * barrier: trees of many small directories keep N files in flight.
    */
   fileGate?: ReturnType<typeof createDirectoryListingGate>;
-  /** Per-directory file batches; the root walk awaits them all at the end. */
-  pendingFileBatches?: Promise<number>[];
+  /**
+   * Per-directory file batches. Each promise is settled when queued; the root
+   * walk inspects the outcomes after discovery.
+   */
+  pendingFileBatches?: Promise<QueuedFileBatch>[];
   /** First session loss seen by any batch; later batches stop claiming files. */
   sessionLostError?: Error | null;
 };
@@ -1063,8 +1071,13 @@ export function useSftpDirectoryTransferOps({
       return errors.length;
       })();
       // Do not wait here: the walk continues into sibling directories while
-      // this directory's files drain through the shared fileGate.
-      progress.pendingFileBatches.push(fileBatch);
+      // this directory's files drain through the shared fileGate. Settle the
+      // batch now so a failure during that walk (unsafe filename, unexpected
+      // worker error) is handled. The root drain still surfaces the error.
+      progress.pendingFileBatches.push(fileBatch.then(
+        (errors): QueuedFileBatch => ({ ok: true, errors }),
+        (error: unknown): QueuedFileBatch => ({ ok: false, error }),
+      ));
     }
 
     return totalErrors;
@@ -1101,10 +1114,11 @@ export function useSftpDirectoryTransferOps({
     let batchError: unknown = null;
     const batches = rootProgress.pendingFileBatches!;
     for (let index = 0; index < batches.length; index += 1) {
-      try {
-        fileErrors += await batches[index];
-      } catch (error) {
-        batchError = batchError ?? error;
+      const outcome = await batches[index];
+      if (outcome.ok) {
+        fileErrors += outcome.errors;
+      } else {
+        batchError = batchError ?? outcome.error;
       }
     }
     if (walkError) throw walkError;
