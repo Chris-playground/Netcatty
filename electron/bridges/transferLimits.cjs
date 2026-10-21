@@ -35,9 +35,17 @@ const FAST_DOWNLOAD_CHANNELS_PER_SESSION = 1;
 // concurrency setting.
 const SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES = DOWNLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE;
 
+// A file that fits in one fanout window finishes in a couple of round trips.
+// Opening a dedicated sftp-server channel for it (channel open + subsystem +
+// SFTP init) costs more than the body itself on WAN links and spawns one
+// remote process per file in folder uploads, so small files use the shared
+// session's pipelined WRITE path instead.
+const SMALL_UPLOAD_SHARED_MAX_BYTES = UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE;
+
 module.exports = {
   DOWNLOAD_TRANSFER_CONCURRENCY,
   SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES,
+  SMALL_UPLOAD_SHARED_MAX_BYTES,
   FAST_DOWNLOAD_CHANNELS_PER_SESSION,
   SFTP_OPEN_TIMEOUT_MS,
   SFTP_REQUEST_TIMEOUT_MS,

@@ -5,6 +5,7 @@ const {
   FAST_DOWNLOAD_CHANNELS_PER_SESSION,
   SMALL_DOWNLOAD_SLOT_EXEMPT_BYTES,
   DOWNLOAD_TRANSFER_CONCURRENCY,
+  SMALL_UPLOAD_SHARED_MAX_BYTES,
   UPLOAD_TRANSFER_CONCURRENCY,
   TRANSFER_CHUNK_SIZE,
 } = require("./transferLimits.cjs");
@@ -19,6 +20,9 @@ test("SFTP transfer limits preserve upload safety and the pre-regression downloa
   // #2449 / Electerm-class: upload window is 2MB (64 × 32KB). Raising only
   // concurrency keeps the safe packet size while matching ssh2/Electerm defaults.
   assert.equal(UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE, 2 * 1024 * 1024);
+  // One fanout window. Files at or under this size upload on the shared browse
+  // channel instead of opening a dedicated sftp-server per file.
+  assert.equal(SMALL_UPLOAD_SHARED_MAX_BYTES, UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE);
   // #2030 reduced the shared chunk size from 512KB to 32KB. Downloads need
   // enough parallel reads to preserve the 2MB in-flight window that existed
   // after #1533, otherwise high-latency proxy paths collapse to KB/s speeds.
