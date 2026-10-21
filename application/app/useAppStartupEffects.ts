@@ -356,10 +356,14 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       // on a slow quit and then quitting anyway after the timeout is
       // exactly the same outcome.
       let hasDirty = false;
+      let reason: "editors" | "transfers" | undefined;
       try {
         // Pending handoffs retain source contents; accepted handoffs clear them.
         hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
-        if (hasDirty) toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
+        if (hasDirty) {
+          reason = "editors";
+          toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
+        }
         if (!hasDirty) {
           const unfinishedTasks = sftpTransferCenterStore.getSnapshot().tasks.filter((task) => (
             !task.parentTaskId && !["completed", "failed", "cancelled"].includes(task.status)
@@ -367,13 +371,22 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
           if (unfinishedTasks.length > 0) {
             await Promise.allSettled(unfinishedTasks.map((task) => sftpTransferCenterStore.pause(task.id)));
             hasDirty = !window.confirm(t('sftp.transferCenter.quitConfirm', { count: unfinishedTasks.length }));
+            if (hasDirty) {
+              // The user chose to stay: undo the pause we applied for the prompt
+              // and tell main this was already answered, so it does not raise a
+              // second (blocking) "unsaved editors" dialog.
+              reason = "transfers";
+              await Promise.allSettled(unfinishedTasks
+                .filter((task) => task.status !== "paused")
+                .map((task) => sftpTransferCenterStore.resume(task.id)));
+            }
           }
         }
       } catch (err) {
         console.error('[App] dirty-editors check failed:', err);
       }
       try {
-        bridge.reportDirtyEditorsResult?.(hasDirty);
+        bridge.reportDirtyEditorsResult?.(hasDirty, reason);
       } catch (err) {
         // Reporting itself shouldn't throw, but if the IPC bridge is in a
         // bad state we'd rather log than bubble out of the listener and
