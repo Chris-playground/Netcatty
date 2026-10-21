@@ -13187,6 +13187,77 @@ test("a closed disposable upload channel falls back once to the healthy shared c
   assert.deepEqual(remoteFiles.get(targetPath), payload);
 });
 
+test("connection loss mid-upload fails instead of hanging on the dead shared channel", async (t) => {
+  // ssh2 drops requests issued after an SFTP channel has closed: the callback
+  // never fires (cleanupRequests already ran). A TCP reset kills the isolated
+  // and the shared browse channel together, so the concurrent-shared fallback
+  // must not issue a write OPEN on the closed browse channel.
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-dead-connection-upload-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const localPath = path.join(tempDir, "fresh.bin");
+  const payload = Buffer.alloc(TRANSFER_CHUNK_SIZE * 4, 7);
+  await fs.promises.writeFile(localPath, payload);
+  let connected = true;
+  let sharedOpensAfterLoss = 0;
+  const makeChannel = () => {
+    const ch = createFastSftp({});
+    ch.lstat = (_p, cb) => { const e = new Error("ENOENT"); e.code = 2; cb(e); };
+    ch.open = (_p, _f, cb) => {
+      if (ch.readable === false) { if (ch === shared) sharedOpensAfterLoss += 1; return; } // ssh2: never answered
+      cb(null, Buffer.from("h"));
+    };
+    ch.close = (_h, cb) => { if (ch.readable !== false) cb(null); };
+    return ch;
+  };
+  const shared = makeChannel();
+  shared.write = () => {};
+  const dropConnection = (channels) => {
+    connected = false;
+    for (const ch of channels) { ch.readable = false; ch.emit("end"); ch.emit("close"); }
+  };
+  const client = {
+    sftp: shared,
+    // ssh2-sftp-client keeps its stale `sftp` after a reset, so stat() is
+    // issued on the closed channel and never settles (observed in the app).
+    stat: async () => {
+      if (!connected) return new Promise(() => {});
+      const e = new Error("ENOENT"); e.code = 2; throw e;
+    },
+    delete: async () => {},
+    rename: async () => {},
+    client: {
+      sftp(callback) {
+        if (!connected) throw new Error("Not connected");
+        const isolated = makeChannel();
+        isolated.write = (_h, _b, _o, _l, _p, cb) => {
+          dropConnection([isolated, shared]);
+          setImmediate(() => cb(new Error("No response from server")));
+        };
+        callback(null, isolated);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await Promise.race([
+    transferBridge.startTransfer({ sender: createSender() }, {
+      transferId: "dead-connection-upload",
+      sourcePath: localPath,
+      targetPath: "/tmp/fresh.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      resumable: true,
+    }),
+    new Promise((resolve) => setTimeout(() => resolve({ hung: true }), 5000)),
+  ]);
+
+  assert.notEqual(result.hung, true, "upload hung after connection loss");
+  assert.ok(result.error, "upload must fail with an error after connection loss");
+  assert.equal(sharedOpensAfterLoss, 0, "no OPEN may be issued on the closed browse channel");
+});
+
 for (const mode of ["single-channel", "sudo"]) {
   test(`a closed ${mode} owner channel fails the upload without another dial`, async (t) => {
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `netcatty-${mode}-owner-close-`));
