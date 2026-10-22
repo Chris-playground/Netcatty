@@ -249,6 +249,16 @@ test("rebaseQueuedConnectionLogs keeps logs another window wrote while this snap
   assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
 });
 
+test("rebaseQueuedConnectionLogs keeps a queued local add after a remote snapshot replaces memory", () => {
+  const queued = [{ ...baseLog, id: "local", startTime: 2000, terminalData: "local-replay" }];
+  const remote = [{ ...baseLog, id: "remote", startTime: 3000 }];
+
+  const rebased = rebaseQueuedConnectionLogs(queued, new Set(), remote, remote);
+
+  assert.deepEqual(rebased.map((log) => log.id), ["remote", "local"]);
+  assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
+});
+
 test("rebaseQueuedConnectionLogs drops a queued delete and keeps a queued add still in memory", () => {
   const queued = [{ ...baseLog, id: "added", startTime: 4000, terminalData: "new" }];
   const memory = queued;
