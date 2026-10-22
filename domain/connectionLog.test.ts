@@ -10,6 +10,7 @@ import {
   mergeTerminalDataMapsForStorage,
   pruneInMemoryUnsavedTerminalData,
   pruneTerminalDataMapForStorage,
+  resetTerminalDataQuotaHint,
   writeTerminalDataMapWithQuotaRetry,
 } from "./connectionLogTerminalData.ts";
 
@@ -253,6 +254,7 @@ const quotaWriter = (limitChars: number) => {
 };
 
 test("writeTerminalDataMapWithQuotaRetry writes once when it fits", () => {
+  resetTerminalDataQuotaHint();
   const logs = quotaLogs(5);
   const map = Object.fromEntries(logs.map((log) => [log.id, "x".repeat(10)]));
   const { calls, write } = quotaWriter(1000);
@@ -263,6 +265,7 @@ test("writeTerminalDataMapWithQuotaRetry writes once when it fits", () => {
 });
 
 test("writeTerminalDataMapWithQuotaRetry drops the oldest unsaved entries until it fits", () => {
+  resetTerminalDataQuotaHint();
   const logs = quotaLogs(50);
   // Newest first, matching pruneTerminalDataMapForStorage order.
   const map = Object.fromEntries(
@@ -283,6 +286,7 @@ test("writeTerminalDataMapWithQuotaRetry drops the oldest unsaved entries until 
 });
 
 test("writeTerminalDataMapWithQuotaRetry never drops saved or unknown entries and stops after all unsaved are gone", () => {
+  resetTerminalDataQuotaHint();
   const logs: ConnectionLog[] = [
     ...quotaLogs(20),
     { ...baseLog, id: "saved", startTime: -1, saved: true },
@@ -300,3 +304,43 @@ test("writeTerminalDataMapWithQuotaRetry never drops saved or unknown entries an
   assert.ok(result.attempts <= 2 + Math.ceil(Math.log2(20)));
 });
 
+const newestFirstMap = (logs: ConnectionLog[], chars: number) =>
+  Object.fromEntries([...logs].reverse().map((log) => [log.id, "x".repeat(chars)]));
+
+test("writeTerminalDataMapWithQuotaRetry starts the next write from the newest set that last fit", () => {
+  resetTerminalDataQuotaHint();
+  const logs = quotaLogs(50);
+  const quota = quotaWriter(10 * 47);
+  writeTerminalDataMapWithQuotaRetry(logs, newestFirstMap(logs, 10), quota.write);
+  // Next close: oldest drops out of the 50, a newer session arrives.
+  const nextLogs = [...logs.slice(1), { ...baseLog, id: "log-50", startTime: 50 }];
+  const second = quotaWriter(10 * 47);
+  const result = writeTerminalDataMapWithQuotaRetry(nextLogs, newestFirstMap(nextLogs, 10), second.write);
+  assert.equal(result.persisted, true);
+  assert.deepEqual(second.calls, [47]);
+  assert.equal(result.written["log-50"] !== undefined, true);
+  assert.equal(result.written["log-3"], undefined);
+});
+
+test("writeTerminalDataMapWithQuotaRetry grows back when entries get smaller", () => {
+  resetTerminalDataQuotaHint();
+  const logs = quotaLogs(50);
+  writeTerminalDataMapWithQuotaRetry(logs, newestFirstMap(logs, 10), quotaWriter(10 * 47).write);
+  const small = quotaWriter(10 * 47);
+  const result = writeTerminalDataMapWithQuotaRetry(logs, newestFirstMap(logs, 5), small.write);
+  assert.deepEqual(small.calls, [50]);
+  assert.equal(Object.keys(result.written).length, 50);
+});
+
+test("writeTerminalDataMapWithQuotaRetry falls back to dropping when the hint is too optimistic", () => {
+  resetTerminalDataQuotaHint();
+  const logs = quotaLogs(50);
+  writeTerminalDataMapWithQuotaRetry(logs, newestFirstMap(logs, 10), quotaWriter(10 * 47).write);
+  const tighter = quotaWriter(10 * 30); // quota shrank (other keys grew)
+  const result = writeTerminalDataMapWithQuotaRetry(logs, newestFirstMap(logs, 10), tighter.write);
+  assert.equal(result.persisted, true);
+  assert.equal(tighter.calls[0], 47);
+  assert.ok(Object.keys(result.written).length <= 30);
+  assert.equal(result.written["log-49"] !== undefined, true);
+  assert.ok(result.attempts <= 2 + Math.ceil(Math.log2(50)));
+});

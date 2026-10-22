@@ -120,33 +120,55 @@ export const pruneInMemoryUnsavedTerminalData = (
  * Drops 1, 2, 4, … oldest entries per retry, so attempts stay O(log n).
  * Saved logs and ids not in `logs` are never dropped.
  */
+// In memory only: summed entry length of the smallest side-store payload that last hit the
+// quota, so the next write can start from the newest set that fits instead of failing first.
+let quotaFailedChars: number | null = null;
+
+export const resetTerminalDataQuotaHint = (): void => {
+  quotaFailedChars = null;
+};
+
 export const writeTerminalDataMapWithQuotaRetry = (
   logs: ConnectionLog[],
   map: ConnectionLogTerminalDataMap,
   write: (next: ConnectionLogTerminalDataMap) => boolean,
 ): { persisted: boolean; written: ConnectionLogTerminalDataMap; attempts: number } => {
-  if (write(map)) return { persisted: true, written: map, attempts: 1 };
-
   const droppable = logs
     .filter((log) => !log.saved && map[log.id] !== undefined)
     .sort((a, b) => a.startTime - b.startTime)
     .map((log) => log.id);
+  let chars = 0;
+  for (const data of Object.values(map)) chars += data.length;
 
-  let attempts = 1;
-  let dropCount = 1;
-  while (droppable.length > 0) {
-    const n = Math.min(dropCount, droppable.length);
-    const dropped = new Set(droppable.slice(0, n));
-    const next: ConnectionLogTerminalDataMap = {};
-    for (const [id, data] of Object.entries(map)) {
-      if (!dropped.has(id)) next[id] = data;
+  let dropCount = 0;
+  if (quotaFailedChars !== null) {
+    while (dropCount < droppable.length && chars >= quotaFailedChars) {
+      chars -= map[droppable[dropCount]].length;
+      dropCount += 1;
+    }
+  }
+
+  let attempts = 0;
+  for (;;) {
+    let next = map;
+    if (dropCount > 0) {
+      const dropped = new Set(droppable.slice(0, dropCount));
+      next = {};
+      for (const [id, data] of Object.entries(map)) {
+        if (!dropped.has(id)) next[id] = data;
+      }
     }
     attempts += 1;
-    if (write(next)) return { persisted: true, written: next, attempts };
-    if (n === droppable.length) break;
-    dropCount *= 2;
+    if (write(next)) {
+      if (dropCount === 0) quotaFailedChars = null;
+      return { persisted: true, written: next, attempts };
+    }
+    quotaFailedChars = quotaFailedChars === null ? chars : Math.min(quotaFailedChars, chars);
+    if (dropCount >= droppable.length) return { persisted: false, written: map, attempts };
+    const target = Math.min(Math.max(dropCount * 2, 1), droppable.length);
+    for (let i = dropCount; i < target; i += 1) chars -= map[droppable[i]].length;
+    dropCount = target;
   }
-  return { persisted: false, written: map, attempts };
 };
 
 /** Fold side-store maps together, then cap to the allowed unsaved/saved set. */
