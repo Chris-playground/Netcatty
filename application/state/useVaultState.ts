@@ -64,6 +64,8 @@ import {
   mergeConnectionLogsFromStorage,
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
+  pruneInMemoryUnsavedTerminalData,
+  writeTerminalDataMapWithQuotaRetry,
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
@@ -276,23 +278,57 @@ const buildPersistedLogIds = (
   return ids;
 };
 
-const writeConnectionLogTerminalDataMap = (
-  logs: ConnectionLog[],
-  localMaps: ConnectionLogTerminalDataMap[],
-  usePersistedLogIdsFromDisk: boolean,
+/**
+ * Same result as comparing `JSON.stringify` of both maps (own keys in the
+ * same order, equal values) without serializing the multi-MB replay data.
+ */
+const isSameTerminalDataMap = (
+  a: ConnectionLogTerminalDataMap,
+  b: ConnectionLogTerminalDataMap,
 ): boolean => {
-  const existing = readConnectionLogTerminalDataMap();
-  const pruned = mergeTerminalDataMapsForStorage(
-    logs,
-    existing,
-    localMaps,
-    buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
-  );
-  if (JSON.stringify(existing) === JSON.stringify(pruned)) return true;
-  return localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
+  if (typeof a !== "object" || a === null || Array.isArray(a)) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (let i = 0; i < aKeys.length; i += 1) {
+    if (aKeys[i] !== bKeys[i] || a[aKeys[i]] !== b[bKeys[i]]) return false;
+  }
+  return true;
 };
 
-export const useVaultState = () => {
+const writeConnectionLogTerminalDataMap = (
+  existing: ConnectionLogTerminalDataMap,
+  pruned: ConnectionLogTerminalDataMap,
+  logs: ConnectionLog[],
+  quotaFailedCharsRef: { current: number | null },
+): boolean => {
+  if (isSameTerminalDataMap(existing, pruned)) return true;
+  // On quota failure keep the newest replay buffers instead of none.
+  // The hint stays on the hook so the domain helper remains a pure calculation.
+  const result = writeTerminalDataMapWithQuotaRetry(
+    logs,
+    pruned,
+    (next) => localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, next),
+    quotaFailedCharsRef.current,
+  );
+  quotaFailedCharsRef.current = result.quotaFailedChars;
+  return result.persisted;
+};
+
+export type UseVaultStateOptions = {
+  /**
+   * When false, skip loading and cross-window sync of the bulky
+   * connection-log terminal-data side store (~30–50 MB in localStorage).
+   * Pass false from windows that never show connection-log replay
+   * (Settings, tray panel, terminal popup). Default true.
+   */
+  syncConnectionLogTerminalData?: boolean;
+};
+
+export const useVaultState = (options?: UseVaultStateOptions) => {
+  const syncConnectionLogTerminalData = options?.syncConnectionLogTerminalData !== false;
   const [isInitialized, setIsInitialized] = useState(false);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<SSHKey[]>([]);
@@ -419,6 +455,7 @@ export const useVaultState = () => {
   const proxyProfilesReadSeq = useRef(0);
   const groupConfigsReadSeq = useRef(0);
   const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
+  const connectionLogQuotaFailedCharsRef = useRef<number | null>(null);
   const pluginCredentialCatalogVersion = useRef(0);
 
   const syncConnectionLogTerminalDataMap = useCallback((
@@ -438,18 +475,15 @@ export const useVaultState = () => {
       buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
     );
     const persisted = writeConnectionLogTerminalDataMap(
+      existing,
+      merged,
       logs,
-      localMaps,
-      usePersistedLogIdsFromDisk,
+      connectionLogQuotaFailedCharsRef,
     );
-    if (persisted) {
-      connectionLogTerminalDataRef.current = merged;
-    } else {
-      connectionLogTerminalDataRef.current = {
-        ...connectionLogTerminalDataRef.current,
-        ...buildTerminalDataMapFromLogs(logs),
-      };
-    }
+    // On a failed write (e.g. QuotaExceeded once the side store nears ~50 MB)
+    // keep the same capped map instead of accumulating every log's replay
+    // buffer in memory; anything outside it would be pruned on the next write.
+    connectionLogTerminalDataRef.current = merged;
     return { map: connectionLogTerminalDataRef.current, persisted };
   }, []);
 
@@ -1297,8 +1331,10 @@ export const useVaultState = () => {
         const savedLogs = prev.filter((l) => l.saved);
         const unsavedLogs = prev.filter((l) => !l.saved);
         const updated = [newLog, ...unsavedLogs].slice(0, 500);
-        const final = [...updated, ...savedLogs].sort(
-          (a, b) => b.startTime - a.startTime
+        const final = pruneInMemoryUnsavedTerminalData(
+          [...updated, ...savedLogs].sort(
+            (a, b) => b.startTime - a.startTime
+          ),
         );
         persistConnectionLogState(final, { pruneMainBlob: true });
         return final;
@@ -1311,8 +1347,8 @@ export const useVaultState = () => {
   const updateConnectionLog = useCallback(
     (id: string, updates: Partial<ConnectionLog>) => {
       setConnectionLogs((prev) => {
-        const updated = prev.map((log) =>
-          log.id === id ? { ...log, ...updates } : log
+        const updated = pruneInMemoryUnsavedTerminalData(
+          prev.map((log) => (log.id === id ? { ...log, ...updates } : log)),
         );
         persistConnectionLogState(updated, { pruneMainBlob: true });
         return updated;
@@ -1323,8 +1359,10 @@ export const useVaultState = () => {
 
   const toggleConnectionLogSaved = useCallback((id: string) => {
     setConnectionLogs((prev) => {
-      const updated = prev.map((log) =>
-        log.id === id ? { ...log, saved: !log.saved } : log
+      const updated = pruneInMemoryUnsavedTerminalData(
+        prev.map((log) =>
+          log.id === id ? { ...log, saved: !log.saved } : log
+        ),
       );
       persistConnectionLogState(updated, { pruneMainBlob: false });
       return updated;
@@ -1628,7 +1666,11 @@ export const useVaultState = () => {
         const savedConnectionLogs = localStorageAdapter.read<ConnectionLog[]>(
           STORAGE_KEY_CONNECTION_LOGS,
         );
-        const terminalDataMap = readConnectionLogTerminalDataMap();
+        // Windows that never render connection-log replay skip the ~30–50 MB
+        // side-store parse on boot (Settings / tray / popup).
+        const terminalDataMap = syncConnectionLogTerminalData
+          ? readConnectionLogTerminalDataMap()
+          : {};
         connectionLogTerminalDataRef.current = terminalDataMap;
         if (savedConnectionLogs) {
           setConnectionLogs(mergeTerminalDataIntoLogs(savedConnectionLogs, terminalDataMap));
@@ -1673,7 +1715,7 @@ export const useVaultState = () => {
     return () => {
       cancelled = true;
     };
-  }, [commitEncryptedHostsUnderVaultLock, updateHosts, updateSnippets]);
+  }, [commitEncryptedHostsUnderVaultLock, syncConnectionLogTerminalData, updateHosts, updateSnippets]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -1882,6 +1924,9 @@ export const useVaultState = () => {
       }
 
       if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) {
+        // Other windows still receive the storage event; skip the multi-MB
+        // JSON.parse when this mount does not show connection-log replay.
+        if (!syncConnectionLogTerminalData) return;
         const next = safeParse<ConnectionLogTerminalDataMap>(event.newValue) ?? {};
         connectionLogTerminalDataRef.current = next;
         setConnectionLogs((prev) => mergeConnectionLogsFromStorage(prev, prev, next));
@@ -1922,6 +1967,7 @@ export const useVaultState = () => {
         return;
       }
       if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) {
+        if (!syncConnectionLogTerminalData) return;
         const next = readConnectionLogTerminalDataMap();
         connectionLogTerminalDataRef.current = next;
         setConnectionLogs((prev) => mergeConnectionLogsFromStorage(prev, prev, next));
@@ -1934,7 +1980,7 @@ export const useVaultState = () => {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleLocalStorageAdapterChanged);
     };
-  }, [applyConnectionLogsFromStorage]);
+  }, [applyConnectionLogsFromStorage, syncConnectionLogTerminalData]);
 
   const updateHostLastConnected = useCallback((hostId: string) => {
     setHosts((prev) => {
