@@ -206,12 +206,13 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   const pendingScriptDeleteCount = (pendingScriptDeleteIds ?? []).filter((id) =>
     snippets.some((snippet) => snippet.id === id),
   ).length;
-  // Overflow popover + encoding submenu are both controlled so that
-  // picking an encoding closes the whole chain, and so the parent popover
-  // can ignore clicks that land in the submenu portal (otherwise the
-  // submenu click would read as "outside" and dismiss the parent).
+  // Overflow popover and its submenus are controlled so that picking an
+  // item closes the whole chain, and so the parent popover can ignore
+  // clicks that land in a submenu portal (otherwise the submenu click
+  // would read as "outside" and dismiss the parent).
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [encodingSubmenuOpen, setEncodingSubmenuOpen] = useState(false);
+  const [sessionLogSubmenuOpen, setSessionLogSubmenuOpen] = useState(false);
   const buttonBase =
     'h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)] bg-transparent hover:bg-transparent';
 
@@ -291,7 +292,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       sessionLog: isSessionLogging
         ? t('terminal.toolbar.stopSessionLog')
         : t('terminal.toolbar.startSessionLog'),
-      openSessionLog: t('terminal.toolbar.openSessionLog'),
+      openSessionLog: t('terminal.toolbar.sessionLog.menu'),
       scripts: t('terminal.toolbar.scripts'),
       history: t('terminal.toolbar.history'),
       configureOsc7: t('terminal.toolbar.configureOsc7'),
@@ -451,6 +452,52 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       </div>
     );
   }
+
+  const renderSessionLogSubmenu = () => {
+    if (!onSessionLogAction) return null;
+    return (
+      <Popover open={sessionLogSubmenuOpen} onOpenChange={setSessionLogSubmenuOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={menuItemClass}
+            aria-haspopup="menu"
+            aria-expanded={sessionLogSubmenuOpen}
+          >
+            <FileSearch size={12} className="shrink-0" />
+            <span className="flex-1 text-left truncate">{t('terminal.toolbar.sessionLog.menu')}</span>
+            <ChevronRight size={12} className="shrink-0 text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          data-session-log-submenu="true"
+          data-section="terminal-toolbar-menu"
+          className="w-56 p-1"
+          side="right"
+          align="start"
+          sideOffset={6}
+        >
+          {(['open', 'reveal', 'chooseApplication', 'systemDefault'] as const).map((action) => (
+            <button
+              key={action}
+              type="button"
+              className={menuItemClass}
+              onClick={() => {
+                onSessionLogAction(action);
+                setSessionLogSubmenuOpen(false);
+                setOverflowOpen(false);
+              }}
+            >
+              <FileSearch size={12} className="shrink-0" />
+              <span className="flex-1 text-left truncate">
+                {t(`terminal.toolbar.sessionLog.${action}`)}
+              </span>
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
+    );
+  };
 
   const renderEncodingSubmenu = () => {
     if (!encodingSwitchSupported || !onSetTerminalEncoding) return null;
@@ -674,7 +721,6 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                     </button>
                   </PopoverClose>
                 ))}
-                <p className="px-2 py-1 text-xs text-muted-foreground">{t('terminal.toolbar.sessionLog.rememberApplication')}</p>
               </PopoverContent>
             </Popover>
           </div>
@@ -952,20 +998,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
           </PopoverClose>
         );
       case 'openSessionLog':
-        return (
-          <React.Fragment key={id}>
-            {(['open', 'reveal', 'chooseApplication', 'systemDefault'] as const).map(action => (
-              <PopoverClose asChild key={action}>
-                <button type="button" className={menuItemClass} onClick={() => onSessionLogAction?.(action)}>
-                  <FileSearch size={12} className="shrink-0" />
-                  <span className="flex-1 text-left truncate">{t(action === 'open'
-                    ? 'terminal.toolbar.openSessionLog' : `terminal.toolbar.sessionLog.${action}`)}</span>
-                </button>
-              </PopoverClose>
-            ))}
-            <p className="px-2 py-1 text-xs text-muted-foreground">{t('terminal.toolbar.sessionLog.rememberApplication')}</p>
-          </React.Fragment>
-        );
+        return <React.Fragment key={id}>{renderSessionLogSubmenu()}</React.Fragment>;
       case 'sessionLog':
         return (
           <PopoverClose asChild key={id}>
@@ -1083,7 +1116,10 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
             open={overflowOpen}
             onOpenChange={(open) => {
               setOverflowOpen(open);
-              if (!open) setEncodingSubmenuOpen(false);
+              if (!open) {
+                setEncodingSubmenuOpen(false);
+                setSessionLogSubmenuOpen(false);
+              }
             }}
           >
             <Tooltip>
@@ -1111,7 +1147,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                 // "outside" this popover; without this guard a click
                 // in the submenu would dismiss the parent.
                 const target = e.target as Element | null;
-                if (target?.closest('[data-encoding-submenu="true"]')) {
+                if (target?.closest('[data-encoding-submenu="true"], [data-session-log-submenu="true"]')) {
                   e.preventDefault();
                 }
               }}

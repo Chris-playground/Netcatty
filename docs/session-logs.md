@@ -3,21 +3,17 @@
 Recording and opening a session log stay separate.
 
 - **Start / Stop session log** controls manual recording.
-- **Open session log**, **Reveal session log in folder**, **Open with
-  application**, and **Open with system default** live in the terminal
-  toolbar's existing **More actions** menu. They are not a default toolbar
-  button. Toolbar customization can show the shortcut on the bar or hide it.
-  When it is shown, the arrow beside it offers the same reveal and open-with
-  actions.
+- **Session log** lives in the terminal toolbar's existing **More actions**
+  menu, as one submenu with **Open**, **Show in folder**, **Open with…**,
+  and **Open with system default**. It is not a default toolbar button.
+  Toolbar customization can show the shortcut on the bar or hide it. When it
+  is shown, the arrow beside it offers the same reveal and open-with actions.
 
-The menu items appear when automatic session logging is enabled. They also
-appear once a manual log has been started for that session, and stay available
-after recording stops. Turning automatic logging off while the session stays
-connected keeps the menu, because that log is still recording. A successful
-reconnect then drops it, and the menu items go with it. A failed reconnect
-keeps them. Pending terminal output is flushed before opening;
-recording continues normally. Automatic logs and manually recorded logs both
-open this way.
+The submenu appears when this session has a saved log, and it stays available
+after recording stops. A successful reconnect drops a stopped log from the
+old connection, and the submenu goes with it. A failed reconnect keeps it.
+Pending terminal output is flushed before opening; recording continues
+normally. Automatic logs and manually recorded logs both open this way.
 
 A successfully selected application is remembered locally for subsequent log
 opens, independently of SFTP file associations. Choosing the system default

@@ -3,10 +3,11 @@ import type { Messages } from '../types';
 export const enTerminalMessages: Messages = {
   'terminal.toolbar.openSessionLog': 'Open session log',
   'terminal.toolbar.sessionLogActions': 'Session log actions',
-  'terminal.toolbar.sessionLog.reveal': 'Reveal session log in folder',
-  'terminal.toolbar.sessionLog.chooseApplication': 'Open with application…',
+  'terminal.toolbar.sessionLog.menu': 'Session log',
+  'terminal.toolbar.sessionLog.open': 'Open',
+  'terminal.toolbar.sessionLog.reveal': 'Show in folder',
+  'terminal.toolbar.sessionLog.chooseApplication': 'Open with…',
   'terminal.toolbar.sessionLog.systemDefault': 'Open with system default',
-  'terminal.toolbar.sessionLog.rememberApplication': 'Application choice is remembered.',
   'terminal.toolbar.openSessionLogFailed': 'Failed to open session log.',
 
   'terminal.menu.saveScreen': 'Save current screen',

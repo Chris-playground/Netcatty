@@ -230,5 +230,9 @@ test('open session log stays in the overflow menu until logging is active', () =
     assert.match(markup, /aria-label="More actions"/);
   }
   assert.match(toolbarSource, /case 'openSessionLog':/);
+  assert.match(toolbarSource, /data-session-log-submenu="true"/);
+  assert.match(toolbarSource, /terminal\.toolbar\.sessionLog\.menu/);
   assert.match(toolbarSource, /terminal\.toolbar\.sessionLog\.\$\{action\}/);
+  assert.equal(toolbarSource.includes('rememberApplication'), false);
+  assert.equal(toolbarSource.includes('Open session log'), false);
 });
