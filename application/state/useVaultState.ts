@@ -37,6 +37,7 @@ import {
 import {
   STORAGE_KEY_CONNECTION_LOGS,
   STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA,
+  STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
   STORAGE_KEY_GROUP_CONFIGS,
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_HOSTS,
@@ -65,9 +66,15 @@ import {
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
   pruneInMemoryUnsavedTerminalData,
-  writeTerminalDataMapWithQuotaRetry,
+  pruneTerminalDataMapForStorage,
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
+import {
+  loadAll as loadConnectionLogTerminalData,
+  migrateLegacyConnectionLogTerminalData,
+  writeTerminalDataMapDiff,
+  type ConnectionLogTerminalDataRev,
+} from "../../infrastructure/persistence/connectionLogTerminalDataStore";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
 import {
   deleteSelectedSnippetsFromVault,
@@ -257,9 +264,6 @@ const readLegacyLineTimestampsEnabled = (): boolean => {
   return stored?.showLineTimestamps === true;
 };
 
-const readConnectionLogTerminalDataMap = (): ConnectionLogTerminalDataMap =>
-  localStorageAdapter.read<ConnectionLogTerminalDataMap>(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) ?? {};
-
 const readPersistedConnectionLogIds = (): Set<string> => {
   const stored = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS) ?? [];
   return new Set(stored.map((log) => log.id));
@@ -276,45 +280,6 @@ const buildPersistedLogIds = (
     }
   }
   return ids;
-};
-
-/**
- * Same result as comparing `JSON.stringify` of both maps (own keys in the
- * same order, equal values) without serializing the multi-MB replay data.
- */
-const isSameTerminalDataMap = (
-  a: ConnectionLogTerminalDataMap,
-  b: ConnectionLogTerminalDataMap,
-): boolean => {
-  if (typeof a !== "object" || a === null || Array.isArray(a)) {
-    return JSON.stringify(a) === JSON.stringify(b);
-  }
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  for (let i = 0; i < aKeys.length; i += 1) {
-    if (aKeys[i] !== bKeys[i] || a[aKeys[i]] !== b[bKeys[i]]) return false;
-  }
-  return true;
-};
-
-const writeConnectionLogTerminalDataMap = (
-  existing: ConnectionLogTerminalDataMap,
-  pruned: ConnectionLogTerminalDataMap,
-  logs: ConnectionLog[],
-  quotaFailedCharsRef: { current: number | null },
-): boolean => {
-  if (isSameTerminalDataMap(existing, pruned)) return true;
-  // On quota failure keep the newest replay buffers instead of none.
-  // The hint stays on the hook so the domain helper remains a pure calculation.
-  const result = writeTerminalDataMapWithQuotaRetry(
-    logs,
-    pruned,
-    (next) => localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, next),
-    quotaFailedCharsRef.current,
-  );
-  quotaFailedCharsRef.current = result.quotaFailedChars;
-  return result.persisted;
 };
 
 export type UseVaultStateOptions = {
@@ -454,40 +419,85 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
   const identitiesReadSeq = useRef(0);
   const proxyProfilesReadSeq = useRef(0);
   const groupConfigsReadSeq = useRef(0);
+  const connectionLogsRef = useRef<ConnectionLog[]>([]);
   const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
-  const connectionLogQuotaFailedCharsRef = useRef<number | null>(null);
+  const connectionLogTerminalDataPersistedRef = useRef<ConnectionLogTerminalDataMap>({});
+  const connectionLogTerminalDataRevRawRef = useRef<string | null>(null);
+  const connectionLogTerminalDataLoadSeq = useRef(0);
+  const terminalDataQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const terminalDataReadyRef = useRef<Promise<void>>(Promise.resolve());
   const pluginCredentialCatalogVersion = useRef(0);
 
-  const syncConnectionLogTerminalDataMap = useCallback((
+  const enqueueTerminalDataTask = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
+    const run = terminalDataQueueRef.current.then(task, task);
+    terminalDataQueueRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  }, []);
+
+  const bumpConnectionLogTerminalDataRev = useCallback((ids: readonly string[]) => {
+    const current = localStorageAdapter.read<ConnectionLogTerminalDataRev>(
+      STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
+    );
+    const prev = typeof current?.rev === "number" && Number.isFinite(current.rev) ? current.rev : 0;
+    const payload: ConnectionLogTerminalDataRev = {
+      rev: Math.max(prev + 1, Date.now()),
+      ids: [...ids].sort(),
+      nonce: crypto.randomUUID(),
+    };
+    // Record the exact JSON before setItem so this window ignores its own echo.
+    connectionLogTerminalDataRevRawRef.current = JSON.stringify(payload);
+    const written = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV, payload);
+    if (!written) {
+      connectionLogTerminalDataRevRawRef.current = localStorageAdapter.readString(
+        STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
+      );
+    }
+  }, []);
+
+  const absorbRemoteTerminalDataIfNeeded = useCallback(async () => {
+    const raw = localStorageAdapter.readString(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV);
+    if (raw === connectionLogTerminalDataRevRawRef.current) return;
+    const map = await loadConnectionLogTerminalData();
+    connectionLogTerminalDataRevRawRef.current = raw;
+    connectionLogTerminalDataPersistedRef.current = map;
+    connectionLogTerminalDataRef.current = {
+      ...map,
+      ...connectionLogTerminalDataRef.current,
+    };
+  }, []);
+
+  const syncConnectionLogTerminalDataMap = useCallback(async (
     logs: ConnectionLog[],
     options?: { usePersistedLogIdsFromDisk?: boolean },
   ) => {
-    const usePersistedLogIdsFromDisk = options?.usePersistedLogIdsFromDisk ?? false;
-    const localMaps = [
-      connectionLogTerminalDataRef.current,
-      buildTerminalDataMapFromLogs(logs),
-    ];
-    const existing = readConnectionLogTerminalDataMap();
+    if (!syncConnectionLogTerminalData) return true;
+    await absorbRemoteTerminalDataIfNeeded();
+    const baseline = connectionLogTerminalDataPersistedRef.current;
     const merged = mergeTerminalDataMapsForStorage(
       logs,
-      existing,
-      localMaps,
-      buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
+      baseline,
+      [
+        connectionLogTerminalDataRef.current,
+        buildTerminalDataMapFromLogs(logs),
+      ],
+      buildPersistedLogIds(logs, options?.usePersistedLogIdsFromDisk ?? false),
     );
-    const persisted = writeConnectionLogTerminalDataMap(
-      existing,
-      merged,
-      logs,
-      connectionLogQuotaFailedCharsRef,
-    );
-    // On a failed write (e.g. QuotaExceeded once the side store nears ~50 MB)
-    // keep the same capped map instead of accumulating every log's replay
-    // buffer in memory; anything outside it would be pruned on the next write.
+    const written = await writeTerminalDataMapDiff(baseline, merged);
+    // Keep the capped map in memory even when IndexedDB rejects the write, so
+    // the next close retries from the last committed baseline.
     connectionLogTerminalDataRef.current = merged;
-    return { map: connectionLogTerminalDataRef.current, persisted };
-  }, []);
+    if (!written.changed) return true;
+    if (!written.persisted) return false;
+    connectionLogTerminalDataPersistedRef.current = merged;
+    bumpConnectionLogTerminalDataRev(Object.keys(merged));
+    return true;
+  }, [
+    absorbRemoteTerminalDataIfNeeded,
+    bumpConnectionLogTerminalDataRev,
+    syncConnectionLogTerminalData,
+  ]);
 
-  const persistConnectionLogState = useCallback((
+  const persistConnectionLogState = useCallback(async (
     logs: ConnectionLog[],
     options?: { pruneMainBlob?: boolean },
   ) => {
@@ -506,9 +516,9 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
     let sidePersisted = true;
     if (mainPersisted || !options?.pruneMainBlob) {
-      ({ persisted: sidePersisted } = syncConnectionLogTerminalDataMap(logs, {
+      sidePersisted = await syncConnectionLogTerminalDataMap(logs, {
         usePersistedLogIdsFromDisk: Boolean(options?.pruneMainBlob && mainPersisted),
-      }));
+      });
     }
 
     if (!options?.pruneMainBlob) {
@@ -524,7 +534,18 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         "[useVaultState] Failed to persist connection log terminal replay data side store.",
       );
     }
+    return mainPersisted && sidePersisted;
   }, [syncConnectionLogTerminalDataMap]);
+
+  const commitConnectionLogs = useCallback((
+    recipe: (prev: ConnectionLog[]) => ConnectionLog[],
+    options?: { pruneMainBlob?: boolean },
+  ) => {
+    const next = recipe(connectionLogsRef.current);
+    connectionLogsRef.current = next;
+    setConnectionLogs(next);
+    return enqueueTerminalDataTask(() => persistConnectionLogState(next, options));
+  }, [enqueueTerminalDataTask, persistConnectionLogState]);
 
   const applyConnectionLogsFromStorage = useCallback((
     prev: ConnectionLog[],
@@ -1326,67 +1347,56 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         ...log,
         id: crypto.randomUUID(),
       };
-      setConnectionLogs((prev) => {
+      void commitConnectionLogs((prev) => {
         // Keep only the last 500 non-saved entries plus all saved entries
         const savedLogs = prev.filter((l) => l.saved);
         const unsavedLogs = prev.filter((l) => !l.saved);
         const updated = [newLog, ...unsavedLogs].slice(0, 500);
-        const final = pruneInMemoryUnsavedTerminalData(
+        return pruneInMemoryUnsavedTerminalData(
           [...updated, ...savedLogs].sort(
             (a, b) => b.startTime - a.startTime
           ),
         );
-        persistConnectionLogState(final, { pruneMainBlob: true });
-        return final;
-      });
+      }, { pruneMainBlob: true });
       return newLog.id;
     },
-    [persistConnectionLogState],
+    [commitConnectionLogs],
   );
 
   const updateConnectionLog = useCallback(
     (id: string, updates: Partial<ConnectionLog>) => {
-      setConnectionLogs((prev) => {
-        const updated = pruneInMemoryUnsavedTerminalData(
+      return commitConnectionLogs((prev) => (
+        pruneInMemoryUnsavedTerminalData(
           prev.map((log) => (log.id === id ? { ...log, ...updates } : log)),
-        );
-        persistConnectionLogState(updated, { pruneMainBlob: true });
-        return updated;
-      });
+        )
+      ), { pruneMainBlob: true });
     },
-    [persistConnectionLogState],
+    [commitConnectionLogs],
   );
 
   const toggleConnectionLogSaved = useCallback((id: string) => {
-    setConnectionLogs((prev) => {
-      const updated = pruneInMemoryUnsavedTerminalData(
+    void commitConnectionLogs((prev) => (
+      pruneInMemoryUnsavedTerminalData(
         prev.map((log) =>
           log.id === id ? { ...log, saved: !log.saved } : log
         ),
-      );
-      persistConnectionLogState(updated, { pruneMainBlob: false });
-      return updated;
-    });
-  }, [persistConnectionLogState]);
+      )
+    ), { pruneMainBlob: false });
+  }, [commitConnectionLogs]);
 
   const deleteConnectionLog = useCallback((id: string) => {
-    setConnectionLogs((prev) => {
-      const updated = prev.filter((log) => log.id !== id);
-      const map = { ...connectionLogTerminalDataRef.current };
-      delete map[id];
-      connectionLogTerminalDataRef.current = map;
-      persistConnectionLogState(updated, { pruneMainBlob: true });
-      return updated;
-    });
-  }, [persistConnectionLogState]);
+    void commitConnectionLogs(
+      (prev) => prev.filter((log) => log.id !== id),
+      { pruneMainBlob: true },
+    );
+  }, [commitConnectionLogs]);
 
   const clearUnsavedConnectionLogs = useCallback(() => {
-    setConnectionLogs((prev) => {
-      const saved = prev.filter((log) => log.saved);
-      persistConnectionLogState(saved, { pruneMainBlob: true });
-      return saved;
-    });
-  }, [persistConnectionLogState]);
+    void commitConnectionLogs(
+      (prev) => prev.filter((log) => log.saved),
+      { pruneMainBlob: true },
+    );
+  }, [commitConnectionLogs]);
 
   // Connection logs for Vault logs section — keep App domain bags off session churn.
   useLayoutEffect(() => {
@@ -1453,6 +1463,11 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
   useEffect(() => {
     let cancelled = false;
+    let resolveTerminalDataReady = () => {};
+    const terminalDataReady = new Promise<void>((resolve) => {
+      resolveTerminalDataReady = resolve;
+    });
+    terminalDataReadyRef.current = terminalDataReady;
     const init = async () => {
       try {
         await withVaultImportLock("vault", async () => {
@@ -1662,18 +1677,44 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           publishShellHistorySnapshot(savedShellHistory);
         }
 
-        // Load connection logs
+        // Load connection logs. Replay blobs live in IndexedDB, one row per
+        // log id. Windows that never render replay skip that read
+        // (Settings / tray / popup).
         const savedConnectionLogs = localStorageAdapter.read<ConnectionLog[]>(
           STORAGE_KEY_CONNECTION_LOGS,
         );
-        // Windows that never render connection-log replay skip the ~30–50 MB
-        // side-store parse on boot (Settings / tray / popup).
-        const terminalDataMap = syncConnectionLogTerminalData
-          ? readConnectionLogTerminalDataMap()
-          : {};
+        let terminalDataMap: ConnectionLogTerminalDataMap = {};
+        if (syncConnectionLogTerminalData) {
+          const loaded = await migrateLegacyConnectionLogTerminalData({
+            read: () => localStorageAdapter.read<ConnectionLogTerminalDataMap>(
+              STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA,
+            ),
+            remove: () => {
+              localStorageAdapter.remove(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA);
+            },
+          });
+          if (cancelled) return;
+          terminalDataMap = loaded.map;
+          const pruned = savedConnectionLogs
+            ? pruneTerminalDataMapForStorage(savedConnectionLogs, terminalDataMap)
+            : terminalDataMap;
+          const written = await writeTerminalDataMapDiff(terminalDataMap, pruned);
+          if (cancelled) return;
+          if (written.persisted) terminalDataMap = pruned;
+          if (loaded.migrated || (written.changed && written.persisted)) {
+            bumpConnectionLogTerminalDataRev(Object.keys(terminalDataMap));
+          } else {
+            connectionLogTerminalDataRevRawRef.current = localStorageAdapter.readString(
+              STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
+            );
+          }
+        }
         connectionLogTerminalDataRef.current = terminalDataMap;
+        connectionLogTerminalDataPersistedRef.current = terminalDataMap;
         if (savedConnectionLogs) {
-          setConnectionLogs(mergeTerminalDataIntoLogs(savedConnectionLogs, terminalDataMap));
+          const hydrated = mergeTerminalDataIntoLogs(savedConnectionLogs, terminalDataMap);
+          connectionLogsRef.current = hydrated;
+          setConnectionLogs(hydrated);
         }
 
         // Load managed sources
@@ -1702,6 +1743,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           }
         }
       } finally {
+        resolveTerminalDataReady();
         // StrictMode remount cancels the first init; only the surviving effect
         // may publish "vault ready" or terminals can boot against empty keys.
         if (!cancelled) {
@@ -1714,8 +1756,15 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     void init();
     return () => {
       cancelled = true;
+      resolveTerminalDataReady();
     };
-  }, [commitEncryptedHostsUnderVaultLock, syncConnectionLogTerminalData, updateHosts, updateSnippets]);
+  }, [
+    bumpConnectionLogTerminalDataRev,
+    commitEncryptedHostsUnderVaultLock,
+    syncConnectionLogTerminalData,
+    updateHosts,
+    updateSnippets,
+  ]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -1917,19 +1966,18 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
       if (key === STORAGE_KEY_CONNECTION_LOGS) {
         const next = safeParse<ConnectionLog[]>(event.newValue) ?? [];
-        setConnectionLogs((prev) =>
-          applyConnectionLogsFromStorage(prev, next, connectionLogTerminalDataRef.current),
+        const merged = applyConnectionLogsFromStorage(
+          connectionLogsRef.current,
+          next,
+          connectionLogTerminalDataRef.current,
         );
+        connectionLogsRef.current = merged;
+        setConnectionLogs(merged);
         return;
       }
 
-      if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) {
-        // Other windows still receive the storage event; skip the multi-MB
-        // JSON.parse when this mount does not show connection-log replay.
-        if (!syncConnectionLogTerminalData) return;
-        const next = safeParse<ConnectionLogTerminalDataMap>(event.newValue) ?? {};
-        connectionLogTerminalDataRef.current = next;
-        setConnectionLogs((prev) => mergeConnectionLogsFromStorage(prev, prev, next));
+      if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV) {
+        applyTerminalDataRev(event.newValue);
         return;
       }
 
@@ -1957,20 +2005,48 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
       }
     };
 
+    const applyTerminalDataRev = (raw: string | null) => {
+      // Settings, tray, and popup mounts never replay logs and must not
+      // pull the side store across windows.
+      if (!syncConnectionLogTerminalData) return;
+      if (raw === connectionLogTerminalDataRevRawRef.current) return;
+      const seq = ++connectionLogTerminalDataLoadSeq.current;
+      void terminalDataReadyRef.current.then(() => enqueueTerminalDataTask(async () => {
+        if (seq !== connectionLogTerminalDataLoadSeq.current) return;
+        const map = await loadConnectionLogTerminalData();
+        if (seq !== connectionLogTerminalDataLoadSeq.current) return;
+        connectionLogTerminalDataRevRawRef.current = localStorageAdapter.readString(
+          STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
+        );
+        connectionLogTerminalDataPersistedRef.current = map;
+        connectionLogTerminalDataRef.current = map;
+        const merged = mergeConnectionLogsFromStorage(
+          connectionLogsRef.current,
+          connectionLogsRef.current,
+          map,
+        );
+        connectionLogsRef.current = merged;
+        setConnectionLogs(merged);
+      }));
+    };
+
     const handleLocalStorageAdapterChanged = (event: Event) => {
       const key = (event as CustomEvent<{ key?: string }>).detail?.key;
       if (key === STORAGE_KEY_CONNECTION_LOGS) {
         const next = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS) ?? [];
-        setConnectionLogs((prev) =>
-          applyConnectionLogsFromStorage(prev, next, connectionLogTerminalDataRef.current),
+        const merged = applyConnectionLogsFromStorage(
+          connectionLogsRef.current,
+          next,
+          connectionLogTerminalDataRef.current,
         );
+        connectionLogsRef.current = merged;
+        setConnectionLogs(merged);
         return;
       }
-      if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) {
-        if (!syncConnectionLogTerminalData) return;
-        const next = readConnectionLogTerminalDataMap();
-        connectionLogTerminalDataRef.current = next;
-        setConnectionLogs((prev) => mergeConnectionLogsFromStorage(prev, prev, next));
+      if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV) {
+        applyTerminalDataRev(localStorageAdapter.readString(
+          STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
+        ));
       }
     };
 
@@ -1980,7 +2056,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleLocalStorageAdapterChanged);
     };
-  }, [applyConnectionLogsFromStorage, syncConnectionLogTerminalData]);
+  }, [applyConnectionLogsFromStorage, enqueueTerminalDataTask, syncConnectionLogTerminalData]);
 
   const updateHostLastConnected = useCallback((hostId: string) => {
     setHosts((prev) => {

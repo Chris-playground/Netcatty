@@ -1614,7 +1614,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const capturedData = options?.finalized
       ? data
       : (finalizeTerminalLogData() || data);
-    captureHandler(capturedSessionId, capturedData);
+    return captureHandler(capturedSessionId, capturedData);
   }, [finalizeTerminalLogData]);
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
@@ -1961,10 +1961,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [sessionId]);
 
   const forceCloseHibernatedSession = useCallback(() => {
+    let pendingCapture: void | Promise<void>;
     if (!terminalDataCapturedRef.current) {
       const hibernatedData = hibernateSnapshotRef.current + hibernatePendingBufferRef.current;
       if (hibernatedData) {
-        handleTerminalDataCaptureOnce(sessionId, hibernatedData);
+        pendingCapture = handleTerminalDataCaptureOnce(sessionId, hibernatedData);
       }
     }
     disposeDataRef.current?.();
@@ -2007,6 +2008,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     sessionRef.current = null;
     clearHibernateRuntimeState();
+    return pendingCapture;
   }, [attachAuthorization, attachExistingSession, clearHibernateRuntimeState, handleTerminalDataCaptureOnce, sessionId, terminalBackend]);
 
   const observeTerminalInputPrompt = useCallback((

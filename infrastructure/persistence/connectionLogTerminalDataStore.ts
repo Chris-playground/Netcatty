@@ -1,0 +1,314 @@
+import {
+  diffTerminalDataMaps,
+  type ConnectionLogTerminalDataMap,
+} from "../../domain/connectionLogTerminalData.ts";
+
+export const CONNECTION_LOG_TERMINAL_DATA_DB_NAME = "netcatty_connection_log_terminal_data";
+export const CONNECTION_LOG_TERMINAL_DATA_STORE_NAME = "entries";
+
+const DB_VERSION = 1;
+
+export type ConnectionLogTerminalDataRev = {
+  rev: number;
+  /** Log ids currently in the side store. */
+  ids?: string[];
+  /**
+   * Distinguishes two writes that would otherwise share `rev` and `ids`
+   * in the same millisecond, so the other window still observes a change.
+   */
+  nonce?: string;
+};
+
+export type LegacyConnectionLogTerminalDataMigration = {
+  read: () => ConnectionLogTerminalDataMap | null;
+  remove: () => void;
+};
+
+export type MigratedConnectionLogTerminalData = {
+  map: ConnectionLogTerminalDataMap;
+  migrated: boolean;
+};
+
+type TerminalDataRow = {
+  id: string;
+  data: string;
+};
+
+let cachedDatabase: IDBDatabase | null = null;
+let openingDatabase: Promise<IDBDatabase | null> | null = null;
+
+const warnStoreFailure = (message: string, error: unknown): void => {
+  console.warn(`[connectionLogTerminalDataStore] ${message}`, error);
+};
+
+const forgetDatabase = (): void => {
+  const db = cachedDatabase;
+  cachedDatabase = null;
+  openingDatabase = null;
+  try {
+    db?.close();
+  } catch {
+    // The connection is already closing.
+  }
+};
+
+const transactionComplete = (tx: IDBTransaction): Promise<void> => new Promise((resolve, reject) => {
+  let settled = false;
+  const finish = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    fn();
+  };
+  tx.oncomplete = () => finish(() => resolve());
+  tx.onabort = () => finish(() => reject(tx.error ?? new Error("IndexedDB transaction aborted")));
+  tx.onerror = () => finish(() => reject(tx.error ?? new Error("IndexedDB transaction failed")));
+});
+
+const openDatabase = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
+  try {
+    if (typeof indexedDB === "undefined" || indexedDB === null) {
+      resolve(null);
+      return;
+    }
+    const request = indexedDB.open(CONNECTION_LOG_TERMINAL_DATA_DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME)) {
+        db.createObjectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      warnStoreFailure("IndexedDB open failed", request.error);
+      resolve(null);
+    };
+  } catch (error) {
+    warnStoreFailure("IndexedDB open failed", error);
+    resolve(null);
+  }
+});
+
+const getDatabase = async (): Promise<IDBDatabase | null> => {
+  if (cachedDatabase) return cachedDatabase;
+  if (!openingDatabase) {
+    openingDatabase = openDatabase().then((db) => {
+      openingDatabase = null;
+      if (!db) return null;
+      cachedDatabase = db;
+      db.onversionchange = () => {
+        if (cachedDatabase === db) cachedDatabase = null;
+        try {
+          db.close();
+        } catch {
+          // Already closed by the deleting context.
+        }
+      };
+      db.onclose = () => {
+        if (cachedDatabase === db) cachedDatabase = null;
+      };
+      return db;
+    }).catch((error: unknown) => {
+      openingDatabase = null;
+      warnStoreFailure("IndexedDB open failed", error);
+      return null;
+    });
+  }
+  return openingDatabase;
+};
+
+const rowsToMap = (rows: TerminalDataRow[]): ConnectionLogTerminalDataMap => {
+  const map: ConnectionLogTerminalDataMap = {};
+  for (const row of rows) {
+    if (!row || typeof row.id !== "string" || typeof row.data !== "string") continue;
+    map[row.id] = row.data;
+  }
+  return map;
+};
+
+const sanitizeMap = (map: ConnectionLogTerminalDataMap | null): ConnectionLogTerminalDataMap => {
+  if (!map || typeof map !== "object" || Array.isArray(map)) return {};
+  const next: ConnectionLogTerminalDataMap = {};
+  for (const [id, data] of Object.entries(map)) {
+    if (typeof data === "string" && data.length > 0) next[id] = data;
+  }
+  return next;
+};
+
+const readAll = async (): Promise<ConnectionLogTerminalDataMap | null> => {
+  try {
+    const db = await getDatabase();
+    if (!db) return null;
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readonly");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const request = store.getAll() as IDBRequest<TerminalDataRow[]>;
+    let rows: TerminalDataRow[] = [];
+    request.onsuccess = () => {
+      rows = request.result ?? [];
+    };
+    await transactionComplete(tx);
+    return rowsToMap(rows);
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB read failed", error);
+    return null;
+  }
+};
+
+export const loadAll = async (): Promise<ConnectionLogTerminalDataMap> => (await readAll()) ?? {};
+
+export const replaceAll = async (map: ConnectionLogTerminalDataMap): Promise<boolean> => {
+  try {
+    const db = await getDatabase();
+    if (!db) return false;
+    const entries = sanitizeMap(map);
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readwrite");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const done = transactionComplete(tx);
+    store.clear();
+    for (const [id, data] of Object.entries(entries)) {
+      store.put({ id, data });
+    }
+    await done;
+    return true;
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB replace failed", error);
+    return false;
+  }
+};
+
+export const putMany = async (entries: ConnectionLogTerminalDataMap): Promise<boolean> => {
+  const rows = sanitizeMap(entries);
+  const ids = Object.keys(rows);
+  if (ids.length === 0) return true;
+  try {
+    const db = await getDatabase();
+    if (!db) return false;
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readwrite");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const done = transactionComplete(tx);
+    for (const id of ids) store.put({ id, data: rows[id] });
+    await done;
+    return true;
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB put failed", error);
+    return false;
+  }
+};
+
+export const deleteMany = async (ids: readonly string[]): Promise<boolean> => {
+  if (ids.length === 0) return true;
+  try {
+    const db = await getDatabase();
+    if (!db) return false;
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readwrite");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const done = transactionComplete(tx);
+    for (const id of ids) store.delete(id);
+    await done;
+    return true;
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB delete failed", error);
+    return false;
+  }
+};
+
+export const clear = async (): Promise<boolean> => {
+  try {
+    const db = await getDatabase();
+    if (!db) return false;
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readwrite");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const done = transactionComplete(tx);
+    store.clear();
+    await done;
+    return true;
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB clear failed", error);
+    return false;
+  }
+};
+
+/**
+ * Apply a persisted-map diff in one transaction. Unchanged maps do not open
+ * a write. A failed commit leaves the previous rows in place for a retry.
+ */
+export const writeTerminalDataMapDiff = async (
+  previous: ConnectionLogTerminalDataMap,
+  next: ConnectionLogTerminalDataMap,
+): Promise<{ persisted: boolean; changed: boolean }> => {
+  const diff = diffTerminalDataMaps(previous, next);
+  const puts = sanitizeMap(diff.puts);
+  const putIds = Object.keys(puts);
+  if (putIds.length === 0 && diff.deleteIds.length === 0) {
+    return { persisted: true, changed: false };
+  }
+  try {
+    const db = await getDatabase();
+    if (!db) return { persisted: false, changed: true };
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readwrite");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const done = transactionComplete(tx);
+    for (const id of putIds) store.put({ id, data: puts[id] });
+    for (const id of diff.deleteIds) store.delete(id);
+    await done;
+    return { persisted: true, changed: true };
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB diff write failed", error);
+    return { persisted: false, changed: true };
+  }
+};
+
+const safeRemove = (remove: () => void): void => {
+  try {
+    remove();
+  } catch (error) {
+    warnStoreFailure("Failed to remove legacy terminal replay blob", error);
+  }
+};
+
+/**
+ * One-shot move from the legacy localStorage blob into IndexedDB.
+ * An empty IndexedDB plus a legacy blob is copied, then the legacy key is
+ * removed only after the transaction commits. A failed read does not treat
+ * the store as empty, so a later retry can still migrate.
+ */
+export const migrateLegacyConnectionLogTerminalData = async (
+  legacy: LegacyConnectionLogTerminalDataMigration,
+): Promise<MigratedConnectionLogTerminalData> => {
+  const loaded = await readAll();
+  if (loaded === null) {
+    let fallback: ConnectionLogTerminalDataMap | null = null;
+    try {
+      fallback = legacy.read();
+    } catch (error) {
+      warnStoreFailure("Failed to read legacy terminal replay blob", error);
+    }
+    return { map: sanitizeMap(fallback), migrated: false };
+  }
+  if (Object.keys(loaded).length > 0) {
+    safeRemove(legacy.remove);
+    return { map: loaded, migrated: false };
+  }
+
+  let fromLegacy: ConnectionLogTerminalDataMap | null = null;
+  try {
+    fromLegacy = legacy.read();
+  } catch (error) {
+    warnStoreFailure("Failed to read legacy terminal replay blob", error);
+    return { map: {}, migrated: false };
+  }
+  const map = sanitizeMap(fromLegacy);
+  if (Object.keys(map).length === 0) {
+    safeRemove(legacy.remove);
+    return { map: {}, migrated: false };
+  }
+  const persisted = await replaceAll(map);
+  if (!persisted) return { map, migrated: false };
+  safeRemove(legacy.remove);
+  return { map, migrated: true };
+};
