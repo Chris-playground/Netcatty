@@ -1,3 +1,5 @@
+const net = require("net");
+
 const SSH_PROTOCOL = "ssh";
 const TELNET_PROTOCOL = "telnet";
 
@@ -145,10 +147,7 @@ function isDisplayIpv4(value) {
 }
 
 function isDisplayIpv6(value) {
-  if (!looksLikeIpv6(value)) return false;
-  if (!/^[0-9a-f:]+$/i.test(value)) return false;
-  const compressed = value.match(/::/g);
-  return !compressed || compressed.length === 1;
+  return net.isIP(value) === 6;
 }
 
 // A leftover IP positional is the PuTTY analogue of SecureCRT /N: the TCP

@@ -428,6 +428,40 @@ test("parsePuttyCommandLine does not guess a tab name from several leftover addr
   assert.equal(parsed?.tabName, undefined);
 });
 
+test("parsePuttyCommandLine names IPv4-mapped and zone-scoped IPv6 jump targets", () => {
+  const mapped = parsePuttyCommandLine([
+    "Netcatty.exe",
+    "-ssh",
+    "alice@[::ffff:192.0.2.10]@198.51.100.20",
+    "-pw",
+    "example",
+  ]);
+  assert.equal(mapped?.hostname, "198.51.100.20");
+  assert.equal(mapped?.tabName, "::ffff:192.0.2.10");
+
+  const zoned = parsePuttyCommandLine([
+    "Netcatty.exe",
+    "-ssh",
+    "alice@[fe80::1%eth0]@198.51.100.20",
+    "-pw",
+    "example",
+  ]);
+  assert.equal(zoned?.hostname, "198.51.100.20");
+  assert.equal(zoned?.tabName, "fe80::1%eth0");
+});
+
+test("parsePuttyCommandLine does not title a jump tab with a malformed colon string", () => {
+  const parsed = parsePuttyCommandLine([
+    "Netcatty.exe",
+    "-ssh",
+    "alice@a:b:c@198.51.100.20",
+    "-pw",
+    "example",
+  ]);
+  assert.equal(parsed?.hostname, "198.51.100.20");
+  assert.equal(parsed?.tabName, undefined);
+});
+
 test("parsePuttyCommandLine uses a bracketed IPv6 target inside a jump login", () => {
   const parsed = parsePuttyCommandLine([
     "Netcatty.exe",
