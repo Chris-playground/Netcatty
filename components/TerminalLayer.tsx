@@ -2528,7 +2528,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         const executor = snippetExecutorsRef.current.get(targetId);
         if (executor) {
           const sensitive = isTerminalSensitiveInputActive(targetId);
-          pendingSends.push(Promise.resolve(executor(text, false)).then(
+          // Explicitly local: an omitted broadcast option falls back to the
+          // toolbar switch, which can still be on while compose is active-only.
+          pendingSends.push(Promise.resolve(executor(text, false, { broadcast: false })).then(
             (sent) => sent && !sensitive && !isTerminalSensitiveInputActive(targetId),
           ));
         } else {

@@ -71,10 +71,13 @@ test('compose active-only sends to the focused session while toolbar broadcast s
 });
 
 test('compose active-only does not run peer executors while toolbar broadcast stays on', async () => {
-  const calls: string[] = [];
+  const calls: Array<{ id: string; broadcast: boolean | undefined }> = [];
   const executors = new Map<string, Executor>([
-    ['0', async () => { calls.push('0'); return true; }],
-    ['1', async () => { calls.push('1'); return true; }],
+    ['0', async (_text, _immediate, options) => {
+      calls.push({ id: '0', broadcast: options?.broadcast });
+      return true;
+    }],
+    ['1', async () => { calls.push({ id: '1', broadcast: undefined }); return true; }],
   ]);
   assert.equal(
     await setup(
@@ -82,7 +85,7 @@ test('compose active-only does not run peer executors while toolbar broadcast st
     ).send('command'),
     true,
   );
-  assert.deepEqual(calls, ['0']);
+  assert.deepEqual(calls, [{ id: '0', broadcast: false }]);
 });
 
 test('compose send-to-all fans out while toolbar broadcast stays off', async () => {
