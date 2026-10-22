@@ -5174,6 +5174,105 @@ test("renderer lifetime close cancels queued replacement and closes the older ac
   assert.equal(manager.hasOpenSession("queued-close"), false);
 });
 
+test("destroying a copied child window releases only its shells on a shared SSH transport", async t => {
+  const terminalBridge = require("./terminalBridge.cjs");
+  const {
+    createConnectionRef,
+    acquireConnectionRef,
+    resetSshTransportRegistryForTests,
+  } = require("./sshConnectionPool.cjs");
+  resetSshTransportRegistryForTests();
+  t.after(() => resetSshTransportRegistryForTests());
+
+  const sessions = new Map();
+  terminalBridge.init({ sessions, electronModule: {} });
+  const conn = { ended: 0, end() { this.ended += 1; } };
+  const shell = () => ({
+    stream: { closed: 0, close() { this.closed += 1; } },
+    conn,
+    chainConnections: [],
+    connRef: null,
+    zmodemSentry: { cancel() {} },
+    bootEpoch: 1,
+  });
+  const mainA = shell();
+  const transport = createConnectionRef(mainA, conn, []);
+  const mainB = shell();
+  const childA = shell();
+  const childB = shell();
+  acquireConnectionRef(mainB, transport);
+  acquireConnectionRef(childA, transport);
+  acquireConnectionRef(childB, transport);
+  sessions.set("main-a", mainA);
+  sessions.set("main-b", mainB);
+  sessions.set("child-a", childA);
+  sessions.set("child-b", childB);
+
+  const renderers = new Map([1, 2].map((id) => {
+    const contents = new EventEmitter();
+    Object.assign(contents, { id, destroyed: false, send() {} });
+    contents.isDestroyed = () => contents.destroyed;
+    contents.destroy = () => { contents.destroyed = true; contents.emit("destroyed"); };
+    return [id, contents];
+  }));
+  const child = new LinkedRuntimeChild();
+  child.connectRuntime((ipcMain) => {
+    ipcMain.handle("netcatty:start", (_event, payload) => ({ sessionId: payload.sessionId }));
+    ipcMain.on("netcatty:close", terminalBridge.closeSession);
+    ipcMain.handle("netcatty:close:await", terminalBridge.closeSession);
+  });
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    electronModule: { webContents: { fromId: (id) => renderers.get(id) } },
+    terminalOutputChannel: { openSession() {}, closeSession() {} },
+  });
+  t.after(() => manager.stop());
+
+  const own = (sessionId, webContentsId) => manager.request(
+    "netcatty:start",
+    { sessionId, bootEpoch: 1, hostId: "shared-host" },
+    { webContentsId },
+  );
+  await own("main-a", 1);
+  await own("main-b", 1);
+  await own("child-a", 2);
+  await own("child-b", 2);
+  assert.equal(transport.count, 4);
+  assert.equal(transport.state, "live");
+
+  renderers.get(2).destroy();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(childA.stream.closed, 1);
+  assert.equal(childB.stream.closed, 1);
+  assert.equal(mainA.stream.closed, 0);
+  assert.equal(mainB.stream.closed, 0);
+  assert.equal(conn.ended, 0, "shared SSH connection stays up for the main window");
+  assert.equal(transport.count, 2);
+  assert.equal(transport.state, "live");
+  assert.equal(sessions.has("main-a"), true);
+  assert.equal(sessions.has("main-b"), true);
+  assert.equal(sessions.has("child-a"), false);
+  assert.equal(sessions.has("child-b"), false);
+  assert.equal(manager.hasOpenSession("main-a"), true);
+  assert.equal(manager.hasOpenSession("main-b"), true);
+  assert.equal(manager.hasOpenSession("child-a"), false);
+  assert.equal(manager.hasOpenSession("child-b"), false);
+
+  renderers.get(2).emit("destroyed");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(transport.count, 2, "a repeated child-window destroy must not drop surviving leases");
+  assert.equal(conn.ended, 0);
+
+  renderers.get(1).destroy();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(mainA.stream.closed, 1);
+  assert.equal(mainB.stream.closed, 1);
+  assert.equal(transport.count, 0);
+  assert.equal(transport.state, "idle");
+  assert.equal(conn.ended, 0, "the parked transport is not ended while it can still be reused");
+});
+
 test("backend-assigned session ID is closed if its renderer disappeared before the response", async t => {
   const f = createRendererLifetimeFixture(t);
   const start = f.manager.request("netcatty:local:start", {}, { webContentsId: 7 });
