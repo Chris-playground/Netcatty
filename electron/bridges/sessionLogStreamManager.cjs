@@ -22,6 +22,10 @@ const sessionLogs = new Map();
 
 // Buffer flush interval (ms)
 const FLUSH_INTERVAL = 500;
+// A failed snapshot retries without waiting for more output, but not in a
+// tight loop. The delay grows while the same failure persists.
+const SNAPSHOT_RETRY_MIN_MS = 250;
+const SNAPSHOT_RETRY_MAX_MS = 5000;
 // Max buffer size before immediate flush (bytes)
 const MAX_BUFFER_SIZE = 64 * 1024;
 const SUDO_AUTOFILL_MARKER_PATTERN = /__NETCATTY_SUDO_[a-z0-9_]+__/gi;
@@ -197,8 +201,10 @@ function createStreamEntry(sessionId, opts) {
     snapshotRequested: false,
     snapshotDirty: false,
     snapshotError: null,
-    // Set only while prepareSessionLog is waiting on a snapshot. A failure
-    // still retries immediately for every other caller.
+    snapshotRetryTimer: null,
+    snapshotRetryDelay: 0,
+    // Set only while prepareSessionLog is waiting on a snapshot, so that
+    // caller can observe the failure before the delayed retry starts.
     deferSnapshotRetry: false,
     error: null,
     closing: false,
@@ -328,9 +334,27 @@ function renderSnapshotContent(entry, { finalize = false } = {}) {
     : content;
 }
 
+function clearSnapshotRetry(entry) {
+  if (!entry?.snapshotRetryTimer) return;
+  clearTimeout(entry.snapshotRetryTimer);
+  entry.snapshotRetryTimer = null;
+}
+
+function scheduleSnapshotRetry(entry) {
+  if (!entry || entry.closing || entry.disabled || entry.isRaw || entry.snapshotRetryTimer) return;
+  const delay = entry.snapshotRetryDelay || SNAPSHOT_RETRY_MIN_MS;
+  entry.snapshotRetryTimer = setTimeout(() => {
+    entry.snapshotRetryTimer = null;
+    if (entry.closing || entry.disabled) return;
+    scheduleSnapshot(entry);
+  }, delay);
+  entry.snapshotRetryDelay = Math.min(delay * 2, SNAPSHOT_RETRY_MAX_MS);
+}
+
 function scheduleSnapshot(entry) {
   if (!entry || entry.disabled || entry.isRaw || entry.closing) return;
   if (!entry.snapshotDirty) return;
+  clearSnapshotRetry(entry);
 
   if (entry.snapshotPromise) {
     entry.snapshotRequested = true;
@@ -341,6 +365,9 @@ function scheduleSnapshot(entry) {
   entry.snapshotError = null;
   entry.snapshotPromise = fs.promises
     .writeFile(entry.filePath, renderSnapshotContent(entry), "utf8")
+    .then(() => {
+      entry.snapshotRetryDelay = 0;
+    })
     .catch((err) => {
       console.error("[SessionLogStream] Snapshot write failed:", err.message);
       entry.snapshotDirty = true;
@@ -348,13 +375,13 @@ function scheduleSnapshot(entry) {
     })
     .finally(() => {
       entry.snapshotPromise = null;
-      // prepareSessionLog has to observe this failure instead of waiting out
-      // the retry loop. Background flushes keep the immediate retry.
+      // prepareSessionLog must see this failure. Other callers retry on a
+      // delay, or sooner when new output is flushed.
       if (entry.snapshotError && entry.deferSnapshotRetry) return;
-      if ((entry.snapshotRequested || entry.snapshotDirty) && !entry.closing) {
-        entry.snapshotRequested = false;
-        scheduleSnapshot(entry);
-      }
+      if (!(entry.snapshotRequested || entry.snapshotDirty) || entry.closing) return;
+      entry.snapshotRequested = false;
+      if (entry.snapshotError) scheduleSnapshotRetry(entry);
+      else scheduleSnapshot(entry);
     });
 }
 
@@ -460,6 +487,7 @@ async function stopStream(sessionId, expectedToken) {
 }
 
 async function finalizeStream(sessionId, entry) {
+  clearSnapshotRetry(entry);
 
   // Stop periodic flush
   if (entry.flushTimer) {
@@ -534,7 +562,7 @@ async function prepareSessionLog(sessionId) {
       });
     } else {
       // Also materialize an empty txt/html log before its first output arrives.
-      // Hold the immediate retry only for this wait, then let it resume.
+      // Hold the retry until this wait returns, then resume on the backoff timer.
       entry.snapshotDirty = true;
       entry.deferSnapshotRetry = true;
       try {
@@ -545,7 +573,8 @@ async function prepareSessionLog(sessionId) {
         entry.deferSnapshotRetry = false;
         if (!entry.snapshotPromise && !entry.closing
           && (entry.snapshotRequested || entry.snapshotDirty)) {
-          scheduleSnapshot(entry);
+          if (entry.snapshotError) scheduleSnapshotRetry(entry);
+          else scheduleSnapshot(entry);
         }
       }
     }

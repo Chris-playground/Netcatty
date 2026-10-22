@@ -12,7 +12,9 @@ Recording and opening a session log stay separate.
 
 The menu items appear when automatic session logging is enabled. They also
 appear once a manual log has been started for that session, and stay available
-after recording stops. Pending terminal output is flushed before opening;
+after recording stops. A successful reconnect drops a stopped manual log when
+automatic logging is off, and the menu items go with it. A failed reconnect
+keeps them. Pending terminal output is flushed before opening;
 recording continues normally. Automatic logs and manually recorded logs both
 open this way.
 

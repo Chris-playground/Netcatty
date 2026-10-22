@@ -74,6 +74,7 @@ import {
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { readOptionalStoredStringValue, useStoredString } from "../application/state/useStoredString";
 import { performSessionLogAction, type SessionLogAction } from "../application/state/sessionLogActions";
+import { resolveRetainedSessionLog } from "./terminal/sessionLogMenuAvailability";
 import { useSessionLogBackend } from "../application/state/useSessionLogBackend";
 import { useTerminalLayoutSuppressActive } from "../application/state/terminalLayoutSuppressStore";
 import { useAppearanceChromeStore } from "../application/state/appearanceChromeStore";
@@ -4254,16 +4255,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   }, [sessionId, host, resolvedChainHosts, keys, identities, terminalSettings, knownHosts]);
 
-  const sessionLogLatchRef = useRef(false);
-  const sessionLogLatchSessionRef = useRef(sessionId);
-  if (sessionLogLatchSessionRef.current !== sessionId) {
-    sessionLogLatchSessionRef.current = sessionId;
-    sessionLogLatchRef.current = false;
-  }
-  // Stopped manual logs stay reachable. The renderer does not otherwise know
-  // that a finalized file still belongs to this session.
-  if (sessionLog?.enabled || isSessionLogging) sessionLogLatchRef.current = true;
-  const canOpenSessionLog = sessionLogLatchRef.current;
+  const [retainedManualLog, setRetainedManualLog] = useState(false);
+  const manualLogSessionRef = useRef(sessionId);
+  const previousTerminalStatusRef = useRef(status);
+  useEffect(() => {
+    const previousStatus = previousTerminalStatusRef.current;
+    previousTerminalStatusRef.current = status;
+    const sessionChanged = manualLogSessionRef.current !== sessionId;
+    manualLogSessionRef.current = sessionId;
+    setRetainedManualLog((retained) => resolveRetainedSessionLog(sessionChanged ? false : retained, {
+      automaticLogging: Boolean(sessionLog?.enabled),
+      manualLogging: isSessionLogging,
+      previousStatus,
+      status,
+    }));
+  }, [isSessionLogging, sessionId, sessionLog?.enabled, status]);
+  const canOpenSessionLog = Boolean(sessionLog?.enabled) || isSessionLogging || retainedManualLog;
 
   const renderControls = useCallback((opts?: { showClose?: boolean; restorePaneLayout?: boolean }) => (
     <TerminalToolbar

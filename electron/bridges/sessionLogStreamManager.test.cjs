@@ -1033,6 +1033,32 @@ test("prepare reports snapshot failures promptly and background writes keep retr
   assert.equal(await prepareSessionLog(sessionId), filePath);
 });
 
+test("persistent snapshot failures back off instead of retrying immediately", async (t) => {
+  const directory = path.join(TEMP_ROOT, `snapshot-backoff-${Date.now()}`);
+  const filePath = path.join(directory, "session.txt");
+  const sessionId = "snapshot-backoff";
+  const writeFile = fs.promises.writeFile.bind(fs.promises);
+  let attempts = 0;
+  t.mock.method(fs.promises, "writeFile", async (...args) => {
+    if (args[0] === filePath) {
+      attempts++;
+      throw new Error("disk full");
+    }
+    return writeFile(...args);
+  });
+  t.after(async () => {
+    await stopStream(sessionId);
+    forgetSessionLog(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  startStreamToFile(sessionId, { filePath, format: "txt" });
+  appendData(sessionId, "x".repeat(64 * 1024));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(attempts, 1, "a failed snapshot must not retry in a tight loop");
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(attempts, 2, "the first retry waits for the backoff delay");
+});
+
 test("finalize ends a raw write stream that a synchronous flush already disabled", async (t) => {
   const directory = path.join(TEMP_ROOT, `finalize-disabled-${Date.now()}`);
   const filePath = path.join(directory, "session.log");
