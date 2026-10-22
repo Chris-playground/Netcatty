@@ -33,6 +33,10 @@ test("close-path connection log updates await the indexedDB persist task", () =>
   assert.match(source, /retainNewestUnsavedReplays\(fallbackLogs, keep\)/);
   assert.match(source, /if \(!map\) return;/);
   assert.match(
+    source,
+    /if \(key === STORAGE_KEY_CONNECTION_LOGS\) \{\s*\/\/ This window already updated connectionLogsRef before setItem\.[\s\S]*?return;\s*\}/,
+  );
+  assert.match(
     terminalLayerSource,
     /const handleTerminalDataCapture = useCallback\(\(sessionId: string, data: string\) => \{\s*return onTerminalDataCapture\?\.\(sessionId, data\);/,
   );

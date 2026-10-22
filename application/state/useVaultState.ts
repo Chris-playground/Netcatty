@@ -2146,14 +2146,11 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     const handleLocalStorageAdapterChanged = (event: Event) => {
       const key = (event as CustomEvent<{ key?: string }>).detail?.key;
       if (key === STORAGE_KEY_CONNECTION_LOGS) {
-        const next = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS) ?? [];
-        const merged = applyConnectionLogsFromStorage(
-          connectionLogsRef.current,
-          next,
-          connectionLogTerminalDataRef.current,
-        );
-        connectionLogsRef.current = merged;
-        setConnectionLogs(merged);
+        // This window already updated connectionLogsRef before setItem. The
+        // adapter notifies on a timer, so this blob can be older than a log
+        // added or finalized while that write was still queued. Applying it
+        // would drop that log from the ref, and the follow-up recipe would
+        // record no changed id. Other windows still arrive through "storage".
         return;
       }
       if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV) {
