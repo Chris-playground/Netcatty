@@ -260,8 +260,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onCreateLocalTerminal,
   isBroadcastEnabled,
   onToggleBroadcast,
+  isComposeSendToAll,
+  onToggleComposeSendTarget,
   isGlobalBroadcastEnabled,
+  isGlobalComposeSendToAll,
   onToggleGlobalBroadcast,
+  onToggleGlobalComposeSendTarget,
   canUseGlobalBroadcast,
   updateHosts,
   updateSnippets,
@@ -1277,6 +1281,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       sourceSessionId,
       globalBroadcastEnabled: isGlobalBroadcastEnabled,
       directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
+      includeGlobalPeersWithoutToolbar: options?.composePeerFanOut === true,
     }).filter(id => !paced?.targets || paced.targets.some(target => target.sessionId === id));
     if (options?.preparePacedBroadcast && paced) {
       paced.targets = targetSessionIds.filter(id => passwordBypass || !isTerminalSensitiveInputActive(id)).map(id => {
@@ -2463,14 +2468,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     let anyRecipientSensitive = false;
     const pendingSends: Promise<boolean>[] = [];
     const payload = text + '\r';
-    const broadcastEnabled = isBroadcastEnabled?.(activeWorkspace.id);
+    // Compose Enter follows the compose-bar target. Toolbar broadcast stays
+    // the keystroke switch and is only the fallback when no compose target
+    // has been published (older callers).
+    const composeSendToAll = isComposeSendToAll
+      ? isComposeSendToAll(activeWorkspace.id) === true
+      : Boolean(isBroadcastEnabled?.(activeWorkspace.id));
     const focusedSessionId = activeWorkspace.focusedSessionId;
     const broadcastPasswordBypass = broadcastPasswordBypassRef.current;
     const focusedSensitive = focusedSessionId
       ? isTerminalSensitiveInputActive(focusedSessionId)
       : false;
 
-    if (broadcastEnabled && (broadcastPasswordBypass || !focusedSensitive)) {
+    if (composeSendToAll && (broadcastPasswordBypass || !focusedSensitive)) {
       const allSessionIds = sessionsRef.current
         .filter((session) => session.workspaceId === activeWorkspace.id)
         .map((session) => session.id);
@@ -2539,7 +2549,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     // eligibility for it.
     if (focusedSensitive || anyRecipientSensitive) return false;
     return delivered;
-  }, [isBroadcastEnabled, terminalBackend]);
+  }, [isBroadcastEnabled, isComposeSendToAll, terminalBackend]);
 
   const sessionLogConfig = useMemo(
     () => ({
@@ -2664,7 +2674,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     restoreTerminalCwd,
     identities,
     isBroadcastEnabled,
+    isComposeSendToAll,
+    onToggleComposeSendTarget,
     isGlobalBroadcastEnabled,
+    isGlobalComposeSendToAll,
+    onToggleGlobalComposeSendTarget,
     canUseGlobalBroadcast,
     isComposeBarOpen,
     keyBindings,
