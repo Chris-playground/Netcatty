@@ -41,6 +41,6 @@ test("boot re-reads connection logs after indexedDB load and falls back to the m
   );
   assert.match(
     source,
-    /!sidePersisted && unsavedTerminalDataPending && mainPersisted\) \{\s*\/\/[\s\S]*?sidePersisted = localStorageAdapter\.write\(STORAGE_KEY_CONNECTION_LOGS, logs\);/,
+    /!sidePersisted && unsavedTerminalDataPending && mainPersisted\) \{\s*\/\/[\s\S]*?localStorageAdapter\.read<ConnectionLog\[\]>\(\s*STORAGE_KEY_CONNECTION_LOGS\s*\)[\s\S]*?mergeTerminalDataIntoLogs\(freshLogs, buildTerminalDataMapFromLogs\(logs\)\)/,
   );
 });

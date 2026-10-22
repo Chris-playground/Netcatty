@@ -525,9 +525,13 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
       mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
     } else if (!sidePersisted && unsavedTerminalDataPending && mainPersisted) {
       // IndexedDB rejected the replay after the pruned metadata write. Put the
-      // buffers back on the main blob so a restart still has them. The next
-      // successful side-store write strips them again.
-      sidePersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+      // buffers back on the current main blob so a restart still has them,
+      // without replacing logs another window wrote during the await.
+      const freshLogs = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS);
+      const fallbackLogs = freshLogs
+        ? mergeTerminalDataIntoLogs(freshLogs, buildTerminalDataMapFromLogs(logs))
+        : logs;
+      sidePersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, fallbackLogs);
     }
 
     if (!mainPersisted && unsavedTerminalDataPending) {
