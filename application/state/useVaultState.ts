@@ -302,12 +302,19 @@ const writeConnectionLogTerminalDataMap = (
   existing: ConnectionLogTerminalDataMap,
   pruned: ConnectionLogTerminalDataMap,
   logs: ConnectionLog[],
+  quotaFailedCharsRef: { current: number | null },
 ): boolean => {
   if (isSameTerminalDataMap(existing, pruned)) return true;
   // On quota failure keep the newest replay buffers instead of none.
-  return writeTerminalDataMapWithQuotaRetry(logs, pruned, (next) =>
-    localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, next),
-  ).persisted;
+  // The hint stays on the hook so the domain helper remains a pure calculation.
+  const result = writeTerminalDataMapWithQuotaRetry(
+    logs,
+    pruned,
+    (next) => localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, next),
+    quotaFailedCharsRef.current,
+  );
+  quotaFailedCharsRef.current = result.quotaFailedChars;
+  return result.persisted;
 };
 
 export const useVaultState = () => {
@@ -437,6 +444,7 @@ export const useVaultState = () => {
   const proxyProfilesReadSeq = useRef(0);
   const groupConfigsReadSeq = useRef(0);
   const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
+  const connectionLogQuotaFailedCharsRef = useRef<number | null>(null);
   const pluginCredentialCatalogVersion = useRef(0);
 
   const syncConnectionLogTerminalDataMap = useCallback((
@@ -455,7 +463,12 @@ export const useVaultState = () => {
       localMaps,
       buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
     );
-    const persisted = writeConnectionLogTerminalDataMap(existing, merged, logs);
+    const persisted = writeConnectionLogTerminalDataMap(
+      existing,
+      merged,
+      logs,
+      connectionLogQuotaFailedCharsRef,
+    );
     // On a failed write (e.g. QuotaExceeded once the side store nears ~50 MB)
     // keep the same capped map instead of accumulating every log's replay
     // buffer in memory; anything outside it would be pruned on the next write.

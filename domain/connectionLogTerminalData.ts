@@ -119,20 +119,18 @@ export const pruneInMemoryUnsavedTerminalData = (
  * without the oldest unsaved replay buffers so the newest sessions are kept.
  * Drops 1, 2, 4, … oldest entries per retry, so attempts stay O(log n).
  * Saved logs and ids not in `logs` are never dropped.
+ *
+ * `quotaFailedChars` is owned by the caller. It is the summed entry length of
+ * the smallest payload that last hit the quota, so the next write can start
+ * from the newest set that fits. A successful write of the full map returns
+ * null. The helper does not keep that hint itself.
  */
-// In memory only: summed entry length of the smallest side-store payload that last hit the
-// quota, so the next write can start from the newest set that fits instead of failing first.
-let quotaFailedChars: number | null = null;
-
-export const resetTerminalDataQuotaHint = (): void => {
-  quotaFailedChars = null;
-};
-
 export const writeTerminalDataMapWithQuotaRetry = (
   logs: ConnectionLog[],
   map: ConnectionLogTerminalDataMap,
   write: (next: ConnectionLogTerminalDataMap) => boolean,
-): { persisted: boolean; written: ConnectionLogTerminalDataMap; attempts: number } => {
+  quotaFailedChars: number | null,
+): { persisted: boolean; written: ConnectionLogTerminalDataMap; attempts: number; quotaFailedChars: number | null } => {
   const droppable = logs
     .filter((log) => !log.saved && map[log.id] !== undefined)
     .sort((a, b) => a.startTime - b.startTime)
@@ -140,9 +138,10 @@ export const writeTerminalDataMapWithQuotaRetry = (
   let chars = 0;
   for (const data of Object.values(map)) chars += data.length;
 
+  let hint = quotaFailedChars;
   let dropCount = 0;
-  if (quotaFailedChars !== null) {
-    while (dropCount < droppable.length && chars >= quotaFailedChars) {
+  if (hint !== null) {
+    while (dropCount < droppable.length && chars >= hint) {
       chars -= map[droppable[dropCount]].length;
       dropCount += 1;
     }
@@ -160,11 +159,13 @@ export const writeTerminalDataMapWithQuotaRetry = (
     }
     attempts += 1;
     if (write(next)) {
-      if (dropCount === 0) quotaFailedChars = null;
-      return { persisted: true, written: next, attempts };
+      if (dropCount === 0) hint = null;
+      return { persisted: true, written: next, attempts, quotaFailedChars: hint };
     }
-    quotaFailedChars = quotaFailedChars === null ? chars : Math.min(quotaFailedChars, chars);
-    if (dropCount >= droppable.length) return { persisted: false, written: map, attempts };
+    hint = hint === null ? chars : Math.min(hint, chars);
+    if (dropCount >= droppable.length) {
+      return { persisted: false, written: map, attempts, quotaFailedChars: hint };
+    }
     const target = Math.min(Math.max(dropCount * 2, 1), droppable.length);
     for (let i = dropCount; i < target; i += 1) chars -= map[droppable[i]].length;
     dropCount = target;
