@@ -52,13 +52,14 @@ export const mergeConnectionLogsFromStorage = (
 /**
  * Apply a queued connection-log snapshot when it runs, not when it was captured.
  * Disk may have gained another window's logs during the wait. Keep those logs.
- * A storage event can replace memory with that remote snapshot before this
- * task runs, so queued ids stay even when memory no longer lists them. Deletes
- * from this snapshot are applied only while memory still agrees.
+ * Re-add a queued id only when this snapshot added or updated it (`changedIds`).
+ * An unchanged id another window deleted stays deleted. Deletes from this
+ * snapshot apply only while memory still agrees.
  */
 export const rebaseQueuedConnectionLogs = (
   queued: readonly ConnectionLog[],
   removedIds: ReadonlySet<string>,
+  changedIds: ReadonlySet<string>,
   memory: readonly ConnectionLog[],
   disk: readonly ConnectionLog[] | null,
 ): ConnectionLog[] => {
@@ -74,7 +75,7 @@ export const rebaseQueuedConnectionLogs = (
   const present = new Set(withReplay.map((log) => log.id));
   const extras: ConnectionLog[] = [];
   for (const log of queued) {
-    if (present.has(log.id)) continue;
+    if (present.has(log.id) || !changedIds.has(log.id)) continue;
     extras.push(memoryById.get(log.id) ?? log);
   }
   if (extras.length === 0) return withReplay;

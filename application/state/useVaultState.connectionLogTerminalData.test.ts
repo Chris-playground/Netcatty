@@ -25,7 +25,7 @@ test("close-path connection log updates await the indexedDB persist task", () =>
     source,
     /const updateConnectionLog = useCallback\([\s\S]*?return commitConnectionLogs\(/,
   );
-  assert.match(source, /rebaseQueuedConnectionLogs\(/);
+  assert.match(source, /rebaseQueuedConnectionLogs\(\s*next,\s*removedIds,\s*changedIds,/);
   assert.match(
     terminalLayerSource,
     /const handleTerminalDataCapture = useCallback\(\(sessionId: string, data: string\) => \{\s*return onTerminalDataCapture\?\.\(sessionId, data\);/,
@@ -33,9 +33,12 @@ test("close-path connection log updates await the indexedDB persist task", () =>
 });
 
 test("boot re-reads connection logs after indexedDB load and falls back to the main blob", () => {
+  const revAt = source.indexOf("let revSeen = readTerminalDataRev()");
   const bootAt = source.indexOf("const loaded = await migrateLegacyConnectionLogTerminalData");
-  assert.notEqual(bootAt, -1);
-  const bootSlice = source.slice(bootAt, bootAt + 1800);
+  assert.notEqual(revAt, -1);
+  assert.ok(revAt < bootAt);
+  const bootSlice = source.slice(bootAt, bootAt + 2800);
+  assert.match(bootSlice, /revNow !== revSeen[\s\S]*?await loadConnectionLogTerminalData\(\)/);
   assert.match(
     bootSlice,
     /localStorageAdapter\.read<ConnectionLog\[\]>\(\s*STORAGE_KEY_CONNECTION_LOGS,\s*\)[\s\S]*?pruneTerminalDataMapForStorage\(connectionLogsForBoot/,

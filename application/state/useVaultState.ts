@@ -553,16 +553,24 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
   ) => {
     const prev = connectionLogsRef.current;
     const next = recipe(prev);
-    const nextIds = new Set(next.map((log) => log.id));
+    const prevById = new Map(prev.map((log) => [log.id, log]));
+    const nextIds = new Set<string>();
+    const changedIds = new Set<string>();
+    for (const log of next) {
+      nextIds.add(log.id);
+      const before = prevById.get(log.id);
+      if (!before || before !== log) changedIds.add(log.id);
+    }
     const removedIds = new Set(prev.filter((log) => !nextIds.has(log.id)).map((log) => log.id));
     connectionLogsRef.current = next;
     setConnectionLogs(next);
     // The task may run after another window writes. Rebase onto the logs that
-    // exist then instead of storing this pre-queue snapshot.
+    // exist then. Restore only ids this recipe added or replaced.
     return enqueueTerminalDataTask(() => persistConnectionLogState(
       rebaseQueuedConnectionLogs(
         next,
         removedIds,
+        changedIds,
         connectionLogsRef.current,
         localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS),
       ),
@@ -1710,6 +1718,13 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         let terminalDataMap: ConnectionLogTerminalDataMap = {};
         let durableTerminalData = true;
         if (syncConnectionLogTerminalData) {
+          const readTerminalDataRev = () => localStorageAdapter.readString(
+            STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
+          );
+          // A peer can commit replay and bump the rev while this load is in
+          // flight. Capture the rev first and reload when it moves, so stamping
+          // the key later does not mark an unread snapshot as consumed.
+          let revSeen = readTerminalDataRev();
           const loaded = await migrateLegacyConnectionLogTerminalData({
             read: () => localStorageAdapter.read<ConnectionLogTerminalDataMap>(
               STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA,
@@ -1720,6 +1735,15 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           });
           if (cancelled) return;
           terminalDataMap = loaded.map;
+          let revNow = readTerminalDataRev();
+          if (revNow !== revSeen) {
+            const reloaded = await loadConnectionLogTerminalData();
+            if (cancelled) return;
+            if (Object.keys(reloaded).length > 0) {
+              terminalDataMap = { ...terminalDataMap, ...reloaded };
+            }
+            revSeen = revNow;
+          }
           // Another window can append a log while IndexedDB is opening. Prune
           // against that newer metadata so this boot does not delete its replay.
           connectionLogsForBoot = localStorageAdapter.read<ConnectionLog[]>(
@@ -1744,9 +1768,19 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           if (loaded.migrated || (written.changed && written.persisted)) {
             bumpConnectionLogTerminalDataRev(Object.keys(terminalDataMap));
           } else {
-            connectionLogTerminalDataRevRawRef.current = localStorageAdapter.readString(
-              STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA_REV,
-            );
+            revNow = readTerminalDataRev();
+            if (revNow !== revSeen) {
+              const reloaded = await loadConnectionLogTerminalData();
+              if (cancelled) return;
+              if (Object.keys(reloaded).length > 0) {
+                terminalDataMap = { ...terminalDataMap, ...reloaded };
+              }
+              revSeen = revNow;
+              connectionLogsForBoot = localStorageAdapter.read<ConnectionLog[]>(
+                STORAGE_KEY_CONNECTION_LOGS,
+              ) ?? connectionLogsForBoot;
+            }
+            connectionLogTerminalDataRevRawRef.current = revSeen;
           }
         }
         connectionLogTerminalDataRef.current = terminalDataMap;

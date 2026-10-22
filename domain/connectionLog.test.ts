@@ -243,7 +243,7 @@ test("rebaseQueuedConnectionLogs keeps logs another window wrote while this snap
     { ...baseLog, id: "local", startTime: 2000 },
   ];
 
-  const rebased = rebaseQueuedConnectionLogs(queued, new Set(), memory, disk);
+  const rebased = rebaseQueuedConnectionLogs(queued, new Set(), new Set(["local"]), memory, disk);
 
   assert.deepEqual(rebased.map((log) => log.id), ["remote", "local"]);
   assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
@@ -253,9 +253,34 @@ test("rebaseQueuedConnectionLogs keeps a queued local add after a remote snapsho
   const queued = [{ ...baseLog, id: "local", startTime: 2000, terminalData: "local-replay" }];
   const remote = [{ ...baseLog, id: "remote", startTime: 3000 }];
 
-  const rebased = rebaseQueuedConnectionLogs(queued, new Set(), remote, remote);
+  const rebased = rebaseQueuedConnectionLogs(
+    queued,
+    new Set(),
+    new Set(["local"]),
+    remote,
+    remote,
+  );
 
   assert.deepEqual(rebased.map((log) => log.id), ["remote", "local"]);
+  assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
+});
+
+test("rebaseQueuedConnectionLogs does not restore an unchanged log another window deleted", () => {
+  const unchanged = { ...baseLog, id: "unchanged", startTime: 1000, terminalData: "old" };
+  const added = { ...baseLog, id: "local", startTime: 4000, terminalData: "local-replay" };
+  const queued = [added, unchanged];
+  const remote = [{ ...baseLog, id: "remote", startTime: 3000 }];
+
+  const rebased = rebaseQueuedConnectionLogs(
+    queued,
+    new Set(),
+    new Set(["local"]),
+    remote,
+    remote,
+  );
+
+  assert.deepEqual(rebased.map((log) => log.id), ["local", "remote"]);
+  assert.equal(rebased.find((log) => log.id === "unchanged"), undefined);
   assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
 });
 
@@ -267,7 +292,13 @@ test("rebaseQueuedConnectionLogs drops a queued delete and keeps a queued add st
     { ...baseLog, id: "kept", startTime: 2000 },
   ];
 
-  const rebased = rebaseQueuedConnectionLogs(queued, new Set(["deleted"]), memory, disk);
+  const rebased = rebaseQueuedConnectionLogs(
+    queued,
+    new Set(["deleted"]),
+    new Set(["added"]),
+    memory,
+    disk,
+  );
 
   assert.deepEqual(rebased.map((log) => log.id), ["added", "kept"]);
   assert.equal(rebased.find((log) => log.id === "added")?.terminalData, "new");
