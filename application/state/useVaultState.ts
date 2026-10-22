@@ -66,6 +66,7 @@ import {
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
   pruneInMemoryUnsavedTerminalData,
+  rebaseQueuedConnectionLogs,
   pruneTerminalDataMapForStorage,
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
@@ -550,10 +551,23 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     recipe: (prev: ConnectionLog[]) => ConnectionLog[],
     options?: { pruneMainBlob?: boolean },
   ) => {
-    const next = recipe(connectionLogsRef.current);
+    const prev = connectionLogsRef.current;
+    const next = recipe(prev);
+    const nextIds = new Set(next.map((log) => log.id));
+    const removedIds = new Set(prev.filter((log) => !nextIds.has(log.id)).map((log) => log.id));
     connectionLogsRef.current = next;
     setConnectionLogs(next);
-    return enqueueTerminalDataTask(() => persistConnectionLogState(next, options));
+    // The task may run after another window writes. Rebase onto the logs that
+    // exist then instead of storing this pre-queue snapshot.
+    return enqueueTerminalDataTask(() => persistConnectionLogState(
+      rebaseQueuedConnectionLogs(
+        next,
+        removedIds,
+        connectionLogsRef.current,
+        localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS),
+      ),
+      options,
+    ));
   }, [enqueueTerminalDataTask, persistConnectionLogState]);
 
   const applyConnectionLogsFromStorage = useCallback((

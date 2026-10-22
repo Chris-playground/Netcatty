@@ -9,6 +9,7 @@ import {
   mergeConnectionLogsFromStorage,
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
+  rebaseQueuedConnectionLogs,
   pruneInMemoryUnsavedTerminalData,
   pruneTerminalDataMapForStorage,
 } from "./connectionLogTerminalData.ts";
@@ -232,6 +233,34 @@ test("mergeTerminalDataMapsForStorage drops deleted log replay buffers", () => {
 
   assert.equal(merged.local, "keep");
   assert.equal(merged.deleted, undefined);
+});
+
+test("rebaseQueuedConnectionLogs keeps logs another window wrote while this snapshot waited", () => {
+  const queued = [{ ...baseLog, id: "local", startTime: 2000, terminalData: "local-replay" }];
+  const memory = queued;
+  const disk = [
+    { ...baseLog, id: "remote", startTime: 3000 },
+    { ...baseLog, id: "local", startTime: 2000 },
+  ];
+
+  const rebased = rebaseQueuedConnectionLogs(queued, new Set(), memory, disk);
+
+  assert.deepEqual(rebased.map((log) => log.id), ["remote", "local"]);
+  assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
+});
+
+test("rebaseQueuedConnectionLogs drops a queued delete and keeps a queued add still in memory", () => {
+  const queued = [{ ...baseLog, id: "added", startTime: 4000, terminalData: "new" }];
+  const memory = queued;
+  const disk = [
+    { ...baseLog, id: "deleted", startTime: 1000 },
+    { ...baseLog, id: "kept", startTime: 2000 },
+  ];
+
+  const rebased = rebaseQueuedConnectionLogs(queued, new Set(["deleted"]), memory, disk);
+
+  assert.deepEqual(rebased.map((log) => log.id), ["added", "kept"]);
+  assert.equal(rebased.find((log) => log.id === "added")?.terminalData, "new");
 });
 
 test("diffTerminalDataMaps puts only changed ids and deletes removed ids", () => {

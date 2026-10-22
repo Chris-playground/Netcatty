@@ -25,6 +25,7 @@ test("close-path connection log updates await the indexedDB persist task", () =>
     source,
     /const updateConnectionLog = useCallback\([\s\S]*?return commitConnectionLogs\(/,
   );
+  assert.match(source, /rebaseQueuedConnectionLogs\(/);
   assert.match(
     terminalLayerSource,
     /const handleTerminalDataCapture = useCallback\(\(sessionId: string, data: string\) => \{\s*return onTerminalDataCapture\?\.\(sessionId, data\);/,

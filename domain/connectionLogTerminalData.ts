@@ -49,6 +49,40 @@ export const mergeConnectionLogsFromStorage = (
   return changed ? merged : next;
 };
 
+/**
+ * Apply a queued connection-log snapshot when it runs, not when it was captured.
+ * Disk may have gained another window's logs during the wait. Keep those logs,
+ * keep this snapshot's deletes only while memory still agrees, and keep replay
+ * buffers from the queued snapshot.
+ */
+export const rebaseQueuedConnectionLogs = (
+  queued: readonly ConnectionLog[],
+  removedIds: ReadonlySet<string>,
+  memory: readonly ConnectionLog[],
+  disk: readonly ConnectionLog[] | null,
+): ConnectionLog[] => {
+  const memoryById = new Map(memory.map((log) => [log.id, log]));
+  const diskKept = (disk ?? []).filter(
+    (log) => !(removedIds.has(log.id) && !memoryById.has(log.id)),
+  );
+  const withReplay = mergeConnectionLogsFromStorage(
+    memory,
+    diskKept,
+    buildTerminalDataMapFromLogs(queued),
+  );
+  const present = new Set(withReplay.map((log) => log.id));
+  const extras: ConnectionLog[] = [];
+  for (const log of queued) {
+    if (present.has(log.id) || !memoryById.has(log.id)) continue;
+    const current = memoryById.get(log.id);
+    if (current) extras.push(current);
+  }
+  if (extras.length === 0) return withReplay;
+  return pruneInMemoryUnsavedTerminalData(
+    [...extras, ...withReplay].sort((a, b) => b.startTime - a.startTime),
+  );
+};
+
 export const buildTerminalDataMapFromLogs = (
   logs: ConnectionLog[],
 ): ConnectionLogTerminalDataMap => {
