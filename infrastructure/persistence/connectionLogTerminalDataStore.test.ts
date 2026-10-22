@@ -261,24 +261,41 @@ test("migration copies a legacy map into indexedDB and removes it only after com
   assert.deepEqual(await loadAll(), legacy);
 });
 
-test("migration does not read the legacy blob once indexedDB has rows", async () => {
+test("migration keeps indexedDB rows and copies legacy ids that are not stored yet", async () => {
   assert.equal(await putMany({ kept: "from-idb" }), true);
-  let reads = 0;
   let removed = false;
   const loaded = await migrateLegacyConnectionLogTerminalData({
-    read: () => {
-      reads += 1;
-      return { kept: "legacy" };
-    },
+    read: () => ({ kept: "stale-legacy", missing: "from-legacy" }),
     remove: () => {
       removed = true;
     },
   });
 
-  assert.equal(reads, 0);
   assert.equal(removed, true);
+  assert.equal(loaded.migrated, true);
+  assert.equal(loaded.durable, true);
+  assert.deepEqual(loaded.map, { kept: "from-idb", missing: "from-legacy" });
+  assert.deepEqual(await loadAll(), { kept: "from-idb", missing: "from-legacy" });
+});
+
+test("migration keeps the legacy key when merging missing rows fails", async () => {
+  assert.equal(await putMany({ kept: "from-idb" }), true);
+  fakeState.failWrites = true;
+  let removed = false;
+  const loaded = await migrateLegacyConnectionLogTerminalData({
+    read: () => ({ missing: "from-legacy" }),
+    remove: () => {
+      removed = true;
+    },
+  });
+
+  assert.equal(removed, false);
   assert.equal(loaded.migrated, false);
-  assert.deepEqual(loaded.map, { kept: "from-idb" });
+  assert.equal(loaded.durable, false);
+  assert.equal(loaded.map.missing, "from-legacy");
+  assert.equal(loaded.map.kept, "from-idb");
+  fakeState.failWrites = false;
+  assert.deepEqual(await loadAll(), { kept: "from-idb" });
 });
 
 test("migration keeps the legacy key when the indexedDB replace fails", async () => {

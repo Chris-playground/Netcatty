@@ -1690,6 +1690,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         );
         let connectionLogsForBoot = savedConnectionLogs;
         let terminalDataMap: ConnectionLogTerminalDataMap = {};
+        let durableTerminalData = true;
         if (syncConnectionLogTerminalData) {
           const loaded = await migrateLegacyConnectionLogTerminalData({
             read: () => localStorageAdapter.read<ConnectionLogTerminalDataMap>(
@@ -1709,9 +1710,19 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           const pruned = connectionLogsForBoot
             ? pruneTerminalDataMapForStorage(connectionLogsForBoot, terminalDataMap)
             : terminalDataMap;
-          const written = await writeTerminalDataMapDiff(terminalDataMap, pruned);
+          // A legacy map that never reached IndexedDB is not a diff baseline.
+          // Comparing against it would persist only the changed ids and then
+          // drop the rest of the legacy blob on the next boot.
+          const baseline = loaded.durable ? terminalDataMap : {};
+          const written = await writeTerminalDataMapDiff(baseline, pruned);
           if (cancelled) return;
-          if (written.persisted) terminalDataMap = pruned;
+          if (written.persisted) {
+            terminalDataMap = pruned;
+            if (!loaded.durable) {
+              localStorageAdapter.remove(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA);
+            }
+          }
+          durableTerminalData = written.persisted || loaded.durable;
           if (loaded.migrated || (written.changed && written.persisted)) {
             bumpConnectionLogTerminalDataRev(Object.keys(terminalDataMap));
           } else {
@@ -1721,7 +1732,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           }
         }
         connectionLogTerminalDataRef.current = terminalDataMap;
-        connectionLogTerminalDataPersistedRef.current = terminalDataMap;
+        connectionLogTerminalDataPersistedRef.current = durableTerminalData ? terminalDataMap : {};
         if (connectionLogsForBoot) {
           const hydrated = mergeTerminalDataIntoLogs(connectionLogsForBoot, terminalDataMap);
           connectionLogsRef.current = hydrated;

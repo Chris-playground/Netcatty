@@ -27,6 +27,11 @@ export type LegacyConnectionLogTerminalDataMigration = {
 export type MigratedConnectionLogTerminalData = {
   map: ConnectionLogTerminalDataMap;
   migrated: boolean;
+  /**
+   * False when `map` contains replay rows that are not committed in IndexedDB.
+   * Callers must not use that map as a diff baseline until a later write commits.
+   */
+  durable: boolean;
 };
 
 type TerminalDataRow = {
@@ -271,44 +276,60 @@ const safeRemove = (remove: () => void): void => {
   }
 };
 
+const readLegacyMap = (
+  legacy: LegacyConnectionLogTerminalDataMigration,
+): ConnectionLogTerminalDataMap | null => {
+  try {
+    return sanitizeMap(legacy.read());
+  } catch (error) {
+    warnStoreFailure("Failed to read legacy terminal replay blob", error);
+    return null;
+  }
+};
+
 /**
  * One-shot move from the legacy localStorage blob into IndexedDB.
  * An empty IndexedDB plus a legacy blob is copied, then the legacy key is
- * removed only after the transaction commits. A failed read does not treat
- * the store as empty, so a later retry can still migrate.
+ * removed only after the transaction commits. Rows already in IndexedDB are
+ * kept; legacy ids that are not there yet are inserted before the key is
+ * removed. A failed read does not treat the store as empty, and a failed
+ * write leaves the legacy key in place.
  */
 export const migrateLegacyConnectionLogTerminalData = async (
   legacy: LegacyConnectionLogTerminalDataMigration,
 ): Promise<MigratedConnectionLogTerminalData> => {
   const loaded = await readAll();
   if (loaded === null) {
-    let fallback: ConnectionLogTerminalDataMap | null = null;
-    try {
-      fallback = legacy.read();
-    } catch (error) {
-      warnStoreFailure("Failed to read legacy terminal replay blob", error);
-    }
-    return { map: sanitizeMap(fallback), migrated: false };
+    const fallback = readLegacyMap(legacy);
+    return { map: fallback ?? {}, migrated: false, durable: false };
   }
   if (Object.keys(loaded).length > 0) {
+    const legacyMap = readLegacyMap(legacy);
+    if (legacyMap === null) return { map: loaded, migrated: false, durable: true };
+    const missing: ConnectionLogTerminalDataMap = {};
+    for (const [id, data] of Object.entries(legacyMap)) {
+      if (!Object.prototype.hasOwnProperty.call(loaded, id)) missing[id] = data;
+    }
+    if (Object.keys(missing).length === 0) {
+      safeRemove(legacy.remove);
+      return { map: loaded, migrated: false, durable: true };
+    }
+    const persisted = await putMany(missing);
+    if (!persisted) {
+      return { map: { ...missing, ...loaded }, migrated: false, durable: false };
+    }
     safeRemove(legacy.remove);
-    return { map: loaded, migrated: false };
+    return { map: { ...loaded, ...missing }, migrated: true, durable: true };
   }
 
-  let fromLegacy: ConnectionLogTerminalDataMap | null = null;
-  try {
-    fromLegacy = legacy.read();
-  } catch (error) {
-    warnStoreFailure("Failed to read legacy terminal replay blob", error);
-    return { map: {}, migrated: false };
-  }
-  const map = sanitizeMap(fromLegacy);
-  if (Object.keys(map).length === 0) {
+  const legacyMap = readLegacyMap(legacy);
+  if (legacyMap === null) return { map: {}, migrated: false, durable: false };
+  if (Object.keys(legacyMap).length === 0) {
     safeRemove(legacy.remove);
-    return { map: {}, migrated: false };
+    return { map: {}, migrated: false, durable: true };
   }
-  const persisted = await replaceAll(map);
-  if (!persisted) return { map, migrated: false };
+  const persisted = await replaceAll(legacyMap);
+  if (!persisted) return { map: legacyMap, migrated: false, durable: false };
   safeRemove(legacy.remove);
-  return { map, migrated: true };
+  return { map: legacyMap, migrated: true, durable: true };
 };
