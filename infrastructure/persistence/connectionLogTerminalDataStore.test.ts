@@ -14,6 +14,7 @@ type Row = { id: string; data: string };
 
 type FakeState = {
   failWrites: boolean;
+  onGet?: (rows: Map<string, Row>) => void;
   openConnections: Set<{ close: () => void; onversionchange: (() => void) | null }>;
 };
 
@@ -173,6 +174,14 @@ class FakeStore {
     return this.tx.track(() => [...this.rows.values()].map((row) => ({ ...row })), false);
   }
 
+  get(id: string): FakeRequest<Row | undefined> {
+    return this.tx.track(() => {
+      fakeState.onGet?.(this.rows);
+      const row = this.rows.get(id);
+      return row ? { ...row } : undefined;
+    }, false);
+  }
+
   put(value: Row): FakeRequest<string> {
     return this.tx.track(() => {
       this.rows.set(value.id, { ...value });
@@ -199,6 +208,7 @@ installFakeIndexedDB();
 
 const resetStore = async () => {
   fakeState.failWrites = false;
+  fakeState.onGet = undefined;
   await new Promise<void>((resolve) => {
     const request = indexedDB.deleteDatabase("netcatty_connection_log_terminal_data");
     request.onsuccess = () => resolve();
@@ -243,6 +253,26 @@ test("writeTerminalDataMapDiff skips indexedDB when the map is unchanged", async
   );
   assert.deepEqual(result, { persisted: true, changed: false });
   assert.deepEqual(await loadAll(), { a: "1", b: "2" });
+});
+
+test("migration inserts legacy rows without clearing a replay committed after the empty read", async () => {
+  fakeState.onGet = (rows) => {
+    rows.set("concurrent", { id: "concurrent", data: "new-window" });
+    fakeState.onGet = undefined;
+  };
+  let removed = false;
+  const loaded = await migrateLegacyConnectionLogTerminalData({
+    read: () => ({ "log-old": "legacy" }),
+    remove: () => {
+      removed = true;
+    },
+  });
+
+  assert.equal(removed, true);
+  assert.equal(loaded.durable, true);
+  assert.equal(loaded.map.concurrent, "new-window");
+  assert.equal(loaded.map["log-old"], "legacy");
+  assert.deepEqual(await loadAll(), { concurrent: "new-window", "log-old": "legacy" });
 });
 
 test("migration copies a legacy map into indexedDB and removes it only after commit", async () => {

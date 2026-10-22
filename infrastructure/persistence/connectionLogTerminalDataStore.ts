@@ -182,6 +182,32 @@ export const replaceAll = async (map: ConnectionLogTerminalDataMap): Promise<boo
   }
 };
 
+/** Insert ids that are still absent. Does not clear or overwrite existing rows. */
+const putMissing = async (entries: ConnectionLogTerminalDataMap): Promise<boolean> => {
+  const rows = sanitizeMap(entries);
+  const ids = Object.keys(rows);
+  if (ids.length === 0) return true;
+  try {
+    const db = await getDatabase();
+    if (!db) return false;
+    const tx = db.transaction(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME, "readwrite");
+    const store = tx.objectStore(CONNECTION_LOG_TERMINAL_DATA_STORE_NAME);
+    const done = transactionComplete(tx);
+    for (const id of ids) {
+      const request = store.get(id) as IDBRequest<TerminalDataRow | undefined>;
+      request.onsuccess = () => {
+        if (request.result === undefined) store.put({ id, data: rows[id] });
+      };
+    }
+    await done;
+    return true;
+  } catch (error) {
+    forgetDatabase();
+    warnStoreFailure("IndexedDB put failed", error);
+    return false;
+  }
+};
+
 export const putMany = async (entries: ConnectionLogTerminalDataMap): Promise<boolean> => {
   const rows = sanitizeMap(entries);
   const ids = Object.keys(rows);
@@ -314,12 +340,17 @@ export const migrateLegacyConnectionLogTerminalData = async (
       safeRemove(legacy.remove);
       return { map: loaded, migrated: false, durable: true };
     }
-    const persisted = await putMany(missing);
+    const persisted = await putMissing(missing);
     if (!persisted) {
       return { map: { ...missing, ...loaded }, migrated: false, durable: false };
     }
     safeRemove(legacy.remove);
-    return { map: { ...loaded, ...missing }, migrated: true, durable: true };
+    const committed = await readAll();
+    return {
+      map: committed ?? { ...loaded, ...missing },
+      migrated: true,
+      durable: committed !== null,
+    };
   }
 
   const legacyMap = readLegacyMap(legacy);
@@ -328,8 +359,10 @@ export const migrateLegacyConnectionLogTerminalData = async (
     safeRemove(legacy.remove);
     return { map: {}, migrated: false, durable: true };
   }
-  const persisted = await replaceAll(legacyMap);
+  // Insert without clearing. A row committed after the empty readAll must stay.
+  const persisted = await putMissing(legacyMap);
   if (!persisted) return { map: legacyMap, migrated: false, durable: false };
   safeRemove(legacy.remove);
-  return { map: legacyMap, migrated: true, durable: true };
+  const committed = await readAll();
+  return { map: committed ?? legacyMap, migrated: true, durable: committed !== null };
 };
