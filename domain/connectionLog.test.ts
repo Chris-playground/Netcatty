@@ -250,20 +250,32 @@ test("rebaseQueuedConnectionLogs keeps logs another window wrote while this snap
   assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
 });
 
-test("rebaseQueuedConnectionLogs keeps a queued local add after a remote snapshot replaces memory", () => {
+test("rebaseQueuedConnectionLogs does not restore an id deleted from memory after it was queued", () => {
   const queued = [{ ...baseLog, id: "local", startTime: 2000, terminalData: "local-replay" }];
-  const remote = [{ ...baseLog, id: "remote", startTime: 3000 }];
+  const disk = [
+    { ...baseLog, id: "remote", startTime: 3000 },
+    { ...baseLog, id: "local", startTime: 2000, terminalData: "stale-intermediate" },
+  ];
 
   const rebased = rebaseQueuedConnectionLogs(
     queued,
     new Set(),
     new Set(["local"]),
-    remote,
-    remote,
+    [{ ...baseLog, id: "remote", startTime: 3000 }],
+    disk,
   );
 
-  assert.deepEqual(rebased.map((log) => log.id), ["remote", "local"]);
-  assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
+  assert.deepEqual(rebased.map((log) => log.id), ["remote"]);
+  assert.equal(rebased.find((log) => log.id === "local"), undefined);
+
+  const notYetOnDisk = rebaseQueuedConnectionLogs(
+    queued,
+    new Set(),
+    new Set(["local"]),
+    [{ ...baseLog, id: "remote", startTime: 3000 }],
+    [{ ...baseLog, id: "remote", startTime: 3000 }],
+  );
+  assert.deepEqual(notYetOnDisk.map((log) => log.id), ["remote"]);
 });
 
 test("rebaseQueuedConnectionLogs does not restore an unchanged log another window deleted", () => {
@@ -276,7 +288,7 @@ test("rebaseQueuedConnectionLogs does not restore an unchanged log another windo
     queued,
     new Set(),
     new Set(["local"]),
-    remote,
+    [added, ...remote],
     remote,
   );
 

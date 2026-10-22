@@ -53,8 +53,9 @@ export const mergeConnectionLogsFromStorage = (
  * Apply a queued connection-log snapshot when it runs, not when it was captured.
  * Disk may have gained another window's logs during the wait. Keep those logs.
  * Metadata from this snapshot replaces a disk row only for ids the recipe added
- * or updated (`changedIds`). An unchanged id another window deleted stays
- * deleted. Deletes from this snapshot apply only while memory still agrees.
+ * or updated (`changedIds`) that are still in memory. An id deleted locally
+ * after this snapshot was queued is not written back. Deletes from this
+ * snapshot apply only while memory still agrees.
  */
 export const rebaseQueuedConnectionLogs = (
   queued: readonly ConnectionLog[],
@@ -69,19 +70,30 @@ export const rebaseQueuedConnectionLogs = (
     (log) => !(removedIds.has(log.id) && !memoryById.has(log.id)),
   );
   const present = new Set<string>();
-  const withLocalEdits = diskKept.map((log) => {
-    present.add(log.id);
+  const withLocalEdits: ConnectionLog[] = [];
+  for (const log of diskKept) {
     const queuedLog = queuedById.get(log.id);
     const memoryLog = memoryById.get(log.id);
-    if (changedIds.has(log.id)) return memoryLog ?? queuedLog ?? log;
+    if (changedIds.has(log.id)) {
+      if (!memoryLog) continue;
+      present.add(log.id);
+      withLocalEdits.push(memoryLog);
+      continue;
+    }
+    present.add(log.id);
     const replay = queuedLog?.terminalData ?? memoryLog?.terminalData ?? log.terminalData;
-    if (!replay || log.terminalData === replay) return log;
-    return { ...log, terminalData: replay };
-  });
+    if (!replay || log.terminalData === replay) {
+      withLocalEdits.push(log);
+      continue;
+    }
+    withLocalEdits.push({ ...log, terminalData: replay });
+  }
   const extras: ConnectionLog[] = [];
   for (const log of queued) {
     if (present.has(log.id) || !changedIds.has(log.id)) continue;
-    extras.push(memoryById.get(log.id) ?? log);
+    const memoryLog = memoryById.get(log.id);
+    if (!memoryLog) continue;
+    extras.push(memoryLog);
   }
   if (extras.length === 0) return withLocalEdits;
   return pruneInMemoryUnsavedTerminalData(
