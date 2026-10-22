@@ -77,7 +77,7 @@ export const TERMINAL_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
     compose: 'show',
     search: 'show',
     sessionLog: 'show',
-    openSessionLog: 'show',
+    openSessionLog: 'collapse',
     scripts: 'show',
     history: 'collapse',
     configureOsc7: 'collapse',
@@ -120,6 +120,8 @@ export interface TerminalToolbarProps {
   showLogButton?: boolean;
   onToggleSessionLog?: () => void;
   onSessionLogAction?: (action: SessionLogAction) => void;
+  /** Automatic logging is enabled, or this session has started a manual log. */
+  canOpenSessionLog?: boolean;
   isSessionLogging?: boolean;
   isSessionLogDisabled?: boolean;
   // Compose bar
@@ -159,6 +161,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   showLogButton = false,
   onToggleSessionLog,
   onSessionLogAction,
+  canOpenSessionLog = false,
   isSessionLogging = false,
   isSessionLogDisabled = false,
   isComposeBarOpen,
@@ -255,7 +258,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       ids.push('ymodemSend', 'ymodemReceive');
     }
     if (showLogButton) ids.push('sessionLog');
-    if (onSessionLogAction) ids.push('openSessionLog');
+    if (onSessionLogAction && canOpenSessionLog) ids.push('openSessionLog');
     if (historySupported) ids.push('history');
     if (onConfigureOsc7 && !hidesSftp) ids.push('configureOsc7');
     if (onStartRecording) ids.push('recording');
@@ -273,6 +276,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     onStartRecording,
     showLogButton,
     onSessionLogAction,
+    canOpenSessionLog,
   ]);
 
   const itemLabels = useMemo(
@@ -959,6 +963,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                 </button>
               </PopoverClose>
             ))}
+            <p className="px-2 py-1 text-xs text-muted-foreground">{t('terminal.toolbar.sessionLog.rememberApplication')}</p>
           </React.Fragment>
         );
       case 'sessionLog':

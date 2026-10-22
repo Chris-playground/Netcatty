@@ -197,6 +197,9 @@ function createStreamEntry(sessionId, opts) {
     snapshotRequested: false,
     snapshotDirty: false,
     snapshotError: null,
+    // Set only while prepareSessionLog is waiting on a snapshot. A failure
+    // still retries immediately for every other caller.
+    deferSnapshotRetry: false,
     error: null,
     closing: false,
     disabled: false,
@@ -345,9 +348,10 @@ function scheduleSnapshot(entry) {
     })
     .finally(() => {
       entry.snapshotPromise = null;
-      // A failed disk write must not spin forever. Retry on the next data
-      // flush or explicit prepare request, and let current callers see it.
-      if (!entry.snapshotError && (entry.snapshotRequested || entry.snapshotDirty) && !entry.closing) {
+      // prepareSessionLog has to observe this failure instead of waiting out
+      // the retry loop. Background flushes keep the immediate retry.
+      if (entry.snapshotError && entry.deferSnapshotRetry) return;
+      if ((entry.snapshotRequested || entry.snapshotDirty) && !entry.closing) {
         entry.snapshotRequested = false;
         scheduleSnapshot(entry);
       }
@@ -476,16 +480,20 @@ async function finalizeStream(sessionId, entry) {
   flushBuffer(entry);
   await waitForSnapshotIdle(entry);
 
-  // Close the raw write stream and wait for it to finish.
+  // Close the raw write stream and wait for it to finish. A flush that
+  // already disabled the entry must still end the stream, or the fd leaks.
   if (entry.writeStream) {
+    let closeError = null;
     try {
-      if (entry.disabled) throw entry.error || new Error("Session log stream failed");
       await new Promise((resolve, reject) => {
         entry.writeStream.end((err) => err ? reject(err) : resolve());
       });
     } catch (err) {
+      closeError = err;
+    }
+    if (entry.disabled || closeError) {
       entry.disabled = true;
-      entry.error = err;
+      entry.error = entry.error || closeError || new Error("Session log stream failed");
     }
   } else if (!entry.disabled) {
     try {
@@ -526,10 +534,20 @@ async function prepareSessionLog(sessionId) {
       });
     } else {
       // Also materialize an empty txt/html log before its first output arrives.
+      // Hold the immediate retry only for this wait, then let it resume.
       entry.snapshotDirty = true;
-      scheduleSnapshot(entry);
-      await waitForSnapshotIdle(entry);
-      if (entry.snapshotError) throw entry.snapshotError;
+      entry.deferSnapshotRetry = true;
+      try {
+        scheduleSnapshot(entry);
+        await waitForSnapshotIdle(entry);
+        if (entry.snapshotError) throw entry.snapshotError;
+      } finally {
+        entry.deferSnapshotRetry = false;
+        if (!entry.snapshotPromise && !entry.closing
+          && (entry.snapshotRequested || entry.snapshotDirty)) {
+          scheduleSnapshot(entry);
+        }
+      }
     }
     // Stop may have begun while the flush was pending; wait for its final file.
     if (record.stopPromise) await record.stopPromise;

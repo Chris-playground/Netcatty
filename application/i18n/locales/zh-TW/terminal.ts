@@ -3,7 +3,7 @@ import type { Messages } from '../types';
 export const zhTWTerminalMessages: Messages = {
   'terminal.toolbar.openSessionLog': '開啟工作階段日誌',
   'terminal.toolbar.sessionLogActions': '工作階段日誌操作',
-  'terminal.toolbar.sessionLog.reveal': '在資料夾中顯示日誌',
+  'terminal.toolbar.sessionLog.reveal': '在資料夾中顯示工作階段日誌',
   'terminal.toolbar.sessionLog.chooseApplication': '選擇應用程式開啟…',
   'terminal.toolbar.sessionLog.systemDefault': '使用系統預設應用程式開啟',
   'terminal.toolbar.sessionLog.rememberApplication': '所選應用程式將用於之後開啟日誌。',

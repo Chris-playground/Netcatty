@@ -4254,6 +4254,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   }, [sessionId, host, resolvedChainHosts, keys, identities, terminalSettings, knownHosts]);
 
+  const sessionLogLatchRef = useRef(false);
+  const sessionLogLatchSessionRef = useRef(sessionId);
+  if (sessionLogLatchSessionRef.current !== sessionId) {
+    sessionLogLatchSessionRef.current = sessionId;
+    sessionLogLatchRef.current = false;
+  }
+  // Stopped manual logs stay reachable. The renderer does not otherwise know
+  // that a finalized file still belongs to this session.
+  if (sessionLog?.enabled || isSessionLogging) sessionLogLatchRef.current = true;
+  const canOpenSessionLog = sessionLogLatchRef.current;
+
   const renderControls = useCallback((opts?: { showClose?: boolean; restorePaneLayout?: boolean }) => (
     <TerminalToolbar
       sessionId={sessionId}
@@ -4294,6 +4305,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onToggleSearch={handleToggleSearch}
       showLogButton
       onSessionLogAction={handleSessionLogAction}
+      canOpenSessionLog={canOpenSessionLog}
       onToggleSessionLog={handleToggleSessionLog}
       isSessionLogging={isSessionLogging}
       isSessionLogDisabled={status !== "connected" && !isSessionLogging}
@@ -4327,6 +4339,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleSetTerminalEncoding,
     handleToggleSessionLog,
     handleSessionLogAction,
+    canOpenSessionLog,
     handleToggleSearch,
     handleToolbarRecordingToggle,
     host,

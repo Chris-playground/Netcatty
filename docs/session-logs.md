@@ -1,13 +1,20 @@
 # Saved session logs
 
-The terminal toolbar has separate actions for recording and opening logs:
+Recording and opening a session log stay separate.
 
 - **Start / Stop session log** controls manual recording.
-- **Open session log** opens the current terminal's saved log in one click.
-  Automatic logs are supported as well as manually recorded logs. Pending
-  terminal output is flushed before opening; recording continues normally.
-- The arrow beside **Open session log** offers **Reveal session log in folder**,
-  **Open with application**, and **Open with system default**.
+- **Open session log**, **Reveal session log in folder**, **Open with
+  application**, and **Open with system default** live in the terminal
+  toolbar's existing **More actions** menu. They are not a default toolbar
+  button. Toolbar customization can show the shortcut on the bar or hide it.
+  When it is shown, the arrow beside it offers the same reveal and open-with
+  actions.
+
+The menu items appear when automatic session logging is enabled. They also
+appear once a manual log has been started for that session, and stay available
+after recording stops. Pending terminal output is flushed before opening;
+recording continues normally. Automatic logs and manually recorded logs both
+open this way.
 
 A successfully selected application is remembered locally for subsequent log
 opens, independently of SFTP file associations. Choosing the system default
@@ -18,7 +25,4 @@ After a successful reconnect, a stopped log from the old connection is not reuse
 If reconnecting fails, the previous saved log remains available.
 Manual recording that is still active remains the current log. If the current session has no saved log,
 or the file was moved or deleted, the action reports an error rather than
-opening an unrelated file. The shortcut does not enable logging automatically.
-
-Like other terminal toolbar items, the shortcut can be shown, collapsed into
-**More actions**, or hidden through the toolbar's customization menu.
+opening an unrelated file. The action does not enable logging automatically.

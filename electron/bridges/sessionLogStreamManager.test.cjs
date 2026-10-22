@@ -996,7 +996,7 @@ test("prepare raw log waits for the write callback, including already-queued wri
   assert.equal(fs.readFileSync(filePath, "utf8").length, 64 * 1024);
 });
 
-test("prepare reports snapshot failures promptly and permits a later retry", async (t) => {
+test("prepare reports snapshot failures promptly and background writes keep retrying", async (t) => {
   const directory = path.join(TEMP_ROOT, `prepare-error-${Date.now()}`);
   const filePath = path.join(directory, "session.txt");
   const sessionId = "prepare-snapshot-error";
@@ -1019,10 +1019,44 @@ test("prepare reports snapshot failures promptly and permits a later retry", asy
   startStreamToFile(sessionId, { filePath, format: "txt" });
   appendData(sessionId, "not lost\n");
   await assert.rejects(prepareSessionLog(sessionId), /disk full/);
-  assert.equal(attempts, 1, "a failed snapshot must not retry in a tight loop");
+  const attemptsAtReport = attempts;
+  assert.ok(attemptsAtReport >= 1);
   fail = false;
+  const started = Date.now();
+  while (!fs.existsSync(filePath) || !fs.readFileSync(filePath, "utf8").includes("not lost")) {
+    if (Date.now() - started > 2000) {
+      assert.fail(`snapshot retry did not persist the log (attempts=${attempts})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(attempts > attemptsAtReport, "a failed snapshot write retries without another prepare");
   assert.equal(await prepareSessionLog(sessionId), filePath);
-  assert.match(fs.readFileSync(filePath, "utf8"), /not lost/);
+});
+
+test("finalize ends a raw write stream that a synchronous flush already disabled", async (t) => {
+  const directory = path.join(TEMP_ROOT, `finalize-disabled-${Date.now()}`);
+  const filePath = path.join(directory, "session.log");
+  const sessionId = "finalize-disabled-raw";
+  const stream = {
+    ended: false,
+    on() { return this; },
+    write() { throw new Error("flush failed"); },
+    end(callback) {
+      this.ended = true;
+      if (typeof callback === "function") callback();
+    },
+  };
+  t.mock.method(fs, "createWriteStream", () => stream);
+  t.after(async () => {
+    await stopStream(sessionId);
+    forgetSessionLog(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const started = startStreamToFile(sessionId, { filePath, format: "raw" });
+  assert.equal(started.ok, true);
+  appendData(sessionId, "pending");
+  assert.equal(await stopStream(sessionId), null);
+  assert.equal(stream.ended, true);
 });
 
 test("prepare reports raw stream errors rather than opening an empty or stale file", async (t) => {
