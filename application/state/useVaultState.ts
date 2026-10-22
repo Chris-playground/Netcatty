@@ -523,6 +523,11 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
     if (!options?.pruneMainBlob) {
       mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+    } else if (!sidePersisted && unsavedTerminalDataPending && mainPersisted) {
+      // IndexedDB rejected the replay after the pruned metadata write. Put the
+      // buffers back on the main blob so a restart still has them. The next
+      // successful side-store write strips them again.
+      sidePersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
     }
 
     if (!mainPersisted && unsavedTerminalDataPending) {
@@ -1683,6 +1688,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         const savedConnectionLogs = localStorageAdapter.read<ConnectionLog[]>(
           STORAGE_KEY_CONNECTION_LOGS,
         );
+        let connectionLogsForBoot = savedConnectionLogs;
         let terminalDataMap: ConnectionLogTerminalDataMap = {};
         if (syncConnectionLogTerminalData) {
           const loaded = await migrateLegacyConnectionLogTerminalData({
@@ -1695,8 +1701,13 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           });
           if (cancelled) return;
           terminalDataMap = loaded.map;
-          const pruned = savedConnectionLogs
-            ? pruneTerminalDataMapForStorage(savedConnectionLogs, terminalDataMap)
+          // Another window can append a log while IndexedDB is opening. Prune
+          // against that newer metadata so this boot does not delete its replay.
+          connectionLogsForBoot = localStorageAdapter.read<ConnectionLog[]>(
+            STORAGE_KEY_CONNECTION_LOGS,
+          ) ?? savedConnectionLogs;
+          const pruned = connectionLogsForBoot
+            ? pruneTerminalDataMapForStorage(connectionLogsForBoot, terminalDataMap)
             : terminalDataMap;
           const written = await writeTerminalDataMapDiff(terminalDataMap, pruned);
           if (cancelled) return;
@@ -1711,8 +1722,8 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         }
         connectionLogTerminalDataRef.current = terminalDataMap;
         connectionLogTerminalDataPersistedRef.current = terminalDataMap;
-        if (savedConnectionLogs) {
-          const hydrated = mergeTerminalDataIntoLogs(savedConnectionLogs, terminalDataMap);
+        if (connectionLogsForBoot) {
+          const hydrated = mergeTerminalDataIntoLogs(connectionLogsForBoot, terminalDataMap);
           connectionLogsRef.current = hydrated;
           setConnectionLogs(hydrated);
         }
