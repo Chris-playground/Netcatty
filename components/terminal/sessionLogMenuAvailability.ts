@@ -7,15 +7,15 @@ export interface SessionLogMenuInput {
   status: SessionLogMenuStatus;
 }
 
-/** Keep a stopped manual log in the menu until a new connection retires it. */
+/** Keep the current log in the menu until a new connection retires it. */
 export function resolveRetainedSessionLog(
   retainedManualLog: boolean,
   input: SessionLogMenuInput,
 ): boolean {
-  if (input.manualLogging) return true;
+  // An automatic stream keeps recording after the setting is turned off.
+  if (input.manualLogging || input.automaticLogging) return true;
   const reconnectRetiredInactiveLog = input.status === "connected"
-    && input.previousStatus !== "connected"
-    && !input.automaticLogging;
+    && input.previousStatus !== "connected";
   if (reconnectRetiredInactiveLog) return false;
   return retainedManualLog;
 }

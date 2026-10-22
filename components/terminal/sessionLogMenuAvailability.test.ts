@@ -28,6 +28,12 @@ test("automatic logging and an active manual log stay available across reconnect
   assert.equal(resolveRetainedSessionLog(true, { ...reconnect, manualLogging: true }), true);
 });
 
+test("turning automatic logging off keeps the current log until reconnect", () => {
+  assert.equal(resolveRetainedSessionLog(false, { ...connected, automaticLogging: true }), true);
+  assert.equal(resolveRetainedSessionLog(true, connected), true);
+  assert.equal(resolveRetainedSessionLog(true, { ...connected, previousStatus: "connecting" }), false);
+});
+
 test("a failed reconnect keeps the stopped manual log", () => {
   const failed = { ...connected, previousStatus: "connecting" as const, status: "disconnected" as const };
   assert.equal(resolveRetainedSessionLog(true, failed), true);
