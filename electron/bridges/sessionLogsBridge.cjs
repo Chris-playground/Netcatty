@@ -782,13 +782,27 @@ async function stopManualSessionLog(event, payload = {}) {
   }
 }
 
-async function getManualSessionLogStatus(event, payload = {}) {
-  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+async function getManualSessionLogStatus(event, payload = {}, terminalWorkerManager = null) {
+  const manager = require("./sessionLogStreamManager.cjs");
   const { sessionId } = payload;
-  if (!sessionId) {
-    return { success: false, isLogging: false, error: "Missing sessionId" };
+  if (!validSessionLogId(sessionId)) {
+    return { success: false, isLogging: false, hasSessionLog: false, error: "Missing sessionId" };
   }
-  return { success: true, isLogging: sessionLogStreamManager.hasStream(sessionId) };
+  // Keep the recording toggle main-owned. Automatic logs may live in the
+  // worker, and stopped logs remain available independently of active streams.
+  const isLogging = manager.hasStream(sessionId);
+  let hasSessionLog = manager.hasSessionLog(sessionId);
+  if (!hasSessionLog && isTerminalWorkerRunning(terminalWorkerManager)) {
+    try {
+      const result = await terminalWorkerManager.request(
+        "netcatty:sessionLog:statusLocal", { sessionId }, {},
+      );
+      hasSessionLog = result?.success === true && result.hasSessionLog === true;
+    } catch {
+      // An unavailable worker must not manufacture an openable log target.
+    }
+  }
+  return { success: true, isLogging, hasSessionLog };
 }
 
 function validSessionLogId(sessionId) {
@@ -854,6 +868,10 @@ async function revealSessionLog(event, payload = {}, terminalWorkerManager = nul
 function registerWorkerHandlers(ipcMain) {
   ipcMain.handle("netcatty:sessionLogs:getActivePaths", async () => getLocalActiveLogPaths());
   ipcMain.handle("netcatty:sessionLog:prepareLocal", prepareLocalSessionLog);
+  ipcMain.handle("netcatty:sessionLog:statusLocal", async (_event, payload = {}) => ({
+    success: true,
+    hasSessionLog: require("./sessionLogStreamManager.cjs").hasSessionLog(payload.sessionId),
+  }));
 }
 
 /**
@@ -875,7 +893,9 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:sessionLog:manualChoosePath", chooseManualSessionLogPath);
   ipcMain.handle("netcatty:sessionLog:manualStart", startManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStop", stopManualSessionLog);
-  ipcMain.handle("netcatty:sessionLog:manualStatus", getManualSessionLogStatus);
+  ipcMain.handle("netcatty:sessionLog:manualStatus", (event, payload) => (
+    getManualSessionLogStatus(event, payload, terminalWorkerManager)
+  ));
   ipcMain.handle("netcatty:sessionLog:prepare", (event, payload) => (
     prepareSessionLog(event, payload, terminalWorkerManager)
   ));

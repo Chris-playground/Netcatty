@@ -74,7 +74,6 @@ import {
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { readOptionalStoredStringValue, useStoredString } from "../application/state/useStoredString";
 import { performSessionLogAction, type SessionLogAction } from "../application/state/sessionLogActions";
-import { resolveRetainedSessionLog } from "./terminal/sessionLogMenuAvailability";
 import { useSessionLogBackend } from "../application/state/useSessionLogBackend";
 import { useTerminalLayoutSuppressActive } from "../application/state/terminalLayoutSuppressStore";
 import { useAppearanceChromeStore } from "../application/state/appearanceChromeStore";
@@ -908,6 +907,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [isCancelling, setIsCancelling] = useState(false);
   const [showSFTP, setShowSFTP] = useState(false);
   const [isSessionLogging, setIsSessionLogging] = useState(false);
+  const [canOpenSessionLog, setCanOpenSessionLog] = useState(false);
   const [progressValue, setProgressValue] = useState(CONNECTION_PROGRESS_START);
   const [isDisconnectedDialogDismissed, setIsDisconnectedDialogDismissed] = useState(false);
   const [connectionReuseFellBack, setConnectionReuseFellBack] = useState(false);
@@ -4187,6 +4187,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (startResult?.success) {
         if (!startResult?.started && startResult?.canceled) return;
         setIsSessionLogging(!!startResult?.started);
+        if (startResult?.started) setCanOpenSessionLog(true);
       } else {
         toast.error(startResult?.error || "Failed to start session log");
       }
@@ -4211,14 +4212,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const currentSessionId = sessionRef.current ?? sessionId;
     if (!currentSessionId) {
       setIsSessionLogging(false);
+      setCanOpenSessionLog(false);
       return;
     }
 
     let cancelled = false;
     void getManualSessionLogStatus({ sessionId: currentSessionId }).then((result) => {
-      if (!cancelled) setIsSessionLogging(!!result?.isLogging);
+      if (!cancelled) {
+        setIsSessionLogging(!!result?.isLogging);
+        setCanOpenSessionLog(!!result?.hasSessionLog);
+      }
     }).catch(() => {
-      if (!cancelled) setIsSessionLogging(false);
+      if (!cancelled) {
+        setIsSessionLogging(false);
+        setCanOpenSessionLog(false);
+      }
     });
 
     return () => {
@@ -4254,23 +4262,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       toast.error(error instanceof Error ? error.message : 'Could not open the host browser');
     }
   }, [sessionId, host, resolvedChainHosts, keys, identities, terminalSettings, knownHosts]);
-
-  const [retainedManualLog, setRetainedManualLog] = useState(false);
-  const manualLogSessionRef = useRef(sessionId);
-  const previousTerminalStatusRef = useRef(status);
-  useEffect(() => {
-    const previousStatus = previousTerminalStatusRef.current;
-    previousTerminalStatusRef.current = status;
-    const sessionChanged = manualLogSessionRef.current !== sessionId;
-    manualLogSessionRef.current = sessionId;
-    setRetainedManualLog((retained) => resolveRetainedSessionLog(sessionChanged ? false : retained, {
-      automaticLogging: Boolean(sessionLog?.enabled),
-      manualLogging: isSessionLogging,
-      previousStatus,
-      status,
-    }));
-  }, [isSessionLogging, sessionId, sessionLog?.enabled, status]);
-  const canOpenSessionLog = Boolean(sessionLog?.enabled) || isSessionLogging || retainedManualLog;
 
   const renderControls = useCallback((opts?: { showClose?: boolean; restorePaneLayout?: boolean }) => (
     <TerminalToolbar

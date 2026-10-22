@@ -1188,3 +1188,76 @@ test("a live manual recording keeps its target across disconnect and reconnect",
   onClosed({ sessionId, explicit: true });
   assert.deepEqual(await prepare(null, { sessionId }), { success: true, filePath });
 });
+
+test("log menu availability follows the owning stream, not automatic logging settings", async () => {
+  const bridge = loadBridgeWithDialog({});
+  const workerHandlers = new Map();
+  bridge.registerWorkerHandlers({ handle: (channel, handler) => workerHandlers.set(channel, handler) });
+  const manager = require("./sessionLogStreamManager.cjs");
+  const workerLogs = new Set();
+  const handlers = registerSessionLogTestHandlers(bridge, {
+    isRunning: () => true,
+    request: async (channel, payload) => {
+      assert.equal(channel, "netcatty:sessionLog:statusLocal");
+      return { success: true, hasSessionLog: workerLogs.has(payload.sessionId) };
+    },
+  });
+  const status = handlers.get("netcatty:sessionLog:manualStatus");
+  for (const sessionId of ["enabled-after-connect", "failed-before-shell"]) {
+    assert.equal((await status(null, { sessionId, enabled: true })).hasSessionLog, false);
+  }
+  workerLogs.add("recording-after-disabled");
+  assert.deepEqual(await status(null, { sessionId: "recording-after-disabled", enabled: false }), {
+    success: true, isLogging: false, hasSessionLog: true,
+  });
+  assert.equal((await status(null, { sessionId: "another-session" })).hasSessionLog, false);
+  // A successful replacement without logging retires the worker-owned target.
+  workerLogs.delete("recording-after-disabled");
+  assert.equal((await status(null, { sessionId: "recording-after-disabled" })).hasSessionLog, false);
+  assert.equal(handlers.has("netcatty:sessionLog:statusLocal"), false);
+  assert.deepEqual(await workerHandlers.get("netcatty:sessionLog:statusLocal")(null, { sessionId: "missing" }), {
+    success: true, hasSessionLog: false,
+  });
+  assert.equal(manager.hasSessionLog("missing"), false);
+});
+
+test("log availability retains stopped main logs and never starts a worker to check", async (t) => {
+  const directory = path.join(TEMP_ROOT, `availability-${Date.now()}`);
+  const filePath = path.join(directory, "manual.txt");
+  const sessionId = "availability-main";
+  const bridge = loadBridgeWithDialog({ showSaveDialog: async () => ({ canceled: false, filePath }) });
+  const manager = require("./sessionLogStreamManager.cjs");
+  const handlers = registerSessionLogTestHandlers(bridge, {
+    isRunning: () => false,
+    request: () => assert.fail("must not cold-start a worker"),
+  });
+  t.after(async () => {
+    await manager.cleanupAll();
+    manager.forgetSessionLog(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const status = handlers.get("netcatty:sessionLog:manualStatus");
+  assert.equal((await status(null, { sessionId })).hasSessionLog, false);
+  assert.equal((await bridge.startManualSessionLog(null, { sessionId, format: "txt" })).started, true);
+  assert.deepEqual(await status(null, { sessionId }), { success: true, isLogging: true, hasSessionLog: true });
+  await bridge.stopManualSessionLog(null, { sessionId });
+  assert.deepEqual(await status(null, { sessionId }), { success: true, isLogging: false, hasSessionLog: true });
+  const workerHandlers = new Map();
+  bridge.registerWorkerHandlers({ handle: (channel, handler) => workerHandlers.set(channel, handler) });
+  assert.deepEqual(await workerHandlers.get("netcatty:sessionLog:statusLocal")(null, { sessionId }), {
+    success: true, hasSessionLog: true,
+  }, "worker lookup also retains stopped logs without requiring an active stream");
+});
+
+test("an unavailable worker does not offer a nonexistent log or change manual recording status", async () => {
+  const bridge = loadBridgeWithDialog({});
+  for (const request of [
+    async () => { throw new Error("worker stopped"); },
+    async () => ({ success: false, error: "session missing" }),
+  ]) {
+    const handlers = registerSessionLogTestHandlers(bridge, { isRunning: () => true, request });
+    assert.deepEqual(await handlers.get("netcatty:sessionLog:manualStatus")(null, { sessionId: "unavailable" }), {
+      success: true, isLogging: false, hasSessionLog: false,
+    });
+  }
+});

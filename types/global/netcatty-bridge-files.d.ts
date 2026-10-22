@@ -131,7 +131,7 @@ declare global {
     revealSessionLog?(payload: { sessionId: string }): Promise<{ success: boolean; error?: string }>;
     getManualSessionLogStatus?(payload: {
       sessionId: string;
-    }): Promise<{ success: boolean; isLogging: boolean; error?: string }>;
+    }): Promise<{ success: boolean; isLogging: boolean; hasSessionLog: boolean; error?: string }>;
 
     // Get file path from File object (for drag-and-drop, uses Electron's webUtils)
     getPathForFile?(file: File): string | undefined;
