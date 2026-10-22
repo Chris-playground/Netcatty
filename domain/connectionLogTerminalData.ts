@@ -114,6 +114,41 @@ export const pruneInMemoryUnsavedTerminalData = (
   return changed ? next : logs;
 };
 
+/**
+ * Write the side store; if the write is rejected (localStorage quota), retry
+ * without the oldest unsaved replay buffers so the newest sessions are kept.
+ * Drops 1, 2, 4, … oldest entries per retry, so attempts stay O(log n).
+ * Saved logs and ids not in `logs` are never dropped.
+ */
+export const writeTerminalDataMapWithQuotaRetry = (
+  logs: ConnectionLog[],
+  map: ConnectionLogTerminalDataMap,
+  write: (next: ConnectionLogTerminalDataMap) => boolean,
+): { persisted: boolean; written: ConnectionLogTerminalDataMap; attempts: number } => {
+  if (write(map)) return { persisted: true, written: map, attempts: 1 };
+
+  const droppable = logs
+    .filter((log) => !log.saved && map[log.id] !== undefined)
+    .sort((a, b) => a.startTime - b.startTime)
+    .map((log) => log.id);
+
+  let attempts = 1;
+  let dropCount = 1;
+  while (droppable.length > 0) {
+    const n = Math.min(dropCount, droppable.length);
+    const dropped = new Set(droppable.slice(0, n));
+    const next: ConnectionLogTerminalDataMap = {};
+    for (const [id, data] of Object.entries(map)) {
+      if (!dropped.has(id)) next[id] = data;
+    }
+    attempts += 1;
+    if (write(next)) return { persisted: true, written: next, attempts };
+    if (n === droppable.length) break;
+    dropCount *= 2;
+  }
+  return { persisted: false, written: map, attempts };
+};
+
 /** Fold side-store maps together, then cap to the allowed unsaved/saved set. */
 export const mergeTerminalDataMapsForStorage = (
   logs: ConnectionLog[],

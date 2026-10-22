@@ -10,6 +10,7 @@ import {
   mergeTerminalDataMapsForStorage,
   pruneInMemoryUnsavedTerminalData,
   pruneTerminalDataMapForStorage,
+  writeTerminalDataMapWithQuotaRetry,
 } from "./connectionLogTerminalData.ts";
 
 const baseLog: ConnectionLog = {
@@ -232,3 +233,70 @@ test("mergeTerminalDataMapsForStorage drops deleted log replay buffers", () => {
   assert.equal(merged.local, "keep");
   assert.equal(merged.deleted, undefined);
 });
+
+const quotaLogs = (count: number): ConnectionLog[] =>
+  Array.from({ length: count }, (_, index) => ({
+    ...baseLog,
+    id: `log-${index}`,
+    startTime: index,
+    saved: false,
+  }));
+
+const quotaWriter = (limitChars: number) => {
+  const calls: number[] = [];
+  const write = (next: Record<string, string>) => {
+    const size = Object.values(next).reduce((sum, value) => sum + value.length, 0);
+    calls.push(Object.keys(next).length);
+    return size <= limitChars;
+  };
+  return { calls, write };
+};
+
+test("writeTerminalDataMapWithQuotaRetry writes once when it fits", () => {
+  const logs = quotaLogs(5);
+  const map = Object.fromEntries(logs.map((log) => [log.id, "x".repeat(10)]));
+  const { calls, write } = quotaWriter(1000);
+  const result = writeTerminalDataMapWithQuotaRetry(logs, map, write);
+  assert.equal(result.persisted, true);
+  assert.equal(result.written, map);
+  assert.deepEqual(calls, [5]);
+});
+
+test("writeTerminalDataMapWithQuotaRetry drops the oldest unsaved entries until it fits", () => {
+  const logs = quotaLogs(50);
+  // Newest first, matching pruneTerminalDataMapForStorage order.
+  const map = Object.fromEntries(
+    [...logs].reverse().map((log) => [log.id, "x".repeat(10)]),
+  );
+  const { calls, write } = quotaWriter(10 * 47);
+  const result = writeTerminalDataMapWithQuotaRetry(logs, map, write);
+  assert.equal(result.persisted, true);
+  // 50 fails, drop 1 → 49 fails, drop 2 → 48 fails, drop 4 → 46 fits.
+  assert.deepEqual(calls, [50, 49, 48, 46]);
+  assert.equal(result.written["log-49"], map["log-49"]);
+  assert.equal(result.written["log-4"], map["log-4"]);
+  for (const id of ["log-0", "log-1", "log-2", "log-3"]) {
+    assert.equal(result.written[id], undefined);
+  }
+  // Key order (newest first) is preserved.
+  assert.deepEqual(Object.keys(result.written), Object.keys(map).filter((id) => id in result.written));
+});
+
+test("writeTerminalDataMapWithQuotaRetry never drops saved or unknown entries and stops after all unsaved are gone", () => {
+  const logs: ConnectionLog[] = [
+    ...quotaLogs(20),
+    { ...baseLog, id: "saved", startTime: -1, saved: true },
+  ];
+  const map: Record<string, string> = Object.fromEntries(
+    logs.map((log) => [log.id, "x".repeat(10)]),
+  );
+  map["other-window"] = "y".repeat(10);
+  const { calls, write } = quotaWriter(5); // nothing fits
+  const result = writeTerminalDataMapWithQuotaRetry(logs, map, write);
+  assert.equal(result.persisted, false);
+  assert.equal(result.written, map);
+  // 22, then drop 1, 2, 4, 8, 16, then all 20 unsaved: bounded attempts.
+  assert.deepEqual(calls, [22, 21, 20, 18, 14, 6, 2]);
+  assert.ok(result.attempts <= 2 + Math.ceil(Math.log2(20)));
+});
+

@@ -65,6 +65,7 @@ import {
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
   pruneInMemoryUnsavedTerminalData,
+  writeTerminalDataMapWithQuotaRetry,
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
@@ -300,9 +301,13 @@ const isSameTerminalDataMap = (
 const writeConnectionLogTerminalDataMap = (
   existing: ConnectionLogTerminalDataMap,
   pruned: ConnectionLogTerminalDataMap,
+  logs: ConnectionLog[],
 ): boolean => {
   if (isSameTerminalDataMap(existing, pruned)) return true;
-  return localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
+  // On quota failure keep the newest replay buffers instead of none.
+  return writeTerminalDataMapWithQuotaRetry(logs, pruned, (next) =>
+    localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, next),
+  ).persisted;
 };
 
 export const useVaultState = () => {
@@ -450,7 +455,7 @@ export const useVaultState = () => {
       localMaps,
       buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
     );
-    const persisted = writeConnectionLogTerminalDataMap(existing, merged);
+    const persisted = writeConnectionLogTerminalDataMap(existing, merged, logs);
     // On a failed write (e.g. QuotaExceeded once the side store nears ~50 MB)
     // keep the same capped map instead of accumulating every log's replay
     // buffer in memory; anything outside it would be pruned on the next write.
