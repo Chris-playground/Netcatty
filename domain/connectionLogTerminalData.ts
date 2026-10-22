@@ -52,9 +52,9 @@ export const mergeConnectionLogsFromStorage = (
 /**
  * Apply a queued connection-log snapshot when it runs, not when it was captured.
  * Disk may have gained another window's logs during the wait. Keep those logs.
- * Re-add a queued id only when this snapshot added or updated it (`changedIds`).
- * An unchanged id another window deleted stays deleted. Deletes from this
- * snapshot apply only while memory still agrees.
+ * Metadata from this snapshot replaces a disk row only for ids the recipe added
+ * or updated (`changedIds`). An unchanged id another window deleted stays
+ * deleted. Deletes from this snapshot apply only while memory still agrees.
  */
 export const rebaseQueuedConnectionLogs = (
   queued: readonly ConnectionLog[],
@@ -64,24 +64,52 @@ export const rebaseQueuedConnectionLogs = (
   disk: readonly ConnectionLog[] | null,
 ): ConnectionLog[] => {
   const memoryById = new Map(memory.map((log) => [log.id, log]));
+  const queuedById = new Map(queued.map((log) => [log.id, log]));
   const diskKept = (disk ?? []).filter(
     (log) => !(removedIds.has(log.id) && !memoryById.has(log.id)),
   );
-  const withReplay = mergeConnectionLogsFromStorage(
-    [...queued, ...memory],
-    diskKept,
-    buildTerminalDataMapFromLogs(queued),
-  );
-  const present = new Set(withReplay.map((log) => log.id));
+  const present = new Set<string>();
+  const withLocalEdits = diskKept.map((log) => {
+    present.add(log.id);
+    const queuedLog = queuedById.get(log.id);
+    const memoryLog = memoryById.get(log.id);
+    if (changedIds.has(log.id)) return memoryLog ?? queuedLog ?? log;
+    const replay = queuedLog?.terminalData ?? memoryLog?.terminalData ?? log.terminalData;
+    if (!replay || log.terminalData === replay) return log;
+    return { ...log, terminalData: replay };
+  });
   const extras: ConnectionLog[] = [];
   for (const log of queued) {
     if (present.has(log.id) || !changedIds.has(log.id)) continue;
     extras.push(memoryById.get(log.id) ?? log);
   }
-  if (extras.length === 0) return withReplay;
+  if (extras.length === 0) return withLocalEdits;
   return pruneInMemoryUnsavedTerminalData(
-    [...extras, ...withReplay].sort((a, b) => b.startTime - a.startTime),
+    [...extras, ...withLocalEdits].sort((a, b) => b.startTime - a.startTime),
   );
+};
+
+/**
+ * Drop `terminalData` from unsaved logs outside the newest `keep` entries.
+ * Saved logs and the newest unsaved replays stay intact.
+ */
+export const retainNewestUnsavedReplays = (
+  logs: readonly ConnectionLog[],
+  keep: number,
+): ConnectionLog[] => {
+  const ranked = logs
+    .filter((log) => !log.saved && log.terminalData)
+    .sort((a, b) => b.startTime - a.startTime);
+  if (ranked.length <= keep) return [...logs];
+  const keepIds = new Set(ranked.slice(0, Math.max(0, keep)).map((log) => log.id));
+  let changed = false;
+  const next = logs.map((log) => {
+    if (log.saved || log.terminalData === undefined || keepIds.has(log.id)) return log;
+    changed = true;
+    const { terminalData: _omitted, ...rest } = log;
+    return rest;
+  });
+  return changed ? next : [...logs];
 };
 
 export const buildTerminalDataMapFromLogs = (

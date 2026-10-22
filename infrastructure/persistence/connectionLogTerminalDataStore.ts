@@ -161,6 +161,9 @@ const readAll = async (): Promise<ConnectionLogTerminalDataMap | null> => {
 
 export const loadAll = async (): Promise<ConnectionLogTerminalDataMap> => (await readAll()) ?? {};
 
+/** `null` when IndexedDB could not be read. `{}` is a successful empty store. */
+export const tryLoadAll = async (): Promise<ConnectionLogTerminalDataMap | null> => readAll();
+
 export const replaceAll = async (map: ConnectionLogTerminalDataMap): Promise<boolean> => {
   try {
     const db = await getDatabase();

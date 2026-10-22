@@ -27,6 +27,12 @@ test("close-path connection log updates await the indexedDB persist task", () =>
   );
   assert.match(source, /rebaseQueuedConnectionLogs\(\s*next,\s*removedIds,\s*changedIds,/);
   assert.match(
+    source,
+    /if \(!options\?\.pruneMainBlob\) \{[\s\S]*?rebaseQueuedConnectionLogs\(/,
+  );
+  assert.match(source, /retainNewestUnsavedReplays\(fallbackLogs, keep\)/);
+  assert.match(source, /if \(!map\) return;/);
+  assert.match(
     terminalLayerSource,
     /const handleTerminalDataCapture = useCallback\(\(sessionId: string, data: string\) => \{\s*return onTerminalDataCapture\?\.\(sessionId, data\);/,
   );

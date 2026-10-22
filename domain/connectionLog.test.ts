@@ -9,9 +9,10 @@ import {
   mergeConnectionLogsFromStorage,
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
-  rebaseQueuedConnectionLogs,
   pruneInMemoryUnsavedTerminalData,
   pruneTerminalDataMapForStorage,
+  rebaseQueuedConnectionLogs,
+  retainNewestUnsavedReplays,
 } from "./connectionLogTerminalData.ts";
 
 const baseLog: ConnectionLog = {
@@ -282,6 +283,42 @@ test("rebaseQueuedConnectionLogs does not restore an unchanged log another windo
   assert.deepEqual(rebased.map((log) => log.id), ["local", "remote"]);
   assert.equal(rebased.find((log) => log.id === "unchanged"), undefined);
   assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "local-replay");
+});
+
+test("rebaseQueuedConnectionLogs applies a local metadata edit onto the latest disk row", () => {
+  const queued = [{ ...baseLog, id: "local", startTime: 2000, saved: true, terminalData: "replay" }];
+  const disk = [
+    { ...baseLog, id: "remote", startTime: 3000 },
+    { ...baseLog, id: "local", startTime: 2000, saved: false },
+  ];
+
+  const rebased = rebaseQueuedConnectionLogs(
+    queued,
+    new Set(),
+    new Set(["local"]),
+    queued,
+    disk,
+  );
+
+  assert.equal(rebased.find((log) => log.id === "local")?.saved, true);
+  assert.equal(rebased.find((log) => log.id === "local")?.terminalData, "replay");
+  assert.ok(rebased.some((log) => log.id === "remote"));
+});
+
+test("retainNewestUnsavedReplays drops older unsaved buffers and keeps the newest", () => {
+  const logs: ConnectionLog[] = [
+    { ...baseLog, id: "old", startTime: 1000, terminalData: "old" },
+    { ...baseLog, id: "mid", startTime: 2000, terminalData: "mid" },
+    { ...baseLog, id: "new", startTime: 3000, terminalData: "new" },
+    { ...baseLog, id: "saved", startTime: 500, saved: true, terminalData: "saved" },
+  ];
+
+  const kept = retainNewestUnsavedReplays(logs, 1);
+
+  assert.equal(kept.find((log) => log.id === "new")?.terminalData, "new");
+  assert.equal(kept.find((log) => log.id === "saved")?.terminalData, "saved");
+  assert.equal(kept.find((log) => log.id === "old")?.terminalData, undefined);
+  assert.equal(kept.find((log) => log.id === "mid")?.terminalData, undefined);
 });
 
 test("rebaseQueuedConnectionLogs drops a queued delete and keeps a queued add still in memory", () => {
