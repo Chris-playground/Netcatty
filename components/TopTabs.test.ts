@@ -315,7 +315,7 @@ test("draggable top-tab close buttons cancel the drag gesture on mousedown", () 
   assert.equal(workspaceSource.includes("<button"), false);
 });
 
-test("draggable top tab roots cancel sub-threshold drags before reorder", () => {
+test("draggable top tab roots activate sub-threshold presses and still reorder past the threshold", () => {
   const tabTypes = ["plugin-view", "editor", "session", "workspace", "logView"];
 
   for (const tabType of tabTypes) {
@@ -326,21 +326,28 @@ test("draggable top tab roots cancel sub-threshold drags before reorder", () => 
     assert.notEqual(classNameAt, -1, tabType);
     const openingHandlers = topTabItemsSource.slice(start, classNameAt);
     assert.match(openingHandlers, /onMouseDown=\{handleTabDragThresholdMouseDown\}/, tabType);
-    assert.match(openingHandlers, /onMouseUp=\{handleTabDragThresholdReset\}/, tabType);
+    assert.match(openingHandlers, /onMouseUp=\{\(event\) => handleTabDragThresholdRelease\(event,/, tabType);
     assert.match(
       openingHandlers,
-      /onDragStart=\{\(event\) => \{\s*if \(handleTabDragThresholdDragStart\(event\)\) return;\s*onTabDragStart\(event,/,
+      /onDragStart=\{\(event\) => \{\s*handleTabDragThresholdDragStart\(event\);\s*onTabDragStart\(event,/,
       tabType,
     );
     assert.match(
       openingHandlers,
-      /onDragEnd=\{\(\) => \{\s*handleTabDragThresholdReset\(\);\s*onTabDragEnd\(\);\s*\}\}/,
+      /onDrag=\{\(event\) => \{\s*if \(!handleTabDragThresholdDrag\(event\)\) return;\s*onTabDragStart\(event,/,
+      tabType,
+    );
+    assert.match(
+      openingHandlers,
+      /onDragEnd=\{\(event\) => \{\s*handleTabDragThresholdRelease\(event,[\s\S]*?onTabDragEnd\(\);\s*\}\}/,
       tabType,
     );
     assert.equal(openingHandlers.includes("handleTabCloseButtonMouseDown"), false, tabType);
+    assert.equal(openingHandlers.includes("preventDefault"), false, tabType);
   }
 
   assert.equal(topTabItemsSource.match(/onMouseDown=\{handleTabMiddleMouseDown\}/g)?.length ?? 0, 0);
+  assert.equal(topTabItemsSource.match(/handleTabDragThresholdRelease\(/g)?.length, 10);
 });
 
 test("session close button double click stays on the close button", () => {

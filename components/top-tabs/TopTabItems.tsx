@@ -26,7 +26,7 @@ import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
 import { DISTRO_LOGOS, DISTRO_COLORS } from '../DistroAvatar';
 import { getShellIconPath, isMonochromeShellIcon } from '../../lib/useDiscoveredShells';
-import { handleTabCloseButtonMouseDown, handleTabDragThresholdDragStart, handleTabDragThresholdMouseDown, handleTabDragThresholdReset, handleTabMiddleClickClose } from '../../lib/tabInteractions';
+import { handleTabCloseButtonMouseDown, handleTabDragThresholdDrag, handleTabDragThresholdDragStart, handleTabDragThresholdMouseDown, handleTabDragThresholdRelease, handleTabMiddleClickClose } from '../../lib/tabInteractions';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SessionTabContextMenuContent } from './SessionTabContextMenuContent';
@@ -516,6 +516,9 @@ export const PluginViewTopTab: React.FC<PluginViewTopTabProps> = memo(({
   shortcutNumber,
 }) => {
   const isActive = useIsTabActive(tab.id);
+  const activate = useCallback(() => {
+    activeTabStore.setActiveTabId(tab.id);
+  }, [tab.id]);
   const close = useCallback((event?: React.MouseEvent) => {
     event?.stopPropagation();
     onClose(tab.id);
@@ -526,17 +529,21 @@ export const PluginViewTopTab: React.FC<PluginViewTopTabProps> = memo(({
           data-tab-type="plugin-view"
           data-state={isActive ? 'active' : 'inactive'}
           data-active={topTabActiveValue(isActive)}
-          onClick={() => activeTabStore.setActiveTabId(tab.id)}
+          onClick={activate}
           onMouseDown={handleTabDragThresholdMouseDown}
-          onMouseUp={handleTabDragThresholdReset}
+          onMouseUp={(event) => handleTabDragThresholdRelease(event, activate)}
           onAuxClick={(event) => handleTabMiddleClickClose(event, close)}
           draggable
           onDragStart={(event) => {
-            if (handleTabDragThresholdDragStart(event)) return;
+            handleTabDragThresholdDragStart(event);
             onTabDragStart(event, tab.id);
           }}
-          onDragEnd={() => {
-            handleTabDragThresholdReset();
+          onDrag={(event) => {
+            if (!handleTabDragThresholdDrag(event)) return;
+            onTabDragStart(event, tab.id);
+          }}
+          onDragEnd={(event) => {
+            handleTabDragThresholdRelease(event, activate);
             onTabDragEnd();
           }}
           onDragOver={(event) => onTabDragOver(event, tab.id)}
@@ -656,15 +663,19 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
           data-active={topTabActiveValue(isActive)}
           onClick={handleClick}
           onMouseDown={handleTabDragThresholdMouseDown}
-          onMouseUp={handleTabDragThresholdReset}
+          onMouseUp={(event) => handleTabDragThresholdRelease(event, handleClick)}
           onAuxClick={(e) => handleTabMiddleClickClose(e, () => onRequestCloseEditorTab(editorTab.id))}
           draggable
           onDragStart={(event) => {
-            if (handleTabDragThresholdDragStart(event)) return;
+            handleTabDragThresholdDragStart(event);
             onTabDragStart(event, tabId);
           }}
-          onDragEnd={() => {
-            handleTabDragThresholdReset();
+          onDrag={(event) => {
+            if (!handleTabDragThresholdDrag(event)) return;
+            onTabDragStart(event, tabId);
+          }}
+          onDragEnd={(event) => {
+            handleTabDragThresholdRelease(event, handleClick);
             onTabDragEnd();
           }}
           onDragOver={(e) => onTabDragOver(e, tabId)}
@@ -840,15 +851,19 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onMouseDown={handleTabDragThresholdMouseDown}
-      onMouseUp={handleTabDragThresholdReset}
+      onMouseUp={(event) => handleTabDragThresholdRelease(event, handleClick)}
       onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseSession(session.id))}
       draggable
       onDragStart={(event) => {
-        if (handleTabDragThresholdDragStart(event)) return;
+        handleTabDragThresholdDragStart(event);
         onTabDragStart(event, session.id);
       }}
-      onDragEnd={() => {
-        handleTabDragThresholdReset();
+      onDrag={(event) => {
+        if (!handleTabDragThresholdDrag(event)) return;
+        onTabDragStart(event, session.id);
+      }}
+      onDragEnd={(event) => {
+        handleTabDragThresholdRelease(event, handleClick);
         onTabDragEnd();
       }}
       onDragOver={(e) => onTabDragOver(e, session.id)}
@@ -1052,15 +1067,19 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
           onMouseDown={handleTabDragThresholdMouseDown}
-          onMouseUp={handleTabDragThresholdReset}
+          onMouseUp={(event) => handleTabDragThresholdRelease(event, handleClick)}
           onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseWorkspace(workspace.id))}
           draggable
           onDragStart={(event) => {
-            if (handleTabDragThresholdDragStart(event)) return;
+            handleTabDragThresholdDragStart(event);
             onTabDragStart(event, workspace.id);
           }}
-          onDragEnd={() => {
-            handleTabDragThresholdReset();
+          onDrag={(event) => {
+            if (!handleTabDragThresholdDrag(event)) return;
+            onTabDragStart(event, workspace.id);
+          }}
+          onDragEnd={(event) => {
+            handleTabDragThresholdRelease(event, handleClick);
             onTabDragEnd();
           }}
           onDragOver={(e) => onTabDragOver(e, workspace.id)}
@@ -1206,15 +1225,19 @@ export const LogViewTopTab: React.FC<LogViewTopTabProps> = memo(({
       data-active={topTabActiveValue(isActive)}
       onClick={handleClick}
       onMouseDown={handleTabDragThresholdMouseDown}
-      onMouseUp={handleTabDragThresholdReset}
+      onMouseUp={(event) => handleTabDragThresholdRelease(event, handleClick)}
       onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseLogView(logView.id))}
       draggable
       onDragStart={(event) => {
-        if (handleTabDragThresholdDragStart(event)) return;
+        handleTabDragThresholdDragStart(event);
         onTabDragStart(event, logView.id);
       }}
-      onDragEnd={() => {
-        handleTabDragThresholdReset();
+      onDrag={(event) => {
+        if (!handleTabDragThresholdDrag(event)) return;
+        onTabDragStart(event, logView.id);
+      }}
+      onDragEnd={(event) => {
+        handleTabDragThresholdRelease(event, handleClick);
         onTabDragEnd();
       }}
       onDragOver={(e) => onTabDragOver(e, logView.id)}

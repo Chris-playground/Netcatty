@@ -6,9 +6,12 @@ import {
   MIDDLE_MOUSE_BUTTON,
   TAB_DRAG_THRESHOLD_PX,
   handleTabCloseButtonMouseDown,
+  handleTabDragThresholdDrag,
   handleTabDragThresholdDragStart,
   handleTabDragThresholdMouseDown,
+  handleTabDragThresholdRelease,
   handleTabDragThresholdReset,
+  isTabDragReorderStarted,
   handleTabMiddleClickClose,
   handleTabMiddleMouseDown,
 } from "./tabInteractions.ts";
@@ -80,29 +83,100 @@ test("handleTabMiddleMouseDown suppresses autoscroll only for the middle button"
   assert.equal(left.calls.preventDefault, 0);
 });
 
-test("handleTabDragThresholdDragStart cancels a drag that stays under the movement threshold", () => {
+test("sub-threshold dragstart does not cancel the gesture, and mouseup activates", () => {
   handleTabDragThresholdReset();
   for (const distance of [0, TAB_DRAG_THRESHOLD_PX - 1]) {
     const press = beginPrimaryPress(10, 20);
     assert.equal(press.calls.preventDefault, 0, "primary mousedown must still allow a later drag");
 
     const drag = makeEvent(0, 10 + distance, 20);
-    const cancelled = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
-    assert.equal(cancelled, true, `distance ${distance} must cancel dragstart`);
-    assert.equal(drag.calls.preventDefault, 1, `distance ${distance} must preventDefault`);
+    const skipReorder = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
+    assert.equal(skipReorder, true, `distance ${distance} must not start a reorder`);
+    assert.equal(isTabDragReorderStarted(), false, `distance ${distance} must not arm reorder chrome`);
+    assert.equal(drag.calls.preventDefault, 0, `distance ${distance} must not preventDefault`);
+
+    let activated = 0;
+    const release = makeEvent(0, 10 + distance, 20);
+    handleTabDragThresholdRelease(release.event, () => {
+      activated++;
+    });
+    assert.equal(activated, 1, `distance ${distance} must activate on mouseup`);
+    assert.equal(release.calls.preventDefault, 0);
   }
   handleTabDragThresholdReset();
 });
 
-test("handleTabDragThresholdDragStart leaves drags at or above the threshold alone", () => {
+test("a sub-threshold release activates only once when mouseup and dragend both fire", () => {
+  handleTabDragThresholdReset();
+  beginPrimaryPress(4, 4);
+  const drag = makeEvent(0, 6, 4);
+  assert.equal(handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent), true);
+
+  let activated = 0;
+  const activate = () => {
+    activated++;
+  };
+  handleTabDragThresholdRelease(makeEvent(0, 6, 4).event, activate);
+  handleTabDragThresholdRelease(makeEvent(0, 6, 4).event, activate);
+  assert.equal(activated, 1);
+  handleTabDragThresholdReset();
+});
+
+test("mouseup without dragstart does not activate", () => {
+  handleTabDragThresholdReset();
+  beginPrimaryPress(1, 1);
+  let activated = 0;
+  handleTabDragThresholdRelease(makeEvent(0, 2, 1).event, () => {
+    activated++;
+  });
+  assert.equal(activated, 0);
+  handleTabDragThresholdReset();
+});
+
+test("drags at or above the threshold still reorder and do not activate on release", () => {
   handleTabDragThresholdReset();
   for (const distance of [TAB_DRAG_THRESHOLD_PX, TAB_DRAG_THRESHOLD_PX + 12]) {
     beginPrimaryPress(5, 8);
     const drag = makeEvent(0, 5 + distance, 8);
-    const cancelled = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
-    assert.equal(cancelled, false, `distance ${distance} must keep the reorder drag`);
+    const skipReorder = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
+    assert.equal(skipReorder, false, `distance ${distance} must keep the reorder drag`);
+    assert.equal(isTabDragReorderStarted(), true, `distance ${distance} must arm reorder chrome`);
     assert.equal(drag.calls.preventDefault, 0, `distance ${distance} must not preventDefault`);
+    assert.equal(handleTabDragThresholdDrag(drag.event as unknown as React.DragEvent), false);
+
+    let activated = 0;
+    handleTabDragThresholdRelease(makeEvent(0, 5 + distance, 8).event, () => {
+      activated++;
+    });
+    assert.equal(activated, 0, `distance ${distance} must not fake-activate`);
   }
+  handleTabDragThresholdReset();
+});
+
+test("a slow drag that starts under the threshold reorders once it crosses it", () => {
+  handleTabDragThresholdReset();
+  beginPrimaryPress(0, 0);
+  const dragStart = makeEvent(0, TAB_DRAG_THRESHOLD_PX - 1, 0);
+  assert.equal(
+    handleTabDragThresholdDragStart(dragStart.event as unknown as React.DragEvent),
+    true,
+  );
+  assert.equal(dragStart.calls.preventDefault, 0);
+
+  const stillShort = makeEvent(0, TAB_DRAG_THRESHOLD_PX - 1, 0);
+  assert.equal(handleTabDragThresholdDrag(stillShort.event as unknown as React.DragEvent), false);
+
+  const crossed = makeEvent(0, TAB_DRAG_THRESHOLD_PX, 0);
+  assert.equal(isTabDragReorderStarted(), false);
+  assert.equal(handleTabDragThresholdDrag(crossed.event as unknown as React.DragEvent), true);
+  assert.equal(isTabDragReorderStarted(), true);
+  assert.equal(handleTabDragThresholdDrag(crossed.event as unknown as React.DragEvent), false);
+
+  let activated = 0;
+  handleTabDragThresholdRelease(makeEvent(0, 1, 0).event, () => {
+    activated++;
+  });
+  assert.equal(activated, 0, "returning near the origin after a real drag must not activate");
   handleTabDragThresholdReset();
 });
 
@@ -118,8 +192,9 @@ test("handleTabDragThreshold ignores non-primary buttons", () => {
     );
 
     const drag = makeEvent(button, 4, 6);
-    const cancelled = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
-    assert.equal(cancelled, false, `button ${button} must not cancel dragstart`);
+    const skipReorder = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
+    assert.equal(skipReorder, false, `button ${button} must not skip dragstart`);
+    assert.equal(isTabDragReorderStarted(), true, `button ${button} must still arm reorder chrome`);
     assert.equal(drag.calls.preventDefault, 0, `button ${button} dragstart must not preventDefault`);
   }
   handleTabDragThresholdReset();
@@ -131,13 +206,14 @@ test("handleTabDragThresholdReset drops a press so the next drag is not judged f
   handleTabDragThresholdReset();
 
   const drag = makeEvent(0, 1, 0);
-  const cancelled = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
-  assert.equal(cancelled, false);
+  const skipReorder = handleTabDragThresholdDragStart(drag.event as unknown as React.DragEvent);
+  assert.equal(skipReorder, false);
   assert.equal(drag.calls.preventDefault, 0);
 
   beginPrimaryPress(0, 0);
   const next = makeEvent(0, 1, 0);
   assert.equal(handleTabDragThresholdDragStart(next.event as unknown as React.DragEvent), true);
+  assert.equal(next.calls.preventDefault, 0);
   handleTabDragThresholdReset();
 });
 
