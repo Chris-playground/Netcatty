@@ -278,6 +278,9 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
     const paneZoomBinding = keyBindings.find((binding) => binding.action === 'togglePaneZoom');
     const paneZoomKeyStr = paneZoomBinding ? (isMac ? paneZoomBinding.mac : paneZoomBinding.pc) : null;
     const isPaneZoomHotkey = paneZoomKeyStr ? matchesKeyBinding(e, paneZoomKeyStr, isMac) : false;
+    const hostTreeBinding = keyBindings.find((binding) => binding.action === 'toggleHostTree');
+    const hostTreeKeyStr = hostTreeBinding ? (isMac ? hostTreeBinding.mac : hostTreeBinding.pc) : null;
+    const isHostTreeHotkey = hostTreeKeyStr ? matchesKeyBinding(e, hostTreeKeyStr, isMac) : false;
 
     if (
       (isFormElement || isMonacoElement)
@@ -285,6 +288,7 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       && e.key !== 'Escape'
       && !isQuickSwitchHotkey
       && !isPaneZoomHotkey
+      && !(isMonacoElement && isHostTreeHotkey)
       && !forwardedNativeShortcutEvents.has(e)
     ) {
       return;
@@ -324,9 +328,10 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
         continue;
       }
 
-      // An unavailable broadcast action must leave the chord to the terminal
-      // (notably tmux's Ctrl+B prefix). Dispatch once before consuming it.
-      if (binding.action === 'broadcast') {
+      // An unavailable action must leave the chord to the terminal.
+      // Broadcast keeps Ctrl/Cmd+B for tmux; the host list keeps Ctrl/Cmd+Shift+B
+      // when the sidebar cannot show. Dispatch once before consuming it.
+      if (binding.action === 'broadcast' || binding.action === 'toggleHostTree') {
         if (executeHotkeyAction(binding.action, e) === true) {
           e.preventDefault();
           e.stopPropagation();
@@ -1007,9 +1012,9 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
           orderedTabs: orderedTabs ?? [],
           sessionIds: new Set((sessions ?? []).map((session: TerminalSession) => session.id)),
           workspaceIds: new Set((workspaces ?? []).map((workspace: { id: string }) => workspace.id)),
-        })) break;
-        toggleHostTree?.();
-        break;
+        }) || typeof toggleHostTree !== 'function') return false;
+        toggleHostTree();
+        return true;
       }
       case 'broadcast': {
         // Workspace tabs keep their local broadcast state; orphan tabs share

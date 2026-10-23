@@ -847,7 +847,7 @@ for (const scheme of ['pc', 'mac'] as const) {
       closeTabKeyStr: '',
       executeHotkeyAction: (action: string) => {
         shiftedActions.push(action);
-        return undefined;
+        return action === 'toggleHostTree';
       },
       hotkeyScheme: scheme,
       keyBindings: DEFAULT_KEY_BINDINGS,
@@ -899,6 +899,99 @@ for (const scheme of ['pc', 'mac'] as const) {
   });
 }
 
+test('focused terminal leaves the host-list chord alone when the toggle does not run', () => {
+  const target = new FakeHTMLElement();
+  const actions: string[] = [];
+  let prevented = false;
+  let stopped = false;
+  handleGlobalHotkeyKeyDownImpl(() => ({
+    HOTKEY_DEBUG: false,
+    closeTabKeyStr: '',
+    executeHotkeyAction: (action: string) => {
+      actions.push(action);
+      return false;
+    },
+    hotkeyScheme: 'pc',
+    keyBindings: DEFAULT_KEY_BINDINGS,
+    matchesKeyBinding,
+  }), {
+    key: 'b',
+    code: 'KeyB',
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: true,
+    target,
+    composedPath: () => [target],
+    preventDefault: () => { prevented = true; },
+    stopPropagation: () => { stopped = true; },
+  } as unknown as KeyboardEvent);
+
+  assert.deepEqual(actions, ['toggleHostTree']);
+  assert.equal(prevented, false);
+  assert.equal(stopped, false);
+});
+
+test('host list shortcut reaches a focused Monaco editor and stays out of plain text fields', () => {
+  const monaco = new FakeMonacoHTMLElement();
+  const monacoActions: string[] = [];
+  let monacoPrevented = false;
+  handleGlobalHotkeyKeyDownImpl(() => ({
+    HOTKEY_DEBUG: false,
+    closeTabKeyStr: '',
+    executeHotkeyAction: (action: string) => {
+      monacoActions.push(action);
+      return true;
+    },
+    hotkeyScheme: 'pc',
+    keyBindings: DEFAULT_KEY_BINDINGS,
+    matchesKeyBinding,
+  }), {
+    key: 'b',
+    code: 'KeyB',
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: true,
+    target: monaco,
+    composedPath: () => [monaco],
+    preventDefault: () => { monacoPrevented = true; },
+    stopPropagation: () => {},
+  } as unknown as KeyboardEvent);
+
+  assert.deepEqual(monacoActions, ['toggleHostTree']);
+  assert.equal(monacoPrevented, true);
+
+  const input = new FakeInputHTMLElement();
+  const inputActions: string[] = [];
+  let inputPrevented = false;
+  handleGlobalHotkeyKeyDownImpl(() => ({
+    HOTKEY_DEBUG: false,
+    closeTabKeyStr: '',
+    executeHotkeyAction: (action: string) => {
+      inputActions.push(action);
+      return true;
+    },
+    hotkeyScheme: 'pc',
+    keyBindings: DEFAULT_KEY_BINDINGS,
+    matchesKeyBinding,
+  }), {
+    key: 'b',
+    code: 'KeyB',
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: true,
+    target: input,
+    composedPath: () => [input],
+    preventDefault: () => { inputPrevented = true; },
+    stopPropagation: () => {},
+  } as unknown as KeyboardEvent);
+
+  assert.deepEqual(inputActions, []);
+  assert.equal(inputPrevented, false);
+});
+
 test('toggleHostTree uses the host list toggle only while that list can show', () => {
   const previous = getSettingsChromeSnapshot();
   const calls: string[] = [];
@@ -917,19 +1010,19 @@ test('toggleHostTree uses the host list toggle only while that list can show', (
 
   try {
     publishSettingsChromeSnapshot({ ...DEFAULT_SETTINGS_CHROME_SNAPSHOT, showHostTreeSidebar: true });
-    executeHotkeyActionImpl(() => contextFor('session-1'), 'toggleHostTree', event);
-    executeHotkeyActionImpl(() => contextFor('editor:note', []), 'toggleHostTree', event);
-    executeHotkeyActionImpl(() => contextFor('workspace-1'), 'toggleHostTree', event);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('session-1'), 'toggleHostTree', event), true);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('editor:note', []), 'toggleHostTree', event), true);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('workspace-1'), 'toggleHostTree', event), true);
     assert.deepEqual(calls, ['toggle', 'toggle', 'toggle']);
 
     calls.length = 0;
-    executeHotkeyActionImpl(() => contextFor('vault', []), 'toggleHostTree', event);
-    executeHotkeyActionImpl(() => contextFor('sftp', []), 'toggleHostTree', event);
-    executeHotkeyActionImpl(() => contextFor('plugin-view:demo:main', ['plugin-view:demo:main']), 'toggleHostTree', event);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('vault', []), 'toggleHostTree', event), false);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('sftp', []), 'toggleHostTree', event), false);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('plugin-view:demo:main', ['plugin-view:demo:main']), 'toggleHostTree', event), false);
     assert.deepEqual(calls, []);
 
     publishSettingsChromeSnapshot({ ...DEFAULT_SETTINGS_CHROME_SNAPSHOT, showHostTreeSidebar: false });
-    executeHotkeyActionImpl(() => contextFor('session-1'), 'toggleHostTree', event);
+    assert.equal(executeHotkeyActionImpl(() => contextFor('session-1'), 'toggleHostTree', event), false);
     assert.deepEqual(calls, []);
   } finally {
     publishSettingsChromeSnapshot(previous);
