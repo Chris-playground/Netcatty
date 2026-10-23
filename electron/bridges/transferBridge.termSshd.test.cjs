@@ -225,27 +225,38 @@ async function createSequentialTransferFixture(t) {
     client: { _remoteVer: "TERM-SSHD", sftp() { throw new Error("No terminal subsystem reuse"); } },
   });
   // Real pooled single-channel clients are distinct aliases of one SFTP stream.
-  transferBridge.init({ sftpClients: new Map([["first", createClient()], ["alias", createClient()]]) });
+  const clients = new Map([["first", createClient()], ["alias", createClient()]]);
+  transferBridge.init({ sftpClients: clients });
   t.after(async () => {
     for (const p of [...paths, ...staged]) await fs.rm(p, { force: true });
   });
   return {
-    payload, files, sftp, handles,
+    payload, files, sftp, handles, clients,
     rejectedOpens: () => rejectedOpens,
     async start(direction, sftpId = "first", options = {}) {
       const transferId = options.transferId || crypto.randomUUID();
       const localPath = tempDirBridge.getTempFilePath(`term-concurrent-${transferId}.bin`);
       paths.push(localPath);
-      staged.push(tempDirBridge.getTransferTempFilePath(transferId, path.basename(localPath)));
+      const stagePath = tempDirBridge.getTransferTempFilePath(transferId,
+        direction === "copy" ? "source.bin" : path.basename(localPath));
+      staged.push(stagePath);
       if (direction === "upload") await fs.writeFile(localPath, payload);
-      const targetPath = direction === "upload" ? `/uploaded-${transferId}.bin` : localPath;
+      const targetPath = direction === "download" ? localPath : `/uploaded-${transferId}.bin`;
+      const checkpoint = options.checkpointBytes || options.downloadCheckpointBytes || 0;
+      if (checkpoint > 0) await fs.writeFile(stagePath, payload.subarray(0, checkpoint));
+      if (direction === "copy" && options.resumeStage === "upload") {
+        await fs.writeFile(stagePath, payload);
+        const remoteStage = `/.${path.basename(targetPath)}.netcatty-${transferId}.part`;
+        files.set(remoteStage, payload.subarray(0, options.uploadCheckpointBytes || 0));
+      }
       const result = await transferBridge.startTransfer({ sender: { send() {} } }, {
         transferId,
         sourcePath: direction === "upload" ? localPath : "/source.bin", targetPath,
         sourceType: direction === "upload" ? "local" : "sftp",
-        targetType: direction === "upload" ? "sftp" : "local",
+        targetType: direction === "download" ? "local" : "sftp",
         sourceSftpId: sftpId, targetSftpId: sftpId,
         totalBytes: payload.length, resumable: true,
+        ...options,
       });
       return { result, targetPath, direction };
     },
@@ -377,3 +388,116 @@ for (const direction of ["download", "upload"]) {
     assert.equal(fixture.rejectedOpens(), 0);
   });
 }
+
+
+for (const direction of ["download", "copy"]) {
+  test(`TERM-SSHD resumed ${direction} source fingerprint waits behind an active alias`, { timeout: 5_000 }, async (t) => {
+    const fixture = await createSequentialTransferFixture(t);
+    const first = fixture.start("download");
+    const deadline = Date.now() + 1_000;
+    while (fixture.handles.size === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const sourceFingerprint = `sha256:p${fixture.payload.length}:${crypto.createHash("sha256").update(fixture.payload).digest("hex")}`;
+    const resumed = fixture.start(direction, "alias", { sourceFingerprint, checkpointBytes: 32768, downloadCheckpointBytes: 32768 });
+    for (const transfer of await Promise.all([first, resumed])) {
+      assert.equal(transfer.result.error, undefined);
+      assert.deepEqual(transfer.direction === "copy" ? fixture.files.get(transfer.targetPath)
+        : await fs.readFile(transfer.targetPath), fixture.payload);
+    }
+    assert.equal(fixture.rejectedOpens(), 0);
+  });
+}
+
+for (const mode of ["download", "copy-download", "copy-upload"]) {
+  test(`TERM-SSHD ${mode} checkpoint verification waits for an alias admitted after fingerprint`, { timeout: 5_000 }, async (t) => {
+    const fixture = await createSequentialTransferFixture(t);
+    const sourceFingerprint = `sha256:p${fixture.payload.length}:${crypto.createHash("sha256").update(fixture.payload).digest("hex")}`;
+    const originalClose = fixture.sftp.close;
+    let competing;
+    fixture.sftp.close = (handle, callback) => {
+      originalClose(handle, callback);
+      // The first close completes the full-source fingerprint. Admit an alias
+      // before the later checkpoint-prefix proof asks for another handle.
+      if (!competing) competing = fixture.start("download", "first");
+    };
+    const result = await fixture.start(mode === "download" ? "download" : "copy", "alias", {
+      sourceFingerprint,
+      checkpointBytes: 32768, downloadCheckpointBytes: 32768,
+      ...(mode === "copy-upload" ? { resumeStage: "upload", uploadCheckpointBytes: 32768 } : {}),
+    });
+    const other = await competing;
+    assert.equal(result.result.error, undefined);
+    assert.equal(other.result.error, undefined);
+    assert.deepEqual(result.direction === "copy" ? fixture.files.get(result.targetPath)
+      : await fs.readFile(result.targetPath), fixture.payload);
+    assert.deepEqual(await fs.readFile(other.targetPath), fixture.payload);
+    assert.equal(fixture.rejectedOpens(), 0);
+  });
+}
+
+for (const phase of ["fingerprint", "checkpoint"]) {
+  test(`TERM-SSHD queued ${phase} verification cancels without opening another handle`, { timeout: 5_000 }, async (t) => {
+    const fixture = await createSequentialTransferFixture(t);
+    const sourceFingerprint = `sha256:p${fixture.payload.length}:${crypto.createHash("sha256").update(fixture.payload).digest("hex")}`;
+    let competing;
+    if (phase === "checkpoint") {
+      const originalClose = fixture.sftp.close;
+      fixture.sftp.close = (handle, callback) => {
+        originalClose(handle, callback);
+        if (!competing) competing = fixture.start("download", "first");
+      };
+    } else {
+      competing = fixture.start("download", "first");
+      const deadline = Date.now() + 1_000;
+      while (fixture.handles.size === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+    const transferId = crypto.randomUUID();
+    const resumed = fixture.start("download", "alias", { transferId, sourceFingerprint, checkpointBytes: 32768 });
+    const deadline = Date.now() + 1_000;
+    while ((!competing || transferBridge._getSessionFastDownloadWaiterCountForTests(fixture.sftp) === 0) && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(transferBridge._getSessionFastDownloadWaiterCountForTests(fixture.sftp), 1);
+    await transferBridge.cancelTransfer(null, { transferId });
+    assert.match((await resumed).result.error || "", /cancelled/i);
+    const other = await competing;
+    assert.equal(other.result.error, undefined);
+    assert.deepEqual(await fs.readFile(other.targetPath), fixture.payload);
+    assert.equal(fixture.rejectedOpens(), 0);
+    assert.equal(transferBridge._getSessionFastDownloadWaiterCountForTests(fixture.sftp), 0);
+  });
+}
+
+
+test("TERM-SSHD remote-copy upload checkpoint locks its target rather than its distinct source", { timeout: 5_000 }, async (t) => {
+  const source = await createSequentialTransferFixture(t);
+  const target = await createSequentialTransferFixture(t);
+  transferBridge.init({ sftpClients: new Map([
+    ...source.clients,
+    ["target-first", target.clients.get("first")],
+    ["target-alias", target.clients.get("alias")],
+  ]) });
+  const competing = target.start("download", "target-first");
+  const deadline = Date.now() + 1_000;
+  while (target.handles.size === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const transferId = crypto.randomUUID();
+  const targetPath = `/uploaded-${transferId}.bin`;
+  target.files.set(`/.${path.basename(targetPath)}.netcatty-${transferId}.part`, source.payload.subarray(0, 32768));
+  const sourceFingerprint = `sha256:p${source.payload.length}:${crypto.createHash("sha256").update(source.payload).digest("hex")}`;
+  const copy = source.start("copy", "first", {
+    transferId, targetSftpId: "target-alias", sourceFingerprint,
+    resumeStage: "upload", uploadCheckpointBytes: 32768,
+  });
+  const [copied, other] = await Promise.all([copy, competing]);
+  assert.equal(copied.result.error, undefined);
+  assert.equal(other.result.error, undefined);
+  assert.deepEqual(target.files.get(copied.targetPath), source.payload);
+  assert.deepEqual(await fs.readFile(other.targetPath), target.payload);
+  assert.equal(source.rejectedOpens(), 0);
+  assert.equal(target.rejectedOpens(), 0);
+});

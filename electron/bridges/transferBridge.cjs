@@ -6495,7 +6495,7 @@ async function startTransferNow(event, payload, onProgress) {
     return transfer.sourceFingerprintPromise;
   };
 
-  const verifyResumeContent = async (bytes, createSourceHash, createStagedHash) => {
+  const verifyResumeContent = async (bytes, createSourceHash, createStagedHash, remoteClient = null) => {
     if (!bytes) return;
     const previousPhase = transfer.phase;
     const verificationStartedAt = Date.now();
@@ -6525,7 +6525,7 @@ async function startTransferNow(event, payload, onProgress) {
     transfer.phase = "verifying";
     publishVerificationProgress(true);
     try {
-      await runTransferAbortableOperation(transfer, (signal) => assertMatchingResumeContent(
+      const verify = () => runTransferAbortableOperation(transfer, (signal) => assertMatchingResumeContent(
         createSourceHash({
           signal,
           onProgress(value) {
@@ -6541,6 +6541,11 @@ async function startTransferNow(event, payload, onProgress) {
           },
         }),
       ));
+      // Resume prefix reads run before the body wrapper. Acquire separately,
+      // before installing the I/O abort hook, so queued cancellation works and
+      // no source/target channel is held while acquiring another channel.
+      if (remoteClient) await withSequentialSftpTransferSlot(remoteClient, transfer, verify);
+      else await verify();
       publishVerificationProgress(true);
     } finally {
       transfer.phase = previousPhase || "transferring";
@@ -6737,7 +6742,12 @@ async function startTransferNow(event, payload, onProgress) {
     }
 
     if (transfer.resumable && transfer.sourceFingerprint) {
-      await transfer.verifySourceFingerprint(transfer.sourceFingerprint);
+      const verify = () => transfer.verifySourceFingerprint(transfer.sourceFingerprint);
+      // Initial remote identity reads also precede the download/upload body.
+      // Do not put this lock inside shared hash helpers: body verification and
+      // soft-resume paths can already own the channel.
+      if (sourceClient) await withSequentialSftpTransferSlot(sourceClient, transfer, verify);
+      else await verify();
     }
 
     sendProgress(transfer.checkpointBytes, fileSize, { force: true });
@@ -6895,6 +6905,7 @@ async function startTransferNow(event, payload, onProgress) {
             options,
           ),
           (options) => hashLocalPrefix(downloadTargetPath, verifyBytes, options),
+          client,
         );
       }
       const download = stageLocalDownload
@@ -7162,6 +7173,7 @@ async function startTransferNow(event, payload, onProgress) {
                 options,
               ),
               (options) => hashLocalPrefix(tempPath, verifyBytes, options),
+              sourceClient,
             );
           }
           const downloadProgress = (transferred, reportedTotal, options = {}) => {
@@ -7311,6 +7323,7 @@ async function startTransferNow(event, payload, onProgress) {
                   verifyBytes,
                   options,
                 ),
+                targetClient,
               );
             }
             await uploadFile(
