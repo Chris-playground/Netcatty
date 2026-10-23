@@ -1332,8 +1332,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       term.focus();
       // Tab focus retries do not imply a lost renderer or a changed layout.
       // Leave explicit app-resume/fullscreen recovery timers untouched when
-      // these bounds are already fitted.
-      if (!currentContainerSizeAlreadyFit()) {
+      // these bounds are already fitted, or recovery is still settling.
+      if (!currentContainerSizeAlreadyFit() && layoutRecoveryTimersRef.current.length === 0) {
         scheduleLayoutRecoveryRefit([0, 100]);
       }
     };

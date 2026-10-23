@@ -165,3 +165,18 @@ for (const source of ['resume', 'fullscreen'] as const) {
     assert.deepEqual(h.fitTimes.map(at => at - h.fitTimes[0]), source === 'resume' ? [0, 100, 300] : [0, 150, 400]);
   });
 }
+
+for (const source of ['resume', 'fullscreen'] as const) {
+  test(`focus during changed bounds preserves pending ${source} settling passes`, t => {
+    const h = harness(t);
+    h.advance(4000); h.reveal(); h.advance(600);
+    h[source](); h.advance(0);
+    h.advance(50);
+    h.values.containerRef.current.clientWidth = 780;
+    h.focus(); h.advance(500);
+    assert.equal(h.calls.focus, 1);
+    assert.equal(h.calls.forcedFit, 3);
+    assert.deepEqual(h.fitTimes.map(at => at - h.fitTimes[0]), source === 'resume' ? [0, 100, 300] : [0, 150, 400]);
+    assert.equal(h.values.lastFittedSizeRef.current.width, 780);
+  });
+}
