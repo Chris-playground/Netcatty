@@ -9,6 +9,8 @@ import { getAvailablePaneMagnificationController } from '../../domain/paneMagnif
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
+import { getSettingsChromeSnapshot } from '../state/settingsChromeStore';
+import { isHostTreeWorkTabSurface } from './workTabSurface';
 import { tabShortcutDigitFromEvent } from '../../domain/models/keyBindings';
 import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
 import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
@@ -801,7 +803,7 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
 }
 
 export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string, e: KeyboardEvent) {
-  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, canUseGlobalBroadcast, closePluginViewTab, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isPluginViewTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, sftpPaneMagnificationRef, splitSessionWithCurrentShell, systemInfoRef, terminalPaneMagnificationRef, toEditorTabId, toggleBroadcast, toggleGlobalBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWindowOpacity, workspaces } = getCtx();
+  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, canUseGlobalBroadcast, closePluginViewTab, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isPluginViewTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, sftpPaneMagnificationRef, splitSessionWithCurrentShell, systemInfoRef, terminalPaneMagnificationRef, toEditorTabId, toggleBroadcast, toggleGlobalBroadcast, toggleHostTree, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWindowOpacity, workspaces } = getCtx();
 {
     const shortcutTabs = buildNumberShortcutTabTargets({
       showSftpTab: settings.showSftpTab ?? true,
@@ -997,6 +999,18 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
       case 'toggleSidePanel':
         toggleSidePanelRef.current?.();
         break;
+      case 'toggleHostTree': {
+        const currentId = activeTabStore.getActiveTabId();
+        if (!isHostTreeWorkTabSurface({
+          enabled: getSettingsChromeSnapshot().showHostTreeSidebar,
+          activeTabId: currentId,
+          orderedTabs: orderedTabs ?? [],
+          sessionIds: new Set((sessions ?? []).map((session: TerminalSession) => session.id)),
+          workspaceIds: new Set((workspaces ?? []).map((workspace: { id: string }) => workspace.id)),
+        })) break;
+        toggleHostTree?.();
+        break;
+      }
       case 'broadcast': {
         // Workspace tabs keep their local broadcast state; orphan tabs share
         // the global state when at least two visible orphan tabs exist.

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -8,6 +9,11 @@ import {
   handleGlobalHotkeyKeyDownImpl,
   markForwardedNativeShortcutEvent,
 } from './app/AppHandlers.ts';
+import {
+  DEFAULT_SETTINGS_CHROME_SNAPSHOT,
+  getSettingsChromeSnapshot,
+  publishSettingsChromeSnapshot,
+} from './state/settingsChromeStore.ts';
 import { matchesKeyBinding } from '../domain/models.ts';
 import { DEFAULT_KEY_BINDINGS } from '../domain/models/keyBindings.ts';
 
@@ -829,3 +835,108 @@ for (const scenario of [
     });
   }
 }
+
+for (const scheme of ['pc', 'mac'] as const) {
+  test(`focused terminal ${scheme} consumes Shift+B for the host list and leaves plain B to broadcast`, () => {
+    const target = new FakeHTMLElement();
+    const shiftedActions: string[] = [];
+    let shiftedPrevented = false;
+    let shiftedStopped = false;
+    handleGlobalHotkeyKeyDownImpl(() => ({
+      HOTKEY_DEBUG: false,
+      closeTabKeyStr: '',
+      executeHotkeyAction: (action: string) => {
+        shiftedActions.push(action);
+        return undefined;
+      },
+      hotkeyScheme: scheme,
+      keyBindings: DEFAULT_KEY_BINDINGS,
+      matchesKeyBinding,
+    }), {
+      key: 'b',
+      code: 'KeyB',
+      ctrlKey: scheme === 'pc',
+      metaKey: scheme === 'mac',
+      altKey: false,
+      shiftKey: true,
+      target,
+      composedPath: () => [target],
+      preventDefault: () => { shiftedPrevented = true; },
+      stopPropagation: () => { shiftedStopped = true; },
+    } as unknown as KeyboardEvent);
+
+    assert.deepEqual(shiftedActions, ['toggleHostTree']);
+    assert.equal(shiftedPrevented, true);
+    assert.equal(shiftedStopped, true);
+
+    const plainActions: string[] = [];
+    let plainPrevented = false;
+    handleGlobalHotkeyKeyDownImpl(() => ({
+      HOTKEY_DEBUG: false,
+      closeTabKeyStr: '',
+      executeHotkeyAction: (action: string) => {
+        plainActions.push(action);
+        return undefined;
+      },
+      hotkeyScheme: scheme,
+      keyBindings: DEFAULT_KEY_BINDINGS,
+      matchesKeyBinding,
+    }), {
+      key: 'b',
+      code: 'KeyB',
+      ctrlKey: scheme === 'pc',
+      metaKey: scheme === 'mac',
+      altKey: false,
+      shiftKey: false,
+      target,
+      composedPath: () => [target],
+      preventDefault: () => { plainPrevented = true; },
+      stopPropagation: () => {},
+    } as unknown as KeyboardEvent);
+
+    assert.deepEqual(plainActions, ['broadcast']);
+    assert.equal(plainPrevented, false);
+  });
+}
+
+test('toggleHostTree uses the host list toggle only while that list can show', () => {
+  const previous = getSettingsChromeSnapshot();
+  const calls: string[] = [];
+  const toggleHostTree = () => { calls.push('toggle'); };
+  const event = {} as KeyboardEvent;
+  const contextFor = (activeTabId: string, orderedTabs: string[] = [activeTabId]) => ({
+    activeTabStore: { getActiveTabId: () => activeTabId },
+    editorTabs: [],
+    orderedTabs,
+    sessions: [{ id: 'session-1' }],
+    settings: {},
+    toEditorTabId: (id: string) => id,
+    toggleHostTree,
+    workspaces: [{ id: 'workspace-1' }],
+  });
+
+  try {
+    publishSettingsChromeSnapshot({ ...DEFAULT_SETTINGS_CHROME_SNAPSHOT, showHostTreeSidebar: true });
+    executeHotkeyActionImpl(() => contextFor('session-1'), 'toggleHostTree', event);
+    executeHotkeyActionImpl(() => contextFor('editor:note', []), 'toggleHostTree', event);
+    executeHotkeyActionImpl(() => contextFor('workspace-1'), 'toggleHostTree', event);
+    assert.deepEqual(calls, ['toggle', 'toggle', 'toggle']);
+
+    calls.length = 0;
+    executeHotkeyActionImpl(() => contextFor('vault', []), 'toggleHostTree', event);
+    executeHotkeyActionImpl(() => contextFor('sftp', []), 'toggleHostTree', event);
+    executeHotkeyActionImpl(() => contextFor('plugin-view:demo:main', ['plugin-view:demo:main']), 'toggleHostTree', event);
+    assert.deepEqual(calls, []);
+
+    publishSettingsChromeSnapshot({ ...DEFAULT_SETTINGS_CHROME_SNAPSHOT, showHostTreeSidebar: false });
+    executeHotkeyActionImpl(() => contextFor('session-1'), 'toggleHostTree', event);
+    assert.deepEqual(calls, []);
+  } finally {
+    publishSettingsChromeSnapshot(previous);
+  }
+});
+
+test('host list shortcut calls the same store toggle as the toolbar button', () => {
+  const source = readFileSync(new URL('./app/AppSideEffects.tsx', import.meta.url), 'utf8');
+  assert.match(source, /toggleHostTree:\s*\(\)\s*=>\s*terminalHostTreeStore\.toggle\(\)/);
+});
