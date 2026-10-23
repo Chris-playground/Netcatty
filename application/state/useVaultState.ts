@@ -522,17 +522,23 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     const unsavedTerminalDataPending = logs.some(
       (log) => !log.saved && log.terminalData !== undefined,
     );
+    let mainReplay: ConnectionLogTerminalDataMap = {};
+    const writeMain = (value: ConnectionLog[]) => {
+      const written = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, value);
+      if (written) mainReplay = buildTerminalDataMapFromLogs(value);
+      return written;
+    };
 
     let mainPersisted = true;
     if (options?.pruneMainBlob) {
       const prunedMain = pruneConnectionLogsForStorage(logs);
-      mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, prunedMain);
+      mainPersisted = writeMain(prunedMain);
       if (!mainPersisted && unsavedTerminalDataPending) {
-        mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+        mainPersisted = writeMain(logs);
       }
     }
 
-    let sidePersisted = true;
+    let sidePersisted = false;
     if (mainPersisted || !options?.pruneMainBlob) {
       sidePersisted = await syncConnectionLogTerminalDataMap(logs, {
         usePersistedLogIdsFromDisk: Boolean(options?.pruneMainBlob && mainPersisted),
@@ -558,7 +564,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           freshLogs,
         )
         : logs;
-      mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, toWrite);
+      mainPersisted = writeMain(toWrite);
     } else if (!sidePersisted && unsavedTerminalDataPending && mainPersisted) {
       // IndexedDB rejected the replay after the pruned metadata write. Put the
       // buffers back on the current main blob so a restart still has them,
@@ -569,12 +575,12 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
       let fallbackLogs = freshLogs
         ? mergeTerminalDataIntoLogs(freshLogs, buildTerminalDataMapFromLogs(logs))
         : logs;
-      sidePersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, fallbackLogs);
+      sidePersisted = writeMain(fallbackLogs);
       let keep = fallbackLogs.filter((log) => !log.saved && log.terminalData).length;
       while (!sidePersisted && keep > 1) {
         keep = Math.max(1, Math.floor(keep / 2));
         fallbackLogs = retainNewestUnsavedReplays(fallbackLogs, keep);
-        sidePersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, fallbackLogs);
+        sidePersisted = writeMain(fallbackLogs);
       }
     }
 
@@ -587,7 +593,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         "[useVaultState] Failed to persist connection log terminal replay data side store.",
       );
     }
-    return mainPersisted && sidePersisted;
+    return { metadataPersisted: mainPersisted, replayPersisted: sidePersisted, mainReplay };
   }, [syncConnectionLogTerminalDataMap]);
 
   const commitConnectionLogs = useCallback((
@@ -652,10 +658,12 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         ),
         { ...options, removedIds, changedIds },
       );
-      if (persisted) {
-        connectionLogPendingRef.current = acknowledgePendingConnectionLogWrites(
-          connectionLogPendingRef.current, pending,
-        );
+      // A replay/quota failure must not retain already-committed add or
+      // metadata ownership: retrying it could undo a peer bookmark/deletion.
+      connectionLogPendingRef.current = acknowledgePendingConnectionLogWrites(
+        connectionLogPendingRef.current, pending, persisted,
+      );
+      if (persisted.metadataPersisted || persisted.replayPersisted) {
         const stored = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS);
         if (stored) {
           const merged = mergeConnectionLogsWithPendingMutations(
@@ -668,7 +676,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
           setConnectionLogs(merged);
         }
       }
-      return persisted;
+      return persisted.metadataPersisted && persisted.replayPersisted;
     }));
   }, [absorbRemoteTerminalDataIfNeeded, enqueueTerminalDataTask, persistConnectionLogState]);
 

@@ -149,6 +149,83 @@ test("acknowledging one commit retains another failed or newer pending id for re
   assert.equal(mergeConnectionLogsWithPendingMutations([], [], {}, pending)[0].id, "retry");
 });
 
+test("metadata-only success retires add ownership without discarding failed replay", () => {
+  const captured = { ...baseLog, terminalData: "failed replay" };
+  const write: PendingConnectionLogWrite = {
+    generation: 1, added: true, log: captured, changes: captured,
+    fieldGenerations: Object.fromEntries(Object.keys(captured).map((field) => [field, 1])),
+  };
+  const pending = acknowledgePendingConnectionLogWrites(
+    new Map([[baseLog.id, write]]), new Map([[baseLog.id, write]]),
+    { metadataPersisted: true, replayPersisted: false },
+  );
+  assert.equal(pending.get(baseLog.id)?.added, false);
+  assert.deepEqual(pending.get(baseLog.id)?.changes, { terminalData: "failed replay" });
+  const bookmarked = mergeConnectionLogsWithPendingMutations(
+    [captured], [{ ...baseLog, saved: true }], {}, pending,
+  );
+  assert.equal(bookmarked[0].saved, true);
+  assert.equal(bookmarked[0].terminalData, "failed replay");
+  assert.deepEqual(mergeConnectionLogsWithPendingMutations([captured], [], {}, pending), []);
+});
+
+test("partial acknowledgment preserves newer metadata and replay generations", () => {
+  const first: PendingConnectionLogWrite = {
+    generation: 1, added: true, log: baseLog, changes: { saved: false, terminalData: "first" },
+    fieldGenerations: { saved: 1, terminalData: 1 },
+  };
+  const later: PendingConnectionLogWrite = {
+    generation: 2, added: true, log: { ...baseLog, saved: true, terminalData: "later" },
+    changes: { saved: true, terminalData: "later" }, fieldGenerations: { saved: 2, terminalData: 2 },
+  };
+  const pending = acknowledgePendingConnectionLogWrites(
+    new Map([[baseLog.id, later]]), new Map([[baseLog.id, first]]),
+    { metadataPersisted: true, replayPersisted: false },
+  );
+  assert.equal(pending.get(baseLog.id)?.added, false);
+  assert.deepEqual(pending.get(baseLog.id)?.changes, later.changes);
+});
+
+test("failed metadata keeps add ownership even when the replay is durable", () => {
+  const captured = { ...baseLog, terminalData: "durable replay" };
+  const write: PendingConnectionLogWrite = {
+    generation: 1, added: true, log: captured, changes: captured,
+    fieldGenerations: Object.fromEntries(Object.keys(captured).map((field) => [field, 1])),
+  };
+  const pending = acknowledgePendingConnectionLogWrites(
+    new Map([[baseLog.id, write]]), new Map([[baseLog.id, write]]),
+    { metadataPersisted: false, replayPersisted: true },
+  );
+  assert.equal(pending.get(baseLog.id)?.added, true);
+  assert.equal(pending.get(baseLog.id)?.changes?.saved, false);
+  assert.equal(Object.hasOwn(pending.get(baseLog.id)?.changes ?? {}, "terminalData"), false);
+});
+
+test("durable saved replay and deletion retire ownership despite a failed side store", () => {
+  const saved: PendingConnectionLogWrite = {
+    generation: 1, added: true, log: { ...baseLog, saved: true, terminalData: "saved" },
+    changes: { saved: true, terminalData: "saved" }, fieldGenerations: { saved: 1, terminalData: 1 },
+  };
+  const deleted: PendingConnectionLogWrite = { generation: 2, log: null };
+  const writes = new Map([[baseLog.id, saved], ["deleted", deleted]]);
+  assert.equal(acknowledgePendingConnectionLogWrites(writes, writes,
+    { metadataPersisted: true, replayPersisted: false, mainReplay: { [baseLog.id]: "saved" } }).size, 0);
+});
+
+test("a stale saved flag cannot acknowledge replay omitted after a peer unbookmark", () => {
+  const write: PendingConnectionLogWrite = {
+    generation: 1, log: { ...baseLog, saved: true, terminalData: "failed final" },
+    changes: { terminalData: "failed final" }, fieldGenerations: { terminalData: 1 },
+  };
+  for (const mainReplay of [{}, { [baseLog.id]: "older durable bytes" }]) {
+    const pending = acknowledgePendingConnectionLogWrites(
+      new Map([[baseLog.id, write]]), new Map([[baseLog.id, write]]),
+      { metadataPersisted: true, replayPersisted: false, mainReplay },
+    );
+    assert.deepEqual(pending.get(baseLog.id)?.changes, { terminalData: "failed final" });
+  }
+});
+
 test("selectConnectionLogForTerminalDataCapture picks the active log for a normal session exit", () => {
   const matchingLog = { ...baseLog, id: "active", startTime: 2000 };
   const staleLog = {

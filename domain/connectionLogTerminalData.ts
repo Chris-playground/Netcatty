@@ -67,29 +67,42 @@ export type PendingConnectionLogWrite = PendingConnectionLogMutation & {
   fieldGenerations?: Partial<Record<keyof ConnectionLog, number>>;
 };
 
-/** Retire only the row/field generations included in a successful commit. */
+/** Retire only row/field generations whose storage write actually committed. */
 export const acknowledgePendingConnectionLogWrites = (
   pending: ReadonlyMap<string, PendingConnectionLogWrite>,
   committed: ReadonlyMap<string, PendingConnectionLogWrite>,
+  durability: {
+    metadataPersisted: boolean;
+    replayPersisted: boolean;
+    mainReplay?: ConnectionLogTerminalDataMap;
+  } = { metadataPersisted: true, replayPersisted: true },
 ): Map<string, PendingConnectionLogWrite> => {
   const remaining = new Map(pending);
   for (const [id, written] of committed) {
     const current = remaining.get(id);
     if (!current) continue;
-    if (current.generation === written.generation) {
+    if (current.generation === written.generation && durability.metadataPersisted
+      && (durability.replayPersisted || written.log === null)) {
       remaining.delete(id);
     } else if (current.log !== null && written.log !== null) {
       const changes = { ...current.changes };
       const fieldGenerations = { ...current.fieldGenerations };
       for (const field of Object.keys(written.fieldGenerations ?? {}) as Array<keyof ConnectionLog>) {
-        if (fieldGenerations[field] === written.fieldGenerations?.[field]) {
+        // Use the bytes actually written, not this pending log's saved flag:
+        // a peer may have unbookmarked it before the snapshot was rebased.
+        const durable = field === "terminalData"
+          ? durability.replayPersisted || (Object.hasOwn(durability.mainReplay ?? {}, id)
+            && durability.mainReplay?.[id] === written.changes?.terminalData)
+          : durability.metadataPersisted;
+        if (durable && fieldGenerations[field] === written.fieldGenerations?.[field]) {
           delete changes[field];
           delete fieldGenerations[field];
         }
       }
-      if (Object.keys(changes).length === 0) remaining.delete(id);
+      const added = durability.metadataPersisted && written.added ? false : current.added;
+      if (Object.keys(changes).length === 0 && !added) remaining.delete(id);
       else remaining.set(id, {
-        ...current, changes, fieldGenerations, added: written.added ? false : current.added,
+        ...current, changes, fieldGenerations, added,
       });
     }
   }

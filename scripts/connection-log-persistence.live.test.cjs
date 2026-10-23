@@ -67,6 +67,36 @@ export async function addAndCapture(log: any, terminalData: string) {
   if (!await latest.updateConnectionLog(id, { terminalData, endTime: log.startTime + 1 })) throw new Error("capture persistence returned false");
   return id;
 }
+export async function failedAddAndCapture(log: any, terminalData: string) {
+  // Fault only this renderer's native write boundaries. Reads and metadata-only
+  // writes still use genuine browser storage; the production hook is unchanged.
+  const transaction = IDBDatabase.prototype.transaction;
+  const setItem = Storage.prototype.setItem;
+  const faults = { indexedDB: 0, replayFallback: 0 };
+  IDBDatabase.prototype.transaction = function (...args: any[]) {
+    if (this.name === store.CONNECTION_LOG_TERMINAL_DATA_DB_NAME && args[1] === "readwrite") {
+      faults.indexedDB++;
+      throw new DOMException("injected replay write failure", "QuotaExceededError");
+    }
+    return transaction.apply(this, args as Parameters<typeof transaction>);
+  };
+  Storage.prototype.setItem = function (key: string, value: string) {
+    if (this === localStorage && key === keys.STORAGE_KEY_CONNECTION_LOGS
+      && JSON.parse(value).some((entry: any) => !entry.saved && entry.terminalData !== undefined)) {
+      faults.replayFallback++;
+      throw new DOMException("injected replay fallback failure", "QuotaExceededError");
+    }
+    return setItem.call(this, key, value);
+  };
+  try {
+    const id = latest!.addConnectionLog(log);
+    const persisted = await latest!.updateConnectionLog(id, { terminalData });
+    return { id, persisted, faults };
+  } finally {
+    IDBDatabase.prototype.transaction = transaction;
+    Storage.prototype.setItem = setItem;
+  }
+}
 export function toggleSaved(id: string) { latest!.toggleConnectionLogSaved(id); }
 export function deleteLog(id: string) { latest!.deleteConnectionLog(id); }
 export function clearUnsaved() { latest!.clearUnsavedConnectionLogs(); }
@@ -322,6 +352,41 @@ if (process.argv.includes("--check-bundle")) {
     await call(a, "deleteLog", "unsaved-040");
     await converged([a, b], s => !s.logs.some(x => x.id === "unsaved-040") && !s.diskLogs.some(x => x.id === "unsaved-040") && !Object.hasOwn(s.replay, "unsaved-040"), "deletion converges in metadata and IndexedDB");
     pass("delete removes matching replay in both windows");
+
+    // A pruned metadata write can succeed while both replay destinations fail.
+    // Failed replay ownership must not keep the already-committed addition or
+    // metadata fields alive across a subsequent peer bookmark/deletion.
+    async function failedCapture(label, startTime) {
+      const data = payload(label);
+      const result = await call(a, "failedAddAndCapture", log("ignored", startTime), data);
+      assert.equal(result.persisted, false);
+      assert.ok(result.faults.indexedDB > 0);
+      assert.ok(result.faults.replayFallback > 0);
+      const snapshot = await call(a, "snapshot");
+      assert.equal(snapshot.diskLogs.find(x => x.id === result.id)?.saved, false);
+      assert.equal(snapshot.diskLogs.find(x => x.id === result.id)?.terminalData, undefined);
+      assert.equal(Object.hasOwn(snapshot.replay, result.id), false);
+      await converged([b], s => s.logs.some(x => x.id === result.id), "peer sees metadata after failed replay capture");
+      return { ...result, data };
+    }
+    const partialBookmark = await failedCapture("partial-write-bookmark", 4000);
+    await call(b, "toggleSaved", partialBookmark.id);
+    await converged([b], s => s.logs.some(x => x.id === partialBookmark.id && x.saved)
+      && s.diskLogs.some(x => x.id === partialBookmark.id && x.saved), "peer bookmark commits after partial capture");
+    assert.equal(await call(a, "capture", partialBookmark.id, partialBookmark.data), true);
+    saved[partialBookmark.id] = partialBookmark.data;
+    await converged([a, b], s => s.logs.some(x => x.id === partialBookmark.id && x.saved && x.terminalData === partialBookmark.data)
+      && s.diskLogs.some(x => x.id === partialBookmark.id && x.saved && x.terminalData === partialBookmark.data), "partial-write retry retains peer bookmark and exact replay");
+    pass("metadata-only success retires stale fields while retry preserves peer bookmark", { faults: partialBookmark.faults });
+
+    const partialDelete = await failedCapture("partial-write-delete", 4001);
+    await call(b, "deleteLog", partialDelete.id);
+    await converged([b], s => !s.logs.some(x => x.id === partialDelete.id)
+      && !s.diskLogs.some(x => x.id === partialDelete.id), "peer deletion commits after partial capture");
+    assert.equal(await call(a, "capture", partialDelete.id, partialDelete.data), true);
+    await converged([a, b], s => !s.logs.some(x => x.id === partialDelete.id)
+      && !s.diskLogs.some(x => x.id === partialDelete.id) && !Object.hasOwn(s.replay, partialDelete.id), "partial-write retry never resurrects peer deletion");
+    pass("metadata-only success retires addition ownership before peer deletion", { faults: partialDelete.faults });
 
     // Both renderer heaps are discarded; only persisted browser storage survives.
     a.destroy(); b.destroy();
