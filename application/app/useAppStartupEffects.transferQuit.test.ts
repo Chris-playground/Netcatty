@@ -1,10 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
+import type { TransferTask } from "../../domain/models";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { useAppStartupEffects } from "./useAppStartupEffects.ts";
 import { sftpTransferCenterStore } from "../state/sftpTransferCenterStore.ts";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge.ts";
+
+const makeTask = (id: string, status: TransferTask["status"]): TransferTask => ({
+  id,
+  fileName: `${id}.txt`,
+  sourcePath: `/source/${id}.txt`,
+  targetPath: `/target/${id}.txt`,
+  sourceConnectionId: "local",
+  targetConnectionId: "remote",
+  direction: "upload",
+  status,
+  totalBytes: 10,
+  transferredBytes: 2,
+  speed: 1,
+  startTime: 1,
+  isDirectory: false,
+});
 
 for (const accept of [false, true]) {
   test(`app Quit with an unfinished transfer: ${accept ? "confirm quits" : "declining reports \"transfers\" before resuming only transferring and queued tasks"}`, async (t) => {
@@ -113,7 +130,7 @@ for (const outcome of ["pause-rejected", "pause-expired", "prompt-expired"] as c
       if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow); else Reflect.deleteProperty(globalThis, "window");
       if (previousAct) Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousAct); else Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT");
     });
-    t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({ tasks: [{ id: "running", status: "transferring" }] }) as ReturnType<typeof sftpTransferCenterStore.getSnapshot>);
+    t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({ activeCount: 1, queuedCount: 0, attentionCount: 0, tasks: [makeTask("running", "transferring")] }));
     t.mock.method(sftpTransferCenterStore, "pause", async () => {
       if (outcome === "pause-rejected") throw new Error("pause failed");
       if (outcome === "pause-expired") now = 6000;
@@ -161,7 +178,7 @@ test("a cancelled task can close after an expired stuck pause, and its late comp
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow); else Reflect.deleteProperty(globalThis, "window");
     if (previousAct) Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousAct); else Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT");
   });
-  t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({ tasks: [{ id: "stuck", status: cancelled ? "cancelled" : "transferring" }] }) as ReturnType<typeof sftpTransferCenterStore.getSnapshot>);
+  t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({ activeCount: cancelled ? 0 : 1, queuedCount: 0, attentionCount: 0, tasks: [makeTask("stuck", cancelled ? "cancelled" : "transferring")] }));
   t.mock.method(sftpTransferCenterStore, "pause", () => pause);
   t.mock.method(sftpTransferCenterStore, "resume", async () => { resumes++; });
   t.mock.method(netcattyBridge, "get", () => ({
@@ -193,7 +210,7 @@ test("retry Cancel preserves the expired attempt auto-resume ownership", async (
   const previousAct = Object.getOwnPropertyDescriptor(globalThis, "IS_REACT_ACT_ENVIRONMENT");
   let renderer: ReactTestRenderer | undefined;
   let now = 0;
-  let status = "transferring";
+  let status: TransferTask["status"] = "transferring";
   let prompts = 0;
   let resumes = 0;
   let releasePause!: () => void;
@@ -209,7 +226,7 @@ test("retry Cancel preserves the expired attempt auto-resume ownership", async (
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow); else Reflect.deleteProperty(globalThis, "window");
     if (previousAct) Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousAct); else Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT");
   });
-  t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({ tasks: [{ id: "stuck", status }] }) as ReturnType<typeof sftpTransferCenterStore.getSnapshot>);
+  t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({ activeCount: status === "transferring" || status === "pausing" ? 1 : 0, queuedCount: 0, attentionCount: 0, tasks: [makeTask("stuck", status)] }));
   t.mock.method(sftpTransferCenterStore, "pause", () => { status = "pausing"; return pause; });
   t.mock.method(sftpTransferCenterStore, "resume", async () => { resumes++; });
   t.mock.method(netcattyBridge, "get", () => ({
