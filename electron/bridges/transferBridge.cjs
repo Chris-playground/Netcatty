@@ -2474,6 +2474,41 @@ async function acquireSessionFastDownloadSlot(client, transfer) {
   }
 }
 
+// TERM-SSHD compatibility requires one file handle per channel. Per-file request
+// concurrency is not enough: pooled SFTP aliases share that physical channel,
+// and a second body or verification OPEN would fail even for tiny files.
+// Reuse the cancelable one-slot queue, keyed by the stream rather than its
+// wrapper client, across both directions and the complete verification phase.
+async function withSequentialSftpTransferSlot(client, transfer, operation) {
+  if (isScpModeClient(client)) return operation();
+  await requireSftpChannel(client);
+  const channel = client.sftp;
+  if (getSftpTransferConcurrency(channel, DOWNLOAD_TRANSFER_CONCURRENCY) !== 1) {
+    return operation();
+  }
+  await acquireSessionFastDownloadSlot(channel, transfer);
+  try {
+    return await operation();
+  } catch (error) {
+    if (error?.uncleanSftpChannel && client.sftp === channel) {
+      abandonWedgedVerificationSftpChannel(client);
+    }
+    throw error;
+  } finally {
+    releaseSessionFastDownloadSlot(channel);
+  }
+}
+
+async function closeSequentialSftpTransferHandle(sftp, handle) {
+  const result = await closeSftpHandleBestEffort(sftp, handle);
+  if (result.unclean) {
+    const error = new Error("SFTP body handle could not be closed");
+    error.noTransferFallback = true;
+    error.uncleanSftpChannel = true;
+    throw error;
+  }
+}
+
 async function acquireIsolatedDownloadChannel(client, transfer) {
   const pool = getIsolatedDownloadChannelPool(client);
   if (transfer?.cancelled) return null;
@@ -2642,6 +2677,22 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
  * last underlying error (Electerm-style: fail closed, do not crawl).
  */
 async function uploadFile(
+  localPath,
+  remotePath,
+  client,
+  fileSize,
+  transfer,
+  sendProgress,
+  encoding = "utf-8",
+  onBytesCommitted = null,
+  options = {},
+) {
+  return withSequentialSftpTransferSlot(client, transfer, () => uploadFileOnChannel(
+    localPath, remotePath, client, fileSize, transfer, sendProgress, encoding, onBytesCommitted, options,
+  ));
+}
+
+async function uploadFileOnChannel(
   localPath,
   remotePath,
   client,
@@ -4704,6 +4755,9 @@ function abandonWedgedVerificationSftpChannel(client) {
   // object back to later browse/transfer work (hasSftpChannelApi only checks
   // method presence). Non-sudo sessions can reopen; sudo recovery stays disabled.
   client.sftp = null;
+  for (const alias of sftpClients?.values?.() || []) {
+    if (alias?.sftp === sftp) alias.sftp = null;
+  }
   try { sftp.end?.(); } catch { /* ignore */ }
   try { sftp.destroy?.(); } catch { /* ignore */ }
 }
@@ -5279,7 +5333,14 @@ async function uploadFileConcurrent(
       // A closed channel never answers CLOSE. Skip it; the 2s race is only for
       // a live shared session. Falling through to another strategy on a dead
       // channel is handled by noTransferFallback on the close error.
-      if (!skipClose && sftp?.readable !== false) {
+      if (!skipClose && sftp?.readable !== false
+        && getSftpTransferConcurrency(sftp, UPLOAD_TRANSFER_CONCURRENCY) === 1) {
+        try {
+          await closeSequentialSftpTransferHandle(sftp, remoteHandle);
+        } catch (error) {
+          remoteCloseError = error;
+        }
+      } else if (!skipClose && sftp?.readable !== false) {
         let closeTimeout = null;
         try {
           await Promise.race([
@@ -5433,7 +5494,13 @@ async function downloadFileResumableFast(
     if (remoteHandle) {
       const skipClose = disposeChannel && (failed || transfer.cancelled);
       if (!skipClose) {
-        if (failed || transfer.cancelled) {
+        if (sequentialPeer && (failed || transfer.cancelled)) {
+          try {
+            await closeSequentialSftpTransferHandle(sftp, remoteHandle);
+          } catch (error) {
+            remoteCloseError = error;
+          }
+        } else if (failed || transfer.cancelled) {
           // Shared cancel/failure already settled the transfer; do not await
           // CLOSE (adds up to 2s on a dead channel). Best-effort close only.
           closeSftpHandle(sftp, remoteHandle).catch(() => {});
@@ -5484,6 +5551,7 @@ async function downloadFileResumableFast(
       error.noTransferFallback = true;
       throw error;
     }
+    if (remoteCloseError?.uncleanSftpChannel) throw remoteCloseError;
     if (!failed && !transfer.cancelled && remoteCloseError) {
       if (disposeChannel) {
         const error = new Error("The isolated SFTP channel failed while closing", { cause: remoteCloseError });
@@ -5509,6 +5577,21 @@ async function downloadFileResumableFast(
  * Hash helpers may still use createReadStream for content verification only.
  */
 async function downloadFile(
+  remotePath,
+  localPath,
+  client,
+  fileSize,
+  transfer,
+  sendProgress,
+  encoding = "utf-8",
+  runCancelablePreflight = async (operation) => operation(),
+) {
+  return withSequentialSftpTransferSlot(client, transfer, () => downloadFileOnChannel(
+    remotePath, localPath, client, fileSize, transfer, sendProgress, encoding, runCancelablePreflight,
+  ));
+}
+
+async function downloadFileOnChannel(
   remotePath,
   localPath,
   client,
