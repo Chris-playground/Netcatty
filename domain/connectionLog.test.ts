@@ -5,14 +5,17 @@ import type { ConnectionLog } from "./models.ts";
 import { selectConnectionLogForTerminalDataCapture } from "./connectionLog.ts";
 import {
   MAX_PERSISTED_UNSAVED_TERMINAL_DATA_ENTRIES,
+  acknowledgePendingConnectionLogWrites,
   diffTerminalDataMaps,
   mergeConnectionLogsFromStorage,
+  mergeConnectionLogsWithPendingMutations,
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
   pruneInMemoryUnsavedTerminalData,
   pruneTerminalDataMapForStorage,
   rebaseQueuedConnectionLogs,
   retainNewestUnsavedReplays,
+  type PendingConnectionLogWrite,
 } from "./connectionLogTerminalData.ts";
 
 const baseLog: ConnectionLog = {
@@ -28,6 +31,123 @@ const baseLog: ConnectionLog = {
   localHostname: "machine",
   saved: false,
 };
+
+test("pending capture survives a peer snapshot and queued persistence rebase", () => {
+  const local = { ...baseLog, id: "local", startTime: 3000, terminalData: "capture" };
+  const peer = { ...baseLog, id: "peer", startTime: 2000 };
+  const memory = mergeConnectionLogsWithPendingMutations(
+    [local, baseLog], [peer, baseLog], {}, new Map([[local.id, { log: local, changes: local, added: true }]]),
+  );
+  const persisted = rebaseQueuedConnectionLogs(
+    [local, baseLog], new Set(), new Set([local.id]), memory, [peer, baseLog],
+  );
+  assert.deepEqual(persisted.map((log) => log.id), ["local", "peer", "log-base"]);
+  assert.equal(persisted[0].terminalData, "capture");
+});
+
+test("pending tombstone wins over a stale peer snapshot without deleting peer-only logs", () => {
+  const peer = { ...baseLog, id: "peer" };
+  const merged = mergeConnectionLogsWithPendingMutations(
+    [], [baseLog, peer], {}, new Map([[baseLog.id, { log: null }]]),
+  );
+  assert.deepEqual(merged, [peer]);
+});
+
+test("unrelated pending mutation never resurrects a remotely deleted memory row", () => {
+  const local = { ...baseLog, id: "local", terminalData: "capture" };
+  const deleted = { ...baseLog, id: "remote-deleted", terminalData: "old" };
+  const merged = mergeConnectionLogsWithPendingMutations(
+    [local, deleted], [], {}, new Map([[local.id, { log: local, changes: local, added: true }]]),
+  );
+  assert.deepEqual(merged, [local]);
+});
+
+test("a pending final capture does not resurrect an existing log a peer deleted", () => {
+  const captured = { ...baseLog, terminalData: "final capture" };
+  const merged = mergeConnectionLogsWithPendingMutations(
+    [captured], [], {},
+    new Map([[baseLog.id, { log: captured, changes: { terminalData: "final capture" }, added: false }]]),
+  );
+  assert.deepEqual(merged, []);
+});
+
+test("pending capture preserves a peer bookmark and pending bookmark preserves a peer capture", () => {
+  const captured = { ...baseLog, terminalData: "new capture", endTime: 2000 };
+  const bookmarked = { ...baseLog, saved: true };
+  const captureMerged = mergeConnectionLogsWithPendingMutations(
+    [captured], [bookmarked], {},
+    new Map([[baseLog.id, { log: captured, changes: { terminalData: "new capture", endTime: 2000 } }]]),
+  );
+  assert.equal(captureMerged[0].saved, true);
+  assert.equal(captureMerged[0].terminalData, "new capture");
+  const oldBookmark = { ...bookmarked, terminalData: "old capture" };
+  const bookmarkMerged = mergeConnectionLogsWithPendingMutations(
+    [oldBookmark], [captured], {}, new Map([[baseLog.id, { log: oldBookmark, changes: { saved: true } }]]),
+  );
+  assert.equal(bookmarkMerged[0].saved, true);
+  assert.equal(bookmarkMerged[0].terminalData, "new capture");
+  const sideStoreMerged = mergeConnectionLogsWithPendingMutations(
+    [oldBookmark], [baseLog], { [baseLog.id]: "new capture" },
+    new Map([[baseLog.id, { log: oldBookmark, changes: { saved: true } }]]),
+  );
+  assert.equal(sideStoreMerged[0].terminalData, "new capture");
+});
+
+test("pending replay overlay retains the newest 50 unsaved buffers and all saved buffers", () => {
+  const logs = Array.from({ length: 65 }, (_, i) => ({
+    ...baseLog, id: `log-${i}`, startTime: i, terminalData: `data-${i}`,
+  }));
+  const saved = { ...baseLog, id: "saved", startTime: -1, saved: true, terminalData: "saved data" };
+  const merged = mergeConnectionLogsWithPendingMutations(
+    [], [...logs, saved], {}, new Map(logs.map((log) => [log.id, { log, changes: log }])),
+  );
+  assert.equal(merged.length, 66);
+  assert.equal(merged.filter((log) => !log.saved && log.terminalData).length, 50);
+  assert.equal(merged.find((log) => log.id === "log-14")?.terminalData, undefined);
+  assert.equal(merged.find((log) => log.id === "log-15")?.terminalData, "data-15");
+  assert.equal(merged.find((log) => log.id === "saved")?.terminalData, "saved data");
+});
+
+test("older successful write retires inherited fields but keeps a later capture generation", () => {
+  const first: PendingConnectionLogWrite = {
+    generation: 1, added: true, log: baseLog,
+    changes: { saved: false, terminalData: "first" }, fieldGenerations: { saved: 1, terminalData: 1 },
+  };
+  const later: PendingConnectionLogWrite = {
+    generation: 2, added: true, log: { ...baseLog, terminalData: "final" },
+    changes: { saved: false, terminalData: "final" }, fieldGenerations: { saved: 1, terminalData: 2 },
+  };
+  const pending = acknowledgePendingConnectionLogWrites(
+    new Map([[baseLog.id, later]]), new Map([[baseLog.id, first]]),
+  );
+  assert.deepEqual(pending.get(baseLog.id)?.changes, { terminalData: "final" });
+  assert.equal(pending.get(baseLog.id)?.added, false);
+  const merged = mergeConnectionLogsWithPendingMutations(
+    [later.log!], [{ ...baseLog, saved: true }], {}, pending,
+  );
+  assert.equal(merged[0].saved, true);
+  assert.equal(merged[0].terminalData, "final");
+});
+
+test("older successful capture cannot acknowledge a newer pending deletion", () => {
+  const first: PendingConnectionLogWrite = { generation: 1, log: baseLog };
+  const deleted: PendingConnectionLogWrite = { generation: 2, log: null };
+  const pending = acknowledgePendingConnectionLogWrites(
+    new Map([[baseLog.id, deleted]]), new Map([[baseLog.id, first]]),
+  );
+  assert.equal(pending.get(baseLog.id), deleted);
+  assert.equal(acknowledgePendingConnectionLogWrites(pending, pending).size, 0);
+});
+
+test("acknowledging one commit retains another failed or newer pending id for retry", () => {
+  const first: PendingConnectionLogWrite = { generation: 1, log: baseLog };
+  const retry: PendingConnectionLogWrite = { generation: 2, added: true, log: { ...baseLog, id: "retry" } };
+  const pending = acknowledgePendingConnectionLogWrites(
+    new Map([[baseLog.id, first], ["retry", retry]]), new Map([[baseLog.id, first]]),
+  );
+  assert.deepEqual([...pending.keys()], ["retry"]);
+  assert.equal(mergeConnectionLogsWithPendingMutations([], [], {}, pending)[0].id, "retry");
+});
 
 test("selectConnectionLogForTerminalDataCapture picks the active log for a normal session exit", () => {
   const matchingLog = { ...baseLog, id: "active", startTime: 2000 };
