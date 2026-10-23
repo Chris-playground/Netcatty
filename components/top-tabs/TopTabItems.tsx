@@ -26,7 +26,7 @@ import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
 import { DISTRO_LOGOS, DISTRO_COLORS } from '../DistroAvatar';
 import { getShellIconPath, isMonochromeShellIcon } from '../../lib/useDiscoveredShells';
-import { handleTabCloseButtonMouseDown, handleTabMiddleClickClose, handleTabMiddleMouseDown } from '../../lib/tabInteractions';
+import { handleTabCloseButtonMouseDown, handleTabDragThresholdDragStart, handleTabDragThresholdMouseDown, handleTabDragThresholdReset, handleTabMiddleClickClose } from '../../lib/tabInteractions';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SessionTabContextMenuContent } from './SessionTabContextMenuContent';
@@ -527,11 +527,18 @@ export const PluginViewTopTab: React.FC<PluginViewTopTabProps> = memo(({
           data-state={isActive ? 'active' : 'inactive'}
           data-active={topTabActiveValue(isActive)}
           onClick={() => activeTabStore.setActiveTabId(tab.id)}
-          onMouseDown={handleTabMiddleMouseDown}
+          onMouseDown={handleTabDragThresholdMouseDown}
+          onMouseUp={handleTabDragThresholdReset}
           onAuxClick={(event) => handleTabMiddleClickClose(event, close)}
           draggable
-          onDragStart={(event) => onTabDragStart(event, tab.id)}
-          onDragEnd={onTabDragEnd}
+          onDragStart={(event) => {
+            if (handleTabDragThresholdDragStart(event)) return;
+            onTabDragStart(event, tab.id);
+          }}
+          onDragEnd={() => {
+            handleTabDragThresholdReset();
+            onTabDragEnd();
+          }}
           onDragOver={(event) => onTabDragOver(event, tab.id)}
           onDragLeave={onTabDragLeave}
           onDrop={(event) => onTabDrop(event, tab.id)}
@@ -648,11 +655,18 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
           data-state={isActive ? 'active' : 'inactive'}
           data-active={topTabActiveValue(isActive)}
           onClick={handleClick}
-          onMouseDown={handleTabMiddleMouseDown}
+          onMouseDown={handleTabDragThresholdMouseDown}
+          onMouseUp={handleTabDragThresholdReset}
           onAuxClick={(e) => handleTabMiddleClickClose(e, () => onRequestCloseEditorTab(editorTab.id))}
           draggable
-          onDragStart={(e) => onTabDragStart(e, tabId)}
-          onDragEnd={onTabDragEnd}
+          onDragStart={(event) => {
+            if (handleTabDragThresholdDragStart(event)) return;
+            onTabDragStart(event, tabId);
+          }}
+          onDragEnd={() => {
+            handleTabDragThresholdReset();
+            onTabDragEnd();
+          }}
           onDragOver={(e) => onTabDragOver(e, tabId)}
           onDragLeave={onTabDragLeave}
           onDrop={(e) => onTabDrop(e, tabId)}
@@ -825,11 +839,18 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
       data-active={topTabActiveValue(isActive)}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      onMouseDown={handleTabMiddleMouseDown}
+      onMouseDown={handleTabDragThresholdMouseDown}
+      onMouseUp={handleTabDragThresholdReset}
       onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseSession(session.id))}
       draggable
-      onDragStart={(e) => onTabDragStart(e, session.id)}
-      onDragEnd={onTabDragEnd}
+      onDragStart={(event) => {
+        if (handleTabDragThresholdDragStart(event)) return;
+        onTabDragStart(event, session.id);
+      }}
+      onDragEnd={() => {
+        handleTabDragThresholdReset();
+        onTabDragEnd();
+      }}
       onDragOver={(e) => onTabDragOver(e, session.id)}
       onDragLeave={onTabDragLeave}
       onDrop={(e) => onTabDrop(e, session.id)}
@@ -1030,11 +1051,18 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           data-host-drop-active={isHostDropTarget ? 'true' : 'false'}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
-          onMouseDown={handleTabMiddleMouseDown}
+          onMouseDown={handleTabDragThresholdMouseDown}
+          onMouseUp={handleTabDragThresholdReset}
           onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseWorkspace(workspace.id))}
           draggable
-          onDragStart={(e) => onTabDragStart(e, workspace.id)}
-          onDragEnd={onTabDragEnd}
+          onDragStart={(event) => {
+            if (handleTabDragThresholdDragStart(event)) return;
+            onTabDragStart(event, workspace.id);
+          }}
+          onDragEnd={() => {
+            handleTabDragThresholdReset();
+            onTabDragEnd();
+          }}
           onDragOver={(e) => onTabDragOver(e, workspace.id)}
           onDragLeave={onTabDragLeave}
           onDrop={(e) => onTabDrop(e, workspace.id)}
@@ -1177,11 +1205,18 @@ export const LogViewTopTab: React.FC<LogViewTopTabProps> = memo(({
       data-state={isActive ? 'active' : 'inactive'}
       data-active={topTabActiveValue(isActive)}
       onClick={handleClick}
-      onMouseDown={handleTabMiddleMouseDown}
+      onMouseDown={handleTabDragThresholdMouseDown}
+      onMouseUp={handleTabDragThresholdReset}
       onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseLogView(logView.id))}
       draggable
-      onDragStart={(e) => onTabDragStart(e, logView.id)}
-      onDragEnd={onTabDragEnd}
+      onDragStart={(event) => {
+        if (handleTabDragThresholdDragStart(event)) return;
+        onTabDragStart(event, logView.id);
+      }}
+      onDragEnd={() => {
+        handleTabDragThresholdReset();
+        onTabDragEnd();
+      }}
       onDragOver={(e) => onTabDragOver(e, logView.id)}
       onDragLeave={onTabDragLeave}
       onDrop={(e) => onTabDrop(e, logView.id)}

@@ -33,6 +33,49 @@ export const handleTabCloseButtonMouseDown = (e: React.MouseEvent): void => {
 };
 
 /**
+ * Pointer travel below this is a click, not a tab reorder. Chromium can fire
+ * `dragstart` after about 2px on a `draggable` tab and cancel the click that
+ * would activate it (#3886).
+ */
+export const TAB_DRAG_THRESHOLD_PX = 4;
+
+let tabDragOrigin: { x: number; y: number } | null = null;
+
+/**
+ * Record a primary-button press on a draggable tab root, and keep middle-click
+ * autoscroll suppression. Wire to the tab root `onMouseDown`. Non-primary
+ * buttons are not tracked, so they cannot cancel a later drag.
+ */
+export const handleTabDragThresholdMouseDown = (e: React.MouseEvent): void => {
+  handleTabMiddleMouseDown(e);
+  if (e.button !== 0) return;
+  tabDragOrigin = { x: e.clientX, y: e.clientY };
+};
+
+/**
+ * Cancel `dragstart` when the pointer has not moved far enough to reorder the
+ * tab, so the subsequent click still activates it. Returns true when the drag
+ * was cancelled. At or above the threshold, returns false and leaves the event
+ * alone for `onTabDragStart`.
+ */
+export const handleTabDragThresholdDragStart = (e: React.DragEvent): boolean => {
+  const origin = tabDragOrigin;
+  tabDragOrigin = null;
+  if (!origin) return false;
+  const distance = Math.hypot(e.clientX - origin.x, e.clientY - origin.y);
+  if (distance < TAB_DRAG_THRESHOLD_PX) {
+    e.preventDefault();
+    return true;
+  }
+  return false;
+};
+
+/** Drop a tracked press on mouseup or dragend so the next gesture starts clean. */
+export const handleTabDragThresholdReset = (): void => {
+  tabDragOrigin = null;
+};
+
+/**
  * Close a tab when it is middle-clicked. Wire to `onAuxClick`, which fires for
  * a completed non-primary click. Left clicks (tab activation) and right clicks
  * (context menu) are ignored so existing behavior is untouched.
