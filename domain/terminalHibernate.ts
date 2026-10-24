@@ -160,48 +160,63 @@ export function shouldSkipHibernateForAltScreen(
 
 export type HiddenTabKeepCountDecision = {
   /**
-   * Soft-hide the session that just left only when the keep set has room, or
-   * when one older session was actually evicted. Otherwise full-hibernate.
+   * Soft-hide immediately when the keep set has room. Await eviction when it
+   * is full. Full-hibernate when keepCount is 0 or no other candidate exists.
+   * Soft-hide after a full set is decided by resolveHiddenTabEviction, only
+   * once a victim's hibernate has completed.
    */
-  action: "soft-hide" | "full-hibernate";
-  /** Soft-hidden session whose eviction succeeded, when the keep set was full. */
-  evictSessionId: string | null;
+  action: "soft-hide" | "full-hibernate" | "await-eviction";
+  /** Oldest-first victims to try when action is await-eviction. */
+  candidates: readonly string[];
 };
 
 /**
  * Keep-count policy for a hidden session that is not already soft-hidden.
  * Callers still handle alternate screen, inline images, and a soft-hidden
  * session that later disconnects before asking. keepCount 0 (disconnected, or
- * the setting) full-hibernates. When the soft-hide set is full, walk
- * candidates oldest-first and soft-hide the leaving session only after
- * `evict` reports success. A refusal (inline images stay soft-hidden) tries
- * the next candidate. If none can leave, the leaving session is fully
- * hibernated so protected renderers cannot grow the set without bound.
- * Wake replay order stays in resolveHibernateWakeHistory (#2762). Atlas
- * clear on a soft wake stays in wakeSoftHiddenRuntime (#1063).
+ * the setting) full-hibernates. When the soft-hide set is full this only
+ * lists candidates. It does not evict: waking a victim clears its marker
+ * before fullHibernateRuntime finishes, so success has to be awaited outside
+ * this helper. Wake replay order stays in resolveHibernateWakeHistory (#2762).
+ * Atlas clear on a soft wake stays in wakeSoftHiddenRuntime (#1063).
  */
 export function decideHiddenTabKeepCountAction(input: {
   keepCount: number;
   softHiddenCount: number;
   sessionId: string;
-  /** Oldest soft-hidden session first. Snapshot this before evict mutates it. */
+  /** Oldest soft-hidden session first. Snapshot this before eviction mutates it. */
   candidatesOldestFirst: readonly string[];
-  /** True only when that session actually left the soft-hidden set. */
-  evict: (sessionId: string) => boolean;
 }): HiddenTabKeepCountDecision {
   if (!(input.keepCount > 0)) {
-    return { action: "full-hibernate", evictSessionId: null };
+    return { action: "full-hibernate", candidates: [] };
   }
   if (input.softHiddenCount < input.keepCount) {
-    return { action: "soft-hide", evictSessionId: null };
+    return { action: "soft-hide", candidates: [] };
   }
-  for (const candidate of input.candidatesOldestFirst) {
-    if (!candidate || candidate === input.sessionId) continue;
-    if (input.evict(candidate)) {
-      return { action: "soft-hide", evictSessionId: candidate };
-    }
+  const candidates = input.candidatesOldestFirst.filter((candidate) => (
+    Boolean(candidate) && candidate !== input.sessionId
+  ));
+  if (candidates.length === 0) {
+    return { action: "full-hibernate", candidates: [] };
   }
-  return { action: "full-hibernate", evictSessionId: null };
+  return { action: "await-eviction", candidates };
+}
+
+/**
+ * Walk eviction candidates until one hibernate actually completes.
+ * `evict` resolves true only after that session is fully hibernated, not when
+ * its soft-hidden marker drops at the start of the attempt. A refusal or a
+ * later failure tries the next candidate. None completed means the leaving
+ * session itself must full-hibernate.
+ */
+export async function resolveHiddenTabEviction(input: {
+  candidates: readonly string[];
+  evict: (sessionId: string) => Promise<boolean> | boolean;
+}): Promise<"soft-hide" | "full-hibernate"> {
+  for (const candidate of input.candidates) {
+    if (await input.evict(candidate)) return "soft-hide";
+  }
+  return "full-hibernate";
 }
 
 /** Snapshot + buffered output to replay when recreating xterm after hibernate. */

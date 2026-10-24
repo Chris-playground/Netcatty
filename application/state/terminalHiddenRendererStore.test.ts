@@ -14,7 +14,7 @@ test("terminalHiddenRendererStore evicts oldest soft-hidden session", () => {
   terminalHiddenRendererStore.clearSoftHidden("b");
 });
 
-test("evictSoftHidden reports refusal and drops an unconsumed request", () => {
+test("evictSoftHidden reports refusal and drops an unconsumed request", async () => {
   const sessions = ["images", "plain", "other"];
   for (const sessionId of sessions) terminalHiddenRendererStore.clearSoftHidden(sessionId);
   terminalHiddenRendererStore.markSoftHidden("images");
@@ -24,13 +24,14 @@ test("evictSoftHidden reports refusal and drops an unconsumed request", () => {
     if (terminalHiddenRendererStore.consumeEvictionRequest("images")) return;
     if (terminalHiddenRendererStore.consumeEvictionRequest("plain")) {
       terminalHiddenRendererStore.clearSoftHidden("plain");
+      terminalHiddenRendererStore.settleEviction("plain", true);
     }
   });
 
   try {
-    assert.equal(terminalHiddenRendererStore.evictSoftHidden("images"), false);
+    assert.equal(await terminalHiddenRendererStore.evictSoftHidden("images"), false);
     assert.equal(terminalHiddenRendererStore.isSoftHidden("images"), true);
-    assert.equal(terminalHiddenRendererStore.evictSoftHidden("plain"), true);
+    assert.equal(await terminalHiddenRendererStore.evictSoftHidden("plain"), true);
     assert.equal(terminalHiddenRendererStore.isSoftHidden("plain"), false);
   } finally {
     unsubscribe();
@@ -38,7 +39,7 @@ test("evictSoftHidden reports refusal and drops an unconsumed request", () => {
   }
 
   terminalHiddenRendererStore.markSoftHidden("images");
-  assert.equal(terminalHiddenRendererStore.evictSoftHidden("images"), false);
+  assert.equal(await terminalHiddenRendererStore.evictSoftHidden("images"), false);
   const delivered: string[] = [];
   const later = terminalHiddenRendererStore.subscribe(() => {
     if (terminalHiddenRendererStore.consumeEvictionRequest("images")) delivered.push("images");
@@ -50,5 +51,30 @@ test("evictSoftHidden reports refusal and drops an unconsumed request", () => {
   } finally {
     later();
     for (const sessionId of sessions) terminalHiddenRendererStore.clearSoftHidden(sessionId);
+  }
+});
+
+test("evictSoftHidden waits for hibernate after the marker is cleared", async () => {
+  terminalHiddenRendererStore.clearSoftHidden("victim");
+  terminalHiddenRendererStore.markSoftHidden("victim");
+  let markerClearedBeforeSettle = false;
+  const unsubscribe = terminalHiddenRendererStore.subscribe(() => {
+    if (!terminalHiddenRendererStore.consumeEvictionRequest("victim")) return;
+    terminalHiddenRendererStore.clearSoftHidden("victim");
+    markerClearedBeforeSettle = !terminalHiddenRendererStore.isSoftHidden("victim");
+    queueMicrotask(() => {
+      terminalHiddenRendererStore.markSoftHidden("victim");
+      terminalHiddenRendererStore.settleEviction("victim", false);
+    });
+  });
+
+  try {
+    const completed = await terminalHiddenRendererStore.evictSoftHidden("victim");
+    assert.equal(markerClearedBeforeSettle, true);
+    assert.equal(completed, false);
+    assert.equal(terminalHiddenRendererStore.isSoftHidden("victim"), true);
+  } finally {
+    unsubscribe();
+    terminalHiddenRendererStore.clearSoftHidden("victim");
   }
 });

@@ -296,6 +296,9 @@ test("a full keep count soft-hides the leaving session instead of snapshotting i
   assert.ok(alternateGate !== -1 && alternateGate < imageGate);
   assert.ok(imageGate !== -1 && imageGate < decision);
   assert.ok(decision < softHide && softHide < hide && hide < full);
+  const awaited = body.indexOf("resolveHiddenTabEviction({");
+  const awaitedHide = body.indexOf("hideRuntimeOnly();", body.indexOf(".then((action) => {"));
+  assert.ok(awaited > decision && awaited < awaitedHide);
   assert.match(body, /evict: \(victim\) => terminalHiddenRendererStore\.evictSoftHidden\(victim\)/);
   assert.doesNotMatch(body, /requestEviction\(keepDecision/);
   assert.match(

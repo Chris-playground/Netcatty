@@ -4,6 +4,23 @@ const softHiddenSessions = new Map<string, number>();
 const listeners = new Set<Listener>();
 let evictionRequestSessionId: string | null = null;
 
+type EvictionWaiter = {
+  promise: Promise<boolean>;
+  resolve: (completed: boolean) => void;
+  settled: boolean;
+};
+
+const evictionWaiters = new Map<string, EvictionWaiter>();
+
+function finishEviction(sessionId: string, completed: boolean): void {
+  const waiter = evictionWaiters.get(sessionId);
+  if (!waiter || waiter.settled) return;
+  waiter.settled = true;
+  evictionWaiters.delete(sessionId);
+  if (evictionRequestSessionId === sessionId) evictionRequestSessionId = null;
+  waiter.resolve(completed);
+}
+
 function emit(): void {
   listeners.forEach((listener) => listener());
 }
@@ -42,19 +59,42 @@ export const terminalHiddenRendererStore = {
     emit();
   },
 
+  /** True while this session's hibernate has been requested and not settled. */
+  hasPendingEviction: (sessionId: string): boolean => {
+    const waiter = evictionWaiters.get(sessionId);
+    return waiter != null && !waiter.settled;
+  },
+
   /**
-   * Ask one soft-hidden session to upgrade. True only when it left the set
-   * during the synchronous listener pass. A refusal, or a session with no
-   * listener, leaves it soft-hidden and drops the request so a later emit
-   * cannot upgrade it after the caller has moved on.
+   * Ask one soft-hidden session to upgrade. Resolves true only when
+   * settleEviction reports that hibernation finished. Clearing the marker
+   * during wake is not success: drain, snapshot, or alternate-screen failure
+   * can still restore that renderer. A synchronous refusal (marker still
+   * present, including inline images) resolves false and drops an unconsumed
+   * request so a later emit cannot upgrade it.
    */
-  evictSoftHidden: (sessionId: string): boolean => {
-    if (!softHiddenSessions.has(sessionId)) return false;
+  evictSoftHidden: (sessionId: string): Promise<boolean> => {
+    const existing = evictionWaiters.get(sessionId);
+    if (existing) return existing.promise;
+    if (!softHiddenSessions.has(sessionId)) return Promise.resolve(false);
+
+    let resolvePromise!: (completed: boolean) => void;
+    const promise = new Promise<boolean>((resolve) => {
+      resolvePromise = resolve;
+    });
+    const waiter: EvictionWaiter = { promise, resolve: resolvePromise, settled: false };
+    evictionWaiters.set(sessionId, waiter);
     evictionRequestSessionId = sessionId;
     emit();
-    if (!softHiddenSessions.has(sessionId)) return true;
-    if (evictionRequestSessionId === sessionId) evictionRequestSessionId = null;
-    return false;
+    if (!waiter.settled && softHiddenSessions.has(sessionId)) {
+      finishEviction(sessionId, false);
+    }
+    return promise;
+  },
+
+  /** Record whether the in-flight eviction's hibernate actually completed. */
+  settleEviction: (sessionId: string, completed: boolean) => {
+    finishEviction(sessionId, completed);
   },
 
   consumeEvictionRequest: (sessionId: string): boolean => {
