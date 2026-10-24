@@ -282,3 +282,22 @@ test("snapshot and handoff paths reject output that misses the settle deadline",
     /const flushed = await flushPendingTerminalWritesBeforeHibernate\(snapshotTerm\);\s*if \(!flushed\) \{\s*throw new Error\("Terminal output did not settle before closing the attached display"\);\s*\}/,
   );
 });
+
+test("a full keep count soft-hides the leaving session instead of snapshotting it", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const body = readFunctionBody(source, "const hibernateRuntime = useCallback(() =>");
+  const imageGate = body.indexOf("if (runtimeHasInlineImages()) {");
+  const alternateGate = body.indexOf("shouldSkipHibernateForActiveAlternateScreen(termRef.current)");
+  const decision = body.indexOf("decideHiddenTabKeepCountAction(");
+  const softHide = body.indexOf('if (keepDecision.action === "soft-hide")');
+  const hide = body.indexOf("hideRuntimeOnly();", softHide);
+  const full = body.indexOf("void fullHibernateRuntime()");
+
+  assert.ok(alternateGate !== -1 && alternateGate < imageGate);
+  assert.ok(imageGate !== -1 && imageGate < decision);
+  assert.ok(decision < softHide && softHide < hide && hide < full);
+  assert.match(
+    body,
+    /if \(softHiddenRef\.current\) \{\s*if \(statusRef\.current === "disconnected"\) \{\s*upgradeSoftHiddenRuntimeToHibernate\(\);\s*\}\s*return;\s*\}/,
+  );
+});

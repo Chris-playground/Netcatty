@@ -158,6 +158,42 @@ export function shouldSkipHibernateForAltScreen(
   return alternateScreen && resolveHibernateSkipAltScreen(settings);
 }
 
+export type HiddenTabKeepCountDecision = {
+  /** Soft-hide the session that just left. Full hibernate only when keepCount is 0. */
+  action: "soft-hide" | "full-hibernate";
+  /** Oldest soft-hidden session to upgrade, when the keep set is already full. */
+  evictSessionId: string | null;
+};
+
+/**
+ * Keep-count policy for a hidden session that is not already soft-hidden.
+ * Callers still handle alternate screen, inline images, and a soft-hidden
+ * session that later disconnects before asking. keepCount 0 (disconnected, or
+ * the setting) full-hibernates. When the soft-hide set is full, the oldest
+ * session is evicted and the session that just left stays soft-hidden, so
+ * switching back is a WebGL wake. Wake replay order stays in
+ * resolveHibernateWakeHistory (#2762). Atlas clear on that wake stays in
+ * wakeSoftHiddenRuntime (#1063).
+ */
+export function decideHiddenTabKeepCountAction(input: {
+  keepCount: number;
+  softHiddenCount: number;
+  sessionId: string;
+  oldestSoftHiddenId: string | null;
+}): HiddenTabKeepCountDecision {
+  if (input.keepCount > 0 && input.softHiddenCount < input.keepCount) {
+    return { action: "soft-hide", evictSessionId: null };
+  }
+  if (input.keepCount > 0) {
+    const victim = input.oldestSoftHiddenId;
+    return {
+      action: "soft-hide",
+      evictSessionId: victim && victim !== input.sessionId ? victim : null,
+    };
+  }
+  return { action: "full-hibernate", evictSessionId: null };
+}
+
 /** Snapshot + buffered output to replay when recreating xterm after hibernate. */
 export type TerminalHibernateWakePayload = {
   /** Full serialized terminal state -- preferred wake history (coherent ANSI). */

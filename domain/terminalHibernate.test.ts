@@ -6,6 +6,7 @@ import {
   canHibernateTerminalRuntimeStatus,
   capHibernateBuffer,
   capHibernateBufferByLines,
+  decideHiddenTabKeepCountAction,
   isTerminalFileTransferActive,
   normalizeHibernateHiddenTabsDelaySec,
   resolveTerminalHibernateDelayMs,
@@ -90,6 +91,47 @@ test("normalizeHibernateHiddenTabsDelaySec clamps to the allowed range", () => {
   assert.equal(normalizeHibernateHiddenTabsDelaySec(45), 45);
   assert.equal(normalizeHibernateHiddenTabsDelaySec(1), TERMINAL_HIBERNATE_DELAY_SEC_MIN);
   assert.equal(normalizeHibernateHiddenTabsDelaySec(9999), TERMINAL_HIBERNATE_DELAY_SEC_MAX);
+});
+
+test("a full keep-count soft-hides the tab that just left and evicts the oldest", () => {
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 2,
+    softHiddenCount: 1,
+    sessionId: "leaving",
+    oldestSoftHiddenId: "older",
+  }), { action: "soft-hide", evictSessionId: null });
+
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 2,
+    softHiddenCount: 2,
+    sessionId: "leaving",
+    oldestSoftHiddenId: "oldest",
+  }), { action: "soft-hide", evictSessionId: "oldest" });
+
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 2,
+    softHiddenCount: 3,
+    sessionId: "leaving",
+    oldestSoftHiddenId: "oldest",
+  }), { action: "soft-hide", evictSessionId: "oldest" });
+});
+
+test("keep-count zero still full-hibernates and does not evict", () => {
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 0,
+    softHiddenCount: 4,
+    sessionId: "leaving",
+    oldestSoftHiddenId: "oldest",
+  }), { action: "full-hibernate", evictSessionId: null });
+});
+
+test("a full keep-count does not evict the session that is deciding", () => {
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 2,
+    softHiddenCount: 2,
+    sessionId: "leaving",
+    oldestSoftHiddenId: "leaving",
+  }), { action: "soft-hide", evictSessionId: null });
 });
 
 test("resolveTerminalHibernateDelayMs converts seconds to milliseconds", () => {

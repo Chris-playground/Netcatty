@@ -243,6 +243,7 @@ import {
 import {
   canHibernateTerminalRuntimeSession,
   canHibernateTerminalRuntimeStatus,
+  decideHiddenTabKeepCountAction,
   isTerminalFileTransferActive,
   resolveHibernateKeepRendererCount,
   resolveHibernatePreferWasmSerialize,
@@ -2343,16 +2344,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const keepCount = statusRef.current === "connected"
       ? resolveHibernateKeepRendererCount(terminalSettings)
       : 0;
-    if (keepCount > 0 && terminalHiddenRendererStore.getSoftHiddenCount() < keepCount) {
+    const keepDecision = decideHiddenTabKeepCountAction({
+      keepCount,
+      softHiddenCount: terminalHiddenRendererStore.getSoftHiddenCount(),
+      sessionId,
+      oldestSoftHiddenId: keepCount > 0
+        ? terminalHiddenRendererStore.pickEvictionCandidate(keepCount)
+        : null,
+    });
+    if (keepDecision.evictSessionId) {
+      terminalHiddenRendererStore.requestEviction(keepDecision.evictSessionId);
+    }
+    if (keepDecision.action === "soft-hide") {
       hideRuntimeOnly();
       return;
-    }
-
-    if (keepCount > 0) {
-      const victim = terminalHiddenRendererStore.pickEvictionCandidate(keepCount);
-      if (victim && victim !== sessionId) {
-        terminalHiddenRendererStore.requestEviction(victim);
-      }
     }
 
     void fullHibernateRuntime();
