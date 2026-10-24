@@ -224,6 +224,102 @@ test("telnet auto-login stops when the user starts typing manually", () => {
   assert.equal(cancelCount, 1);
 });
 
+test("telnet auto-login stays armed when a wake-only enter arrives before any login prompt", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  // Silent serial consoles need a bare CR to wake getty before "login:" appears.
+  autoLogin.handleUserInput("\r");
+  autoLogin.handleText("login: ");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 0);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+});
+
+test("telnet auto-login treats a bare newline as a wake and still autofills", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  autoLogin.handleUserInput("\n");
+  autoLogin.handleUserInput("\r\n");
+  autoLogin.handleText("login: ");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 0);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+});
+
+test("telnet auto-login still cancels when a normal character arrives before login", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  autoLogin.handleUserInput("x");
+  autoLogin.handleText("login: ");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(writes, []);
+});
+
+test("telnet auto-login still cancels an enter after credentials have started", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  autoLogin.handleText("login: ");
+  autoLogin.handleUserInput("\r");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(writes, ["admin\r"]);
+});
+
+test("telnet auto-login still cancels an enter when a login prompt is already in the tail", () => {
+  let clock = 0;
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    now: () => clock,
+    timeoutMs: 60_000,
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  // After the window, the prompt is recorded but credentials are not sent.
+  clock = 60_001;
+  autoLogin.handleText("login: ");
+  autoLogin.handleUserInput("\r");
+
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(writes, []);
+});
+
 test("telnet auto-login avoids common non-prompt login text", () => {
   const writes = [];
   const autoLogin = createTelnetAutoLogin({

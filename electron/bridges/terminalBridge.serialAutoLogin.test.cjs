@@ -1,6 +1,32 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const terminalBridge = require("./terminalBridge.cjs");
+const { createTelnetAutoLogin } = require("./telnetAutoLogin.cjs");
+
+function createSerialAutoLoginSession() {
+  const writes = [];
+  const events = [];
+  const session = {
+    type: "serial",
+    protocol: "serial",
+    encoding: "utf-8",
+    serialPort: {
+      write: (data) => {
+        writes.push(typeof data === "string" ? data : Buffer.from(data).toString());
+        return true;
+      },
+    },
+  };
+  session.autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => {
+      session.serialPort.write(data);
+    },
+    onUserInput: () => { events.push("cancelled"); },
+  });
+  return { session, writes, events };
+}
 
 test("serial auto-login cancels on interactive user input but not automated writes", () => {
   let userInputs = 0;
@@ -56,6 +82,87 @@ test("serial line-mode buffered input notification cancels auto-login", () => {
     // Unknown sessions are ignored.
     terminalBridge.notifySessionUserInput({}, { sessionId: "missing" });
     assert.equal(userInputs, 1);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
+test("serial wake-only enter keeps auto-login armed and still reaches the port", () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  terminalBridge.init({ sessions: new Map([["s", session]]), electronModule: {} });
+  try {
+    terminalBridge.writeToSession({}, { sessionId: "s", data: "\r" });
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["\r"]);
+
+    session.autoLogin.handleText("login: ");
+    session.autoLogin.handleText("\r\nPassword: ");
+
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["\r", "admin\r", "secret\r"]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
+test("serial character input before login still cancels auto-login", () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  terminalBridge.init({ sessions: new Map([["s", session]]), electronModule: {} });
+  try {
+    terminalBridge.writeToSession({}, { sessionId: "s", data: "x" });
+    session.autoLogin.handleText("login: ");
+    session.autoLogin.handleText("\r\nPassword: ");
+
+    assert.deepEqual(events, ["cancelled"]);
+    assert.deepEqual(writes, ["x"]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
+test("serial wake-only enter stays armed when an input interceptor is pending", async () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  let interceptorResolved = false;
+  terminalBridge.init({
+    sessions: new Map([["s", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has: () => true,
+      interceptInput: async (sessionId, data) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        interceptorResolved = true;
+        return data;
+      },
+    },
+  });
+  try {
+    terminalBridge.writeToSession({}, { sessionId: "s", data: "\n" });
+    assert.deepEqual(events, []);
+    assert.equal(interceptorResolved, false);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(interceptorResolved, true);
+    assert.deepEqual(writes, ["\n"]);
+
+    session.autoLogin.handleText("login: ");
+    session.autoLogin.handleText("\r\nPassword: ");
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["\n", "admin\r", "secret\r"]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
+test("serial line-mode notification still cancels auto-login without keystroke data", () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  terminalBridge.init({ sessions: new Map([["s", session]]), electronModule: {} });
+  try {
+    terminalBridge.notifySessionUserInput({}, { sessionId: "s" });
+    session.autoLogin.handleText("login: ");
+    session.autoLogin.handleText("\r\nPassword: ");
+
+    assert.deepEqual(events, ["cancelled"]);
+    assert.deepEqual(writes, []);
   } finally {
     terminalBridge.cleanupAllSessions();
   }

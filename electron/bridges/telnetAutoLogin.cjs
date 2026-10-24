@@ -207,7 +207,21 @@ function createTelnetAutoLogin(options = {}) {
         notifyIncomplete();
       }
     },
-    handleUserInput() {
+    // Silent serial consoles need a bare CR/LF to wake getty before "login:"
+    // appears. That wake is not a takeover: keep autofill armed and leave the
+    // caller's write on the port. Any other user input still cancels.
+    handleUserInput(data) {
+      const wakeOnly = typeof data === "string" && /^[\r\n]+$/.test(data);
+      if (
+        wakeOnly
+        && !sentUsername
+        && !sentPassword
+        && !isUsernamePrompt(tail)
+        && !isPasswordPrompt(tail)
+      ) {
+        sentWake = true;
+        return;
+      }
       disabled = true;
       clearExpiryTimer();
       notifyUserInput();
