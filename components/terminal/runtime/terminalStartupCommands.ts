@@ -6,27 +6,50 @@ import type { TerminalSessionStartersContext } from "./createTerminalSessionStar
 /**
  * Host startup is scheduled only after the shell attaches. Restored SSH panes
  * boot from the session fallback first; vault hydration (including group
- * defaults) replaces `hostRef` while that dial is still in flight. The boot
- * snapshot (`ctx.host`) keeps the credentials used to dial, but the SSH
- * command must come from the host that is current at attach time.
+ * defaults) replaces `hostRef` while that dial is still in flight. `startSSH`
+ * keeps dialing the boot snapshot (`ctx.host`). The startup command may come
+ * from the live host only when that object is still this dial: same id,
+ * hostname, username, and dial port (`port || 22`), and the same protocol
+ * when the live host sets one. A missing protocol is a legacy SSH host.
+ * A saved host edited onto another endpoint since the workspace was saved
+ * keeps the snapshot, so its command is not typed into the old session.
  *
  * Serial preflight uses this same resolver to decide whether to wait for
- * auto-login, then schedules again after the port opens. A command that shows
- * up on `hostRef` only during that open stays on the snapshot, so it is not
- * typed into the saved username/password exchange. Other non-SSH transports
- * keep that snapshot too, so preflight and schedule stay on the same host.
- * A missing protocol is a legacy SSH host. A ref that only carries a
- * write-path toggle (no id) is not a host snapshot. A different host id is a
- * later pane, not this dial, so keep the snapshot.
+ * auto-login, then schedules again after the port opens. Non-SSH transports
+ * stay on the snapshot, so a command that appears on `hostRef` during the
+ * open is not typed into a saved username/password exchange.
+ * A ref that only carries a write-path toggle (no id) is not a host snapshot.
+ * A different host id is a later pane, not this dial, so keep the snapshot.
  */
 const prefersLiveStartupHost = (protocol: string | undefined): boolean =>
   protocol === "ssh" || protocol === undefined;
+
+const sshDialPort = (port: number | undefined): number => port || 22;
+
+const sameSshDialTarget = (
+  dial: TerminalSessionStartersContext["host"],
+  live: TerminalSessionStartersContext["host"],
+): boolean => {
+  if (live.hostname !== dial.hostname) return false;
+  if ((live.username ?? "") !== (dial.username ?? "")) return false;
+  if (sshDialPort(live.port) !== sshDialPort(dial.port)) return false;
+  // A live protocol, when set, must still be the protocol this dial used.
+  if (live.protocol !== undefined && live.protocol !== (dial.protocol || "ssh")) return false;
+  return true;
+};
 
 const resolveStartupHost = (
   ctx: TerminalSessionStartersContext,
 ): TerminalSessionStartersContext["host"] => {
   const live = ctx.hostRef?.current;
-  if (prefersLiveStartupHost(ctx.host.protocol) && live && live.id === ctx.host.id) return live;
+  if (
+    prefersLiveStartupHost(ctx.host.protocol)
+    && live
+    && live.id === ctx.host.id
+    && sameSshDialTarget(ctx.host, live)
+  ) {
+    return live;
+  }
   return ctx.host;
 };
 
