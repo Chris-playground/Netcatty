@@ -3,6 +3,17 @@ type Listener = () => void;
 const softHiddenSessions = new Map<string, number>();
 const listeners = new Set<Listener>();
 let evictionRequestSessionId: string | null = null;
+/** Leaving tabs that have claimed a keep slot while a victim hibernate is in flight. */
+const reservedLeavingSlots = new Map<string, number>();
+let reservationToken = 0;
+
+function reservedLeavingCount(): number {
+  let extra = 0;
+  for (const sessionId of reservedLeavingSlots.keys()) {
+    if (!softHiddenSessions.has(sessionId)) extra += 1;
+  }
+  return extra;
+}
 
 type EvictionWaiter = {
   promise: Promise<boolean>;
@@ -33,6 +44,43 @@ function listSoftHiddenOldestFirst(): string[] {
 
 export const terminalHiddenRendererStore = {
   getSoftHiddenCount: () => softHiddenSessions.size,
+
+  /**
+   * Soft-hidden markers plus leaving tabs that reserved a slot and are not
+   * yet in the marker set. Keep-count decisions use this so a second timer
+   * cannot take the slot a pending eviction already claimed.
+   */
+  getSoftHiddenOccupancy: () => softHiddenSessions.size + reservedLeavingCount(),
+
+  /**
+   * Claim one keep slot for a leaving tab before awaiting eviction.
+   * A session already in the marker set is not counted twice. A later claim
+   * for the same id replaces the token; only that token can release it.
+   */
+  reserveLeavingSlot: (sessionId: string): number => {
+    const token = ++reservationToken;
+    if (sessionId && !softHiddenSessions.has(sessionId)) {
+      reservedLeavingSlots.set(sessionId, token);
+    }
+    return token;
+  },
+
+  releaseLeavingSlot: (sessionId: string, token: number) => {
+    if (reservedLeavingSlots.get(sessionId) === token) {
+      reservedLeavingSlots.delete(sessionId);
+    }
+  },
+
+  /**
+   * True when retaining this leaving tab would stay within keepCount.
+   * Its own reservation is not counted against the slots held by others.
+   */
+  leavingSlotStillFits: (sessionId: string, keepCount: number): boolean => {
+    if (!(keepCount > 0)) return false;
+    const reservedHere = reservedLeavingSlots.has(sessionId) && !softHiddenSessions.has(sessionId);
+    const others = softHiddenSessions.size + reservedLeavingCount() - (reservedHere ? 1 : 0);
+    return others < keepCount;
+  },
 
   isSoftHidden: (sessionId: string) => softHiddenSessions.has(sessionId),
 

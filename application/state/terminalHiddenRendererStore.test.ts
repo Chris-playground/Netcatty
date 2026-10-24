@@ -54,6 +54,40 @@ test("evictSoftHidden reports refusal and drops an unconsumed request", async ()
   }
 });
 
+test("a reserved leaving slot counts toward occupancy until it is released", () => {
+  const sessions = ["a", "b", "c", "d"];
+  for (const sessionId of sessions) terminalHiddenRendererStore.clearSoftHidden(sessionId);
+  terminalHiddenRendererStore.markSoftHidden("a");
+  terminalHiddenRendererStore.markSoftHidden("b");
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 2);
+
+  const alreadyHidden = terminalHiddenRendererStore.reserveLeavingSlot("a");
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 2);
+  terminalHiddenRendererStore.releaseLeavingSlot("a", alreadyHidden);
+
+  const tokenC = terminalHiddenRendererStore.reserveLeavingSlot("c");
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 3);
+  assert.equal(terminalHiddenRendererStore.leavingSlotStillFits("c", 2), false);
+
+  terminalHiddenRendererStore.clearSoftHidden("a");
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 2);
+  assert.equal(terminalHiddenRendererStore.leavingSlotStillFits("c", 2), true);
+
+  const tokenD = terminalHiddenRendererStore.reserveLeavingSlot("d");
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 3);
+  assert.equal(terminalHiddenRendererStore.leavingSlotStillFits("c", 2), false);
+  assert.equal(terminalHiddenRendererStore.leavingSlotStillFits("d", 2), false);
+  terminalHiddenRendererStore.releaseLeavingSlot("c", tokenD);
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 3);
+  terminalHiddenRendererStore.releaseLeavingSlot("c", tokenC);
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 2);
+  terminalHiddenRendererStore.releaseLeavingSlot("d", tokenD);
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 1);
+
+  for (const sessionId of sessions) terminalHiddenRendererStore.clearSoftHidden(sessionId);
+  assert.equal(terminalHiddenRendererStore.getSoftHiddenOccupancy(), 0);
+});
+
 test("evictSoftHidden waits for hibernate after the marker is cleared", async () => {
   terminalHiddenRendererStore.clearSoftHidden("victim");
   terminalHiddenRendererStore.markSoftHidden("victim");

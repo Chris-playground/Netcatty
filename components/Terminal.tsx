@@ -244,7 +244,6 @@ import {
   canHibernateTerminalRuntimeSession,
   canHibernateTerminalRuntimeStatus,
   decideHiddenTabKeepCountAction,
-  resolveHiddenTabEviction,
   isTerminalFileTransferActive,
   resolveHibernateKeepRendererCount,
   resolveHibernatePreferWasmSerialize,
@@ -256,6 +255,7 @@ import {
 } from "../domain/terminalHibernate";
 import { getLastChar, removeLastChar } from "../domain/serialCharMetrics";
 import { stringCellWidth } from "./terminal/autocomplete/terminalStringCellWidth";
+import { retainLeavingTabAfterEviction } from "../application/state/hiddenTabEviction";
 import { terminalHiddenRendererStore } from "../application/state/terminalHiddenRendererStore";
 import {
   wakeTerminalFromHibernate,
@@ -2319,16 +2319,23 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       (completed) => {
         if (!completed) {
           resumeRendererAfterCancelledHibernateUpgradeRef.current?.();
-          // Wake already dropped the marker. If hibernate does not finish, put
-          // the renderer back in the soft-hidden set so it stays a candidate.
-          if (pendingEviction) hideRuntimeOnly();
+          // Wake already dropped the marker. Restore the soft-hidden slot only
+          // while this tab is still hidden and hibernate is still enabled.
+          // Selecting the victim during the drain makes fullHibernateRuntime
+          // return false because the tab is visible; soft-hiding it again
+          // would hide the tab the user just opened.
+          if (pendingEviction && !isVisibleRef.current && hibernateEnabledRef.current) {
+            hideRuntimeOnly();
+          }
         }
         terminalHiddenRendererStore.settleEviction(sessionId, completed);
       },
       (error) => {
         logger.error("[Terminal] Failed to upgrade soft-hidden runtime to hibernate", { sessionId, error });
         resumeRendererAfterCancelledHibernateUpgradeRef.current?.();
-        if (pendingEviction) hideRuntimeOnly();
+        if (pendingEviction && !isVisibleRef.current && hibernateEnabledRef.current) {
+          hideRuntimeOnly();
+        }
         terminalHiddenRendererStore.settleEviction(sessionId, false);
       },
     );
@@ -2360,7 +2367,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       : 0;
     const keepDecision = decideHiddenTabKeepCountAction({
       keepCount,
-      softHiddenCount: terminalHiddenRendererStore.getSoftHiddenCount(),
+      softHiddenCount: terminalHiddenRendererStore.getSoftHiddenOccupancy(),
       sessionId,
       candidatesOldestFirst: keepCount > 0
         ? terminalHiddenRendererStore.listSoftHiddenOldestFirst()
@@ -2372,21 +2379,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     if (keepDecision.action === "await-eviction") {
       const attempt = ++hibernateEvictionAttemptRef.current;
-      // evict resolves only after fullHibernateRuntime settles. A sync marker
+      // Reserves this tab's slot before the first await, then soft-hides only
+      // if a victim hibernate completes and the slot still fits. A sync marker
       // clear is not enough: alt-screen and drain/snapshot failure restore the
-      // victim, and this tab stays out of the soft-hidden set unless the
-      // promise is true.
-      void resolveHiddenTabEviction({
+      // victim, and this tab stays out of the soft-hidden set.
+      void retainLeavingTabAfterEviction({
+        sessionId,
         candidates: keepDecision.candidates,
-        evict: (victim) => terminalHiddenRendererStore.evictSoftHidden(victim),
-      }).then((action) => {
-        if (hibernateEvictionAttemptRef.current !== attempt) return;
-        if (isVisibleRef.current || hibernatedRef.current || softHiddenRef.current) return;
-        if (action === "soft-hide") {
-          hideRuntimeOnly();
-          return;
-        }
-        void fullHibernateRuntime();
+        keepCount,
+        stillWantsRetention: () => (
+          hibernateEvictionAttemptRef.current === attempt
+          && !isVisibleRef.current
+          && !hibernatedRef.current
+          && !softHiddenRef.current
+        ),
+        softHide: () => hideRuntimeOnly(),
+        fullHibernate: () => {
+          void fullHibernateRuntime();
+        },
       });
       return;
     }

@@ -7,7 +7,6 @@ import {
   capHibernateBuffer,
   capHibernateBufferByLines,
   decideHiddenTabKeepCountAction,
-  resolveHiddenTabEviction,
   isTerminalFileTransferActive,
   normalizeHibernateHiddenTabsDelaySec,
   resolveTerminalHibernateDelayMs,
@@ -115,52 +114,6 @@ test("a full keep-count lists eviction candidates and does not evict them itself
     sessionId: "leaving",
     candidatesOldestFirst: ["oldest"],
   }), { action: "await-eviction", candidates: ["oldest"] });
-});
-
-test("a refused eviction tries the next candidate, then full-hibernates", async () => {
-  const attempts: string[] = [];
-  assert.equal(await resolveHiddenTabEviction({
-    candidates: ["images", "plain"],
-    evict: async (sessionId) => {
-      attempts.push(sessionId);
-      return sessionId === "plain";
-    },
-  }), "soft-hide");
-  assert.deepEqual(attempts, ["images", "plain"]);
-
-  const blocked: string[] = [];
-  assert.equal(await resolveHiddenTabEviction({
-    candidates: ["images", "also-images"],
-    evict: async (sessionId) => {
-      blocked.push(sessionId);
-      return false;
-    },
-  }), "full-hibernate");
-  assert.deepEqual(blocked, ["images", "also-images"]);
-});
-
-test("hibernate failure after the soft-hidden marker drops does not retain the leaving tab", async () => {
-  const attempts: string[] = [];
-  assert.equal(await resolveHiddenTabEviction({
-    candidates: ["victim"],
-    evict: async (sessionId) => {
-      attempts.push(sessionId);
-      await Promise.resolve();
-      return false;
-    },
-  }), "full-hibernate");
-  assert.deepEqual(attempts, ["victim"]);
-
-  const recovered: string[] = [];
-  assert.equal(await resolveHiddenTabEviction({
-    candidates: ["victim", "next"],
-    evict: async (sessionId) => {
-      recovered.push(sessionId);
-      await Promise.resolve();
-      return sessionId === "next";
-    },
-  }), "soft-hide");
-  assert.deepEqual(recovered, ["victim", "next"]);
 });
 
 test("keep-count zero still full-hibernates and does not evict", () => {

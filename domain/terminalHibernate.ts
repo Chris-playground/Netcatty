@@ -162,8 +162,7 @@ export type HiddenTabKeepCountDecision = {
   /**
    * Soft-hide immediately when the keep set has room. Await eviction when it
    * is full. Full-hibernate when keepCount is 0 or no other candidate exists.
-   * Soft-hide after a full set is decided by resolveHiddenTabEviction, only
-   * once a victim's hibernate has completed.
+   * Callers retain the leaving tab only after a victim's hibernate completes.
    */
   action: "soft-hide" | "full-hibernate" | "await-eviction";
   /** Oldest-first victims to try when action is await-eviction. */
@@ -175,10 +174,11 @@ export type HiddenTabKeepCountDecision = {
  * Callers still handle alternate screen, inline images, and a soft-hidden
  * session that later disconnects before asking. keepCount 0 (disconnected, or
  * the setting) full-hibernates. When the soft-hide set is full this only
- * lists candidates. It does not evict: waking a victim clears its marker
- * before fullHibernateRuntime finishes, so success has to be awaited outside
- * this helper. Wake replay order stays in resolveHibernateWakeHistory (#2762).
- * Atlas clear on a soft wake stays in wakeSoftHiddenRuntime (#1063).
+ * lists candidates. It does not evict, reserve a slot, or touch renderer
+ * lifecycle. Waking a victim clears its marker before hibernate finishes, so
+ * the caller awaits that outside this helper. Wake replay order stays in
+ * resolveHibernateWakeHistory (#2762). Atlas clear on a soft wake stays in
+ * wakeSoftHiddenRuntime (#1063).
  */
 export function decideHiddenTabKeepCountAction(input: {
   keepCount: number;
@@ -200,23 +200,6 @@ export function decideHiddenTabKeepCountAction(input: {
     return { action: "full-hibernate", candidates: [] };
   }
   return { action: "await-eviction", candidates };
-}
-
-/**
- * Walk eviction candidates until one hibernate actually completes.
- * `evict` resolves true only after that session is fully hibernated, not when
- * its soft-hidden marker drops at the start of the attempt. A refusal or a
- * later failure tries the next candidate. None completed means the leaving
- * session itself must full-hibernate.
- */
-export async function resolveHiddenTabEviction(input: {
-  candidates: readonly string[];
-  evict: (sessionId: string) => Promise<boolean> | boolean;
-}): Promise<"soft-hide" | "full-hibernate"> {
-  for (const candidate of input.candidates) {
-    if (await input.evict(candidate)) return "soft-hide";
-  }
-  return "full-hibernate";
 }
 
 /** Snapshot + buffered output to replay when recreating xterm after hibernate. */

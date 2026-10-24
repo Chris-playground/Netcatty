@@ -239,6 +239,16 @@ test("a cancelled soft-hidden upgrade resumes its renderer", () => {
   assert.match(helperBody, /ensureWebglRenderer\(\)/);
   assert.match(helperBody, /clearTextureAtlas\(\)/);
   assert.match(helperBody, /safeFitRef\.current\(\{ force: true \}\)/);
+  const restoreGuard = "if (pendingEviction && !isVisibleRef.current && hibernateEnabledRef.current)";
+  assert.equal(
+    upgradeBody.split(restoreGuard).length - 1,
+    2,
+    "both the failed hibernate and the rejection path must skip soft-hide when the tab is visible or hibernate is off",
+  );
+  assert.ok(
+    upgradeBody.indexOf(restoreGuard) > upgradeIndex,
+    "the visibility guard belongs on the settled upgrade, after the renderer was resumed",
+  );
 });
 
 test("snapshot and handoff paths reject output that misses the settle deadline", () => {
@@ -296,10 +306,12 @@ test("a full keep count soft-hides the leaving session instead of snapshotting i
   assert.ok(alternateGate !== -1 && alternateGate < imageGate);
   assert.ok(imageGate !== -1 && imageGate < decision);
   assert.ok(decision < softHide && softHide < hide && hide < full);
-  const awaited = body.indexOf("resolveHiddenTabEviction({");
-  const awaitedHide = body.indexOf("hideRuntimeOnly();", body.indexOf(".then((action) => {"));
-  assert.ok(awaited > decision && awaited < awaitedHide);
-  assert.match(body, /evict: \(victim\) => terminalHiddenRendererStore\.evictSoftHidden\(victim\)/);
+  const awaited = body.indexOf("retainLeavingTabAfterEviction({");
+  assert.ok(awaited > decision, "a full keep set retains the leaving tab from the application eviction walk");
+  assert.match(body, /getSoftHiddenOccupancy\(\)/);
+  assert.match(body, /stillWantsRetention:/);
+  assert.match(body, /softHide: \(\) => hideRuntimeOnly\(\)/);
+  assert.doesNotMatch(body, /resolveHiddenTabEviction/);
   assert.doesNotMatch(body, /requestEviction\(keepDecision/);
   assert.match(
     body,
