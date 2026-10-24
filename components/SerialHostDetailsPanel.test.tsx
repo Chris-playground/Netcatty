@@ -6,9 +6,9 @@ import { I18nProvider } from '../application/i18n/I18nProvider';
 import type { Host } from '../domain/models';
 import { SerialHostDetailsPanel } from './SerialHostDetailsPanel';
 
-function renderPanel(path: string) {
+function renderPanel(path: string, hostname = path) {
   const host: Host = {
-    id: 'serial-test', label: 'VM console', hostname: path, protocol: 'serial',
+    id: 'serial-test', label: 'VM console', hostname, protocol: 'serial',
     port: 115200, username: '', tags: [], os: 'linux',
     serialConfig: { path, baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' },
   };
@@ -26,4 +26,9 @@ test('saved named-pipe host is editable without hardware baud controls', () => {
 
 test('hardware serial host retains its baud-rate controls', () => {
   assert.match(renderPanel('COM3'), /for="baud-rate"/);
+});
+
+test('editor prefers the stored pipe path over a stale hardware hostname', () => {
+  const html = renderPanel(String.raw`\\.\pipe\VM console`, 'COM3');
+  assert.doesNotMatch(html, /for="baud-rate"/);
 });

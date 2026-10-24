@@ -93,7 +93,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
   // input alone cannot restore `password` to undefined — the user needs a
   // dedicated control to delete the credential entirely.
   const [passwordCleared, setPasswordCleared] = useState(false);
-  const [selectedPort, setSelectedPort] = useState(initialData.hostname || initialData.serialConfig?.path || '');
+  const [selectedPort, setSelectedPort] = useState(initialData.serialConfig?.path || initialData.hostname || '');
   const [baudRate, setBaudRate] = useState(initialData.serialConfig?.baudRate || initialData.port || 115200);
   const [dataBits, setDataBits] = useState<5 | 6 | 7 | 8>(initialData.serialConfig?.dataBits || 8);
   const [stopBits, setStopBits] = useState<1 | 1.5 | 2>(initialData.serialConfig?.stopBits || 1);
