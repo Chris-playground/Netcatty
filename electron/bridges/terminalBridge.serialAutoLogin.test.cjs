@@ -153,6 +153,49 @@ test("serial wake-only enter stays armed when an input interceptor is pending", 
   }
 });
 
+test("queued wake enter does not cancel auto-login when login arrives during interception", async () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  let releaseIntercept = () => {};
+  const intercepted = new Promise((resolve) => {
+    releaseIntercept = resolve;
+  });
+  terminalBridge.init({
+    sessions: new Map([["s", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has: () => true,
+      interceptInput: async (_sessionId, data) => {
+        await intercepted;
+        return data;
+      },
+    },
+  });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    terminalBridge.writeToSession({}, { sessionId: "s", data: "\r" });
+    await flush();
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, []);
+
+    session.autoLogin.handleText("login: ");
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["admin\r"]);
+
+    releaseIntercept();
+    await intercepted;
+    await flush();
+
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["admin\r"]);
+
+    session.autoLogin.handleText("\r\nPassword: ");
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["admin\r", "secret\r"]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
 test("serial line-mode notification still cancels auto-login without keystroke data", () => {
   const { session, writes, events } = createSerialAutoLoginSession();
   terminalBridge.init({ sessions: new Map([["s", session]]), electronModule: {} });

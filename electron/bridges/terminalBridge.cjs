@@ -1686,7 +1686,7 @@ function shouldBlockSessionInput(session, data) {
   return false;
 }
 
-function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
+function writeToSessionNow(payload, data, logRewrite = payload.logRewrite, preservedWake = false) {
   const session = sessions.get(payload.sessionId);
   const trace = payload.interruptTrace || null;
   if (!session) {
@@ -1714,7 +1714,15 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       && !payload.automated
       && !isTerminalReportSequence(data)
     ) {
-      session.autoLogin?.handleUserInput(data);
+      if (preservedWake) {
+        // Ingress already classified this as a wake. Replaying it must not
+        // cancel once login has started, and the byte must not land after
+        // the username. The flag is internal: renderer payloads cannot set it.
+        const disposition = session.autoLogin?.handleUserInput(data, { preservedWake: true });
+        if (disposition === "drop") return true;
+      } else {
+        session.autoLogin?.handleUserInput(data);
+      }
     }
 
     // Encode keystrokes with the SAME charset the output path decodes with so
@@ -1805,6 +1813,9 @@ function writeToSessionWithInterception(
   paste = null,
   index = 0,
 ) {
+  // Set only after a queued wake is classified below. The fast path reads
+  // this while it is still false and classifies inside writeToSessionNow.
+  let preservedWake = false;
   const writeWithReceipt = (nextData) => {
     if (paste && !paste.active) return;
     const current = sessions.get(payload.sessionId);
@@ -1817,7 +1828,7 @@ function writeToSessionWithInterception(
       paste.finish(index, true);
       return;
     }
-    const written = writeToSessionNow(payload, nextData, logRewrite);
+    const written = writeToSessionNow(payload, nextData, logRewrite, preservedWake);
     if (paste) paste.finish(written ? index : undefined);
   };
   const bypass = payload?.sensitive === true || isTerminalReportSequence(data);
@@ -1830,20 +1841,19 @@ function writeToSessionWithInterception(
     writeWithReceipt(data);
     return;
   }
-  // Cancel the auto-login detector at input ingress, before the asynchronous
-  // interception pipeline: a slow interceptor would otherwise leave the
-  // detector armed while the user's keystrokes are queued, letting a login
-  // prompt that arrives during that wait trigger a saved-credential
-  // transmission after the user has already taken over. Same guard
-  // conditions as writeToSessionNow; handleUserInput is idempotent, so the
-  // later call there stays a no-op.
+  // Non-wake input cancels auto-login at ingress, before the asynchronous
+  // interception pipeline. A slow interceptor must not leave the detector
+  // armed while real keystrokes are queued. A bare CR/LF stays classified
+  // as a wake: the later write replays that classification, so a login
+  // prompt that arrives during the wait cannot turn the same Enter into a
+  // cancel or write it into the credential exchange.
   if (
     expectedSession
     && (expectedSession.type === 'telnet-native' || expectedSession.type === 'serial')
     && !payload.automated
     && !isTerminalReportSequence(data)
   ) {
-    expectedSession.autoLogin?.handleUserInput(data);
+    preservedWake = expectedSession.autoLogin?.handleUserInput(data) === "wake";
   }
   const writeIfCurrent = (nextData) => {
     const current = sessions.get(payload.sessionId);

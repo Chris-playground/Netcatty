@@ -243,6 +243,75 @@ test("telnet auto-login stays armed when a wake-only enter arrives before any lo
   assert.deepEqual(writes, ["admin\r", "secret\r"]);
 });
 
+test("preserved wake enter does not cancel after username is sent during the delay", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  assert.equal(autoLogin.handleUserInput("\r"), "wake");
+  autoLogin.handleText("login: ");
+  assert.equal(autoLogin.handleUserInput("\r", { preservedWake: true }), "drop");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 0);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+});
+
+test("preserved wake enter is dropped after both credentials were sent during the delay", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  assert.equal(autoLogin.handleUserInput("\n"), "wake");
+  autoLogin.handleText("login: ");
+  autoLogin.handleText("\r\nPassword: ");
+  assert.equal(autoLogin.handleUserInput("\n", { preservedWake: true }), "drop");
+
+  assert.equal(cancelCount, 0);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+});
+
+test("preserved wake replay still writes when no prompt arrived and a rewritten byte still cancels", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const armed = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  assert.equal(armed.handleUserInput("\r"), "wake");
+  assert.equal(armed.handleUserInput("\r", { preservedWake: true }), "write");
+  armed.handleText("login: ");
+  armed.handleText("\r\nPassword: ");
+  assert.equal(cancelCount, 0);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+
+  const cancelled = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+  assert.equal(cancelled.handleUserInput("\r"), "wake");
+  assert.equal(cancelled.handleUserInput("x", { preservedWake: true }), "write");
+  cancelled.handleText("login: ");
+  cancelled.handleText("\r\nPassword: ");
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+});
+
 test("telnet auto-login treats a bare newline as a wake and still autofills", () => {
   const writes = [];
   let cancelCount = 0;
