@@ -65,9 +65,9 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 // not flip a Windows DefaultShell soft hint:
 //   - bash/zsh `user@host[:path][#$]` (colon before the path; `root@host ~#` stays rejected)
 //   - RHEL-family `[\u@\h \W]\$` -> `[user@host path][#$]`, or `[user@host][#$]`
-//     with no path. `\W` may contain whitespace (`[user@host My Project]$`);
-//     the closing `]` stays the boundary.
-const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r\]]+)?\])[#$]$/;
+//     with no path. `\W` may contain whitespace or `]` (`[user@host My [Project]]$`);
+//     the final `]` before `$`/`#` is the delimiter.
+const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
