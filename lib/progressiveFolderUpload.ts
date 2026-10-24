@@ -566,6 +566,7 @@ export async function uploadLocalFoldersProgressively(
         throw new Error(streamResult.error);
       }
 
+      if (streamResult?.warning) callbacks?.onTaskWarning?.(childId, streamResult.warning);
       results.push({ fileName: entry.relativePath, success: true, ...(streamResult?.warning ? { warning: streamResult.warning } : {}) });
       stats.completed += 1;
       callbacks?.onTaskCompleted?.(childId, fileTotalBytes);

@@ -974,6 +974,9 @@ async function uploadEntries(
             throw new Error(uploadResult.error);
           }
 
+          if (uploadResult.warning) {
+            callbacks?.onTaskWarning?.(bundledChildTaskId || standaloneTransferId, uploadResult.warning);
+          }
           results.push({ fileName: entry.relativePath, success: true, ...(uploadResult.warning ? { warning: uploadResult.warning } : {}) });
 
           // Update progress tracking
