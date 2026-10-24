@@ -34,6 +34,7 @@ export interface UploadResult {
   fileName: string;
   success: boolean;
   error?: string;
+  warning?: string;
   cancelled?: boolean;
 }
 
@@ -109,7 +110,7 @@ export interface UploadBridge {
       globalConcurrency?: number;
       skipAdmission?: boolean;
     }
-  ) => Promise<{ transferId: string; totalBytes?: number; error?: string; cancelled?: boolean }>;
+  ) => Promise<{ transferId: string; totalBytes?: number; error?: string; cancelled?: boolean; warning?: string }>;
   cancelTransfer?: (transferId: string) => Promise<void>;
 }
 
