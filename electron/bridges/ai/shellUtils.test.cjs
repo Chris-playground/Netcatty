@@ -140,6 +140,8 @@ test("isDefaultPosixPromptLine matches classic user@host prompts", () => {
   assert.equal(isDefaultPosixPromptLine("[opc@instance-20260905-1821 ~]$ "), true);
   assert.equal(isDefaultPosixPromptLine("[root@host ~]#"), true);
   assert.equal(isDefaultPosixPromptLine("[user@host]$"), true);
+  assert.equal(isDefaultPosixPromptLine("[user@host My Project]$"), true);
+  assert.equal(isDefaultPosixPromptLine("[user@host My Project]$ "), true);
   assert.equal(isDefaultPosixPromptLine("root@host ~#"), false);
   assert.equal(isDefaultPosixPromptLine("PS C:\\Users\\alice>"), false);
   assert.equal(isDefaultPosixPromptLine("C:\\Users\\alice>"), false);
@@ -160,6 +162,10 @@ test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   assert.equal(
     extractTrailingIdlePrompt("welcome\r\nuser@host:~$ "),
     "user@host:~$ ",
+  );
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\n[user@host My Project]$ "),
+    "[user@host My Project]$ ",
   );
   // Unbracketed space form is still not a recognized default prompt.
   assert.equal(extractTrailingIdlePrompt("welcome\r\nroot@host ~#"), "");
@@ -715,6 +721,11 @@ test("trackSessionIdlePrompt and getFreshIdlePrompt accept an Oracle/RHEL bracke
   const unbracketed = {};
   assert.equal(trackSessionIdlePrompt(unbracketed, "root@host ~#"), "");
   assert.equal(getFreshIdlePrompt(unbracketed), "");
+
+  const spacedPath = {};
+  trackSessionIdlePrompt(spacedPath, "Last login...\r\n[user@host My Project]$ ");
+  assert.equal(spacedPath.lastIdlePrompt, "[user@host My Project]$ ");
+  assert.equal(getFreshIdlePrompt(spacedPath), "[user@host My Project]$ ");
 });
 
 test("getFreshIdlePrompt and trackSessionIdlePrompt round-trip through a real PTY-like flow", () => {
