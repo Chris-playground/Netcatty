@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import React from 'react';
+import React, { startTransition, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot, type Root } from 'react-dom/client';
+import { JSDOM } from 'jsdom';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { readFileSync } from 'node:fs';
@@ -200,6 +203,79 @@ test('selecting a side panel tool commits open tabs and layout in one render', a
       renderer?.unmount();
     });
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  }
+});
+
+test('a pending side-panel write survives an urgent render on another tab', async () => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: dom.window });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document });
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+
+  let state: ReturnType<typeof useTerminalSidePanelLayoutState> | null = null;
+  let bump: ((value: number) => void) | null = null;
+  const Probe = () => {
+    state = useTerminalSidePanelLayoutState();
+    const [, setTick] = useState(0);
+    bump = setTick;
+    return null;
+  };
+
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  const tools = (tabId: string, fromRef = false) => {
+    const layout = fromRef
+      ? state?.sidePanelLayoutsRef.current.get(tabId)
+      : state?.sidePanelLayouts.get(tabId);
+    return layout ? collectSidePanelPanes(layout.root).map((pane) => pane.tool) : [];
+  };
+
+  try {
+    await act(async () => {
+      root.render(React.createElement(Probe));
+    });
+    await act(async () => {
+      state?.selectSidePanelToolForTab('terminal-a', 'notes');
+      state?.selectSidePanelToolForTab('terminal-b', 'scripts');
+    });
+    await act(async () => {
+      state?.splitPane('terminal-a', 'ai', 'vertical', {
+        paneId: 'pane-ai',
+        splitId: 'split-a',
+      }, 400);
+    });
+
+    await act(async () => {
+      startTransition(() => {
+        state?.selectSidePanelToolForTab('terminal-a', 'history');
+      });
+      flushSync(() => {
+        bump?.(1);
+      });
+      assert.deepEqual(tools('terminal-a'), ['notes', 'ai']);
+      assert.deepEqual(tools('terminal-a', true), ['notes', 'history']);
+      startTransition(() => {
+        state?.selectSidePanelToolForTab('terminal-b', 'sftp');
+      });
+    });
+
+    assert.deepEqual(tools('terminal-a'), ['notes', 'history']);
+    assert.equal(state!.sidePanelOpenTabs.get('terminal-a'), 'history');
+    assert.deepEqual(tools('terminal-b'), ['sftp']);
+    assert.equal(state!.sidePanelOpenTabs.get('terminal-b'), 'sftp');
+  } finally {
+    await act(async () => {
+      root.unmount();
+    });
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previousDocument });
+    dom.window.close();
   }
 });
 
