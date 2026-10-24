@@ -210,31 +210,17 @@ function createTelnetAutoLogin(options = {}) {
     // Silent serial consoles need a bare CR/LF to wake getty before "login:"
     // appears. That wake is not a takeover: keep autofill armed and leave the
     // caller's write on the port. Any other user input still cancels.
-    //
-    // Interception classifies the wake at ingress (`"wake"`) and replays it
-    // with `{ preservedWake: true }` when the queued bytes are finally
-    // written. A login prompt that arrives in between may already have sent
-    // the username; the same Enter must not cancel, and it must not be
-    // written into the credential exchange.
-    handleUserInput(data, options = {}) {
+    handleUserInput(data) {
       const wakeOnly = typeof data === "string" && /^[\r\n]+$/.test(data);
-      const exchangeStarted = sentUsername
-        || sentPassword
-        || completed
-        || isUsernamePrompt(tail)
-        || isPasswordPrompt(tail);
-      if (options.preservedWake) {
-        if (wakeOnly && exchangeStarted) return "drop";
-        if (!disabled && !completed && !wakeOnly) {
-          disabled = true;
-          clearExpiryTimer();
-          notifyUserInput();
-        }
-        return "write";
-      }
-      if (wakeOnly && !exchangeStarted) {
+      if (
+        wakeOnly
+        && !sentUsername
+        && !sentPassword
+        && !isUsernamePrompt(tail)
+        && !isPasswordPrompt(tail)
+      ) {
         sentWake = true;
-        return "wake";
+        return;
       }
       disabled = true;
       clearExpiryTimer();

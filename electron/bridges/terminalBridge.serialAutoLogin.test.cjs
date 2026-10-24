@@ -153,11 +153,12 @@ test("serial wake-only enter stays armed when an input interceptor is pending", 
   }
 });
 
-test("queued wake enter does not cancel auto-login when login arrives during interception", async () => {
+test("serial wake enter is not cancelled when login arrives during interceptor delay", async () => {
   const { session, writes, events } = createSerialAutoLoginSession();
-  let releaseIntercept = () => {};
-  const intercepted = new Promise((resolve) => {
-    releaseIntercept = resolve;
+  let interceptorStarted = false;
+  let releaseInterceptor = () => {};
+  const interceptorGate = new Promise((resolve) => {
+    releaseInterceptor = resolve;
   });
   terminalBridge.init({
     sessions: new Map([["s", session]]),
@@ -165,33 +166,37 @@ test("queued wake enter does not cancel auto-login when login arrives during int
     terminalDataPipeline: {
       has: () => true,
       interceptInput: async (_sessionId, data) => {
-        await intercepted;
+        interceptorStarted = true;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await interceptorGate;
         return data;
       },
     },
   });
-  const flush = () => new Promise((resolve) => setImmediate(resolve));
   try {
     terminalBridge.writeToSession({}, { sessionId: "s", data: "\r" });
-    await flush();
-    assert.deepEqual(events, []);
-    assert.deepEqual(writes, []);
+    await Promise.resolve();
+    assert.equal(interceptorStarted, true);
 
+    // Prompt arrives while the wake byte is still queued in the interceptor.
     session.autoLogin.handleText("login: ");
     assert.deepEqual(events, []);
     assert.deepEqual(writes, ["admin\r"]);
 
-    releaseIntercept();
-    await intercepted;
-    await flush();
+    releaseInterceptor();
+    const deadline = Date.now() + 500;
+    while (writes.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
     assert.deepEqual(events, []);
-    assert.deepEqual(writes, ["admin\r"]);
+    assert.deepEqual(writes, ["admin\r", "\r"]);
 
     session.autoLogin.handleText("\r\nPassword: ");
     assert.deepEqual(events, []);
-    assert.deepEqual(writes, ["admin\r", "secret\r"]);
+    assert.deepEqual(writes, ["admin\r", "\r", "secret\r"]);
   } finally {
+    releaseInterceptor();
     terminalBridge.cleanupAllSessions();
   }
 });
