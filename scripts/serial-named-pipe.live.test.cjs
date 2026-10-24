@@ -36,6 +36,7 @@ if (!process.versions.electron) {
     app.exit(code);
   }
   const js = (source) => win.webContents.executeJavaScript(source);
+  const subscribe = (sessionId) => js(`window.pipeDataOff?.(); window.pipeExitOff?.(); window.pipeOutput = ''; window.pipeExits = []; window.pipeDataOff = window.netcatty.onSessionData(${JSON.stringify(sessionId)}, data => { window.pipeOutput += data; document.getElementById('output').textContent = window.pipeOutput; }); window.pipeExitOff = window.netcatty.onSessionExit(${JSON.stringify(sessionId)}, event => window.pipeExits.push(event)); void 0;`);
   async function waitFor(source) {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
@@ -59,6 +60,9 @@ if (!process.versions.electron) {
     assert.equal(await js('typeof window.netcatty.startSerialSession'), 'function');
     const endpoint = String.raw`\\.\pipe\netcatty VM console ${randomUUID()}`;
     if (process.platform !== 'win32') {
+      // Exercise callback registration too; functions must never be returned
+      // from executeJavaScript across Electron's structured-clone boundary.
+      await subscribe('unsupported');
       await assert.rejects(js(`window.netcatty.startSerialSession(${JSON.stringify({ sessionId: 'unsupported', path: endpoint })})`), /only supported on Windows/);
       assert.equal(sessions.size, 0);
       console.log('SERIAL_PIPE_ELECTRON_PASS: native preload/IPC rejects Windows pipes on non-Windows');
@@ -79,7 +83,7 @@ if (!process.versions.electron) {
     for (let attempt = 0; attempt < 2; attempt++) {
       assert.equal(await js(`window.netcatty.startSerialSession(${JSON.stringify({ sessionId, path: endpoint, charset: 'utf-8' })})`), sessionId);
       assert.equal(sessions.get(sessionId).type, 'serial');
-      await js(`window.pipeDataOff?.(); window.pipeExitOff?.(); window.pipeOutput = ''; window.pipeExits = []; window.pipeDataOff = window.netcatty.onSessionData(${JSON.stringify(sessionId)}, data => { window.pipeOutput += data; document.getElementById('output').textContent = window.pipeOutput; }); window.pipeExitOff = window.netcatty.onSessionExit(${JSON.stringify(sessionId)}, event => window.pipeExits.push(event));`);
+      await subscribe(sessionId);
       const payload = `round ${attempt}: café 中文\r\n`;
       await js(`window.netcatty.writeToSession(${JSON.stringify(sessionId)}, ${JSON.stringify(payload)})`);
       await waitFor(`window.pipeOutput === ${JSON.stringify(payload)}`);
