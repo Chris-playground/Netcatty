@@ -26,7 +26,7 @@ async function echoServer(t) {
     for (const socket of peers) socket.destroy();
     await new Promise((resolve) => server.close(resolve));
   });
-  return { address, peers };
+  return { address, peers, server };
 }
 
 function open(port) {
@@ -42,7 +42,7 @@ test('recognizes only local Windows named pipe paths', () => {
   }
 });
 
-test('real IPC stream carries binary input/output and can reconnect after close', async (t) => {
+test('real IPC stream carries binary input/output and can reconnect after close', { timeout: 10000 }, async (t) => {
   const { address } = await echoServer(t);
   for (let attempt = 0; attempt < 2; attempt++) {
     const port = new SerialNamedPipe(address);
@@ -58,7 +58,7 @@ test('real IPC stream carries binary input/output and can reconnect after close'
   }
 });
 
-test('missing pipe fails opening once without an unhandled error', async () => {
+test('missing pipe fails opening once without an unhandled error', { timeout: 10000 }, async () => {
   const port = new SerialNamedPipe(endpoint());
   let callbacks = 0;
   const closed = new Promise((resolve) => port.once('close', resolve));
@@ -71,7 +71,7 @@ test('missing pipe fails opening once without an unhandled error', async () => {
   assert.equal(callbacks, 1);
 });
 
-test('closing during open cancels the pending connection once', async (t) => {
+test('closing during open cancels the pending connection once', { timeout: 10000 }, async (t) => {
   const { address } = await echoServer(t);
   const port = new SerialNamedPipe(address);
   let callbacks = 0;
@@ -86,11 +86,11 @@ test('closing during open cancels the pending connection once', async (t) => {
   assert.equal(port.destroyed, true);
 });
 
-test('server disconnection closes the transport', async (t) => {
-  const { address, peers } = await echoServer(t);
+test('server disconnection closes the transport', { timeout: 10000 }, async (t) => {
+  const { address, peers, server } = await echoServer(t);
   const port = new SerialNamedPipe(address);
   t.after(() => port.close());
-  await open(port);
+  await Promise.all([once(server, 'connection'), open(port)]);
   const closed = once(port, 'close');
   for (const peer of peers) peer.end();
   await closed;
