@@ -1714,7 +1714,7 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       && !payload.automated
       && !isTerminalReportSequence(data)
     ) {
-      session.autoLogin?.handleUserInput();
+      session.autoLogin?.handleUserInput(data);
     }
 
     // Encode keystrokes with the SAME charset the output path decodes with so
@@ -1843,7 +1843,7 @@ function writeToSessionWithInterception(
     && !payload.automated
     && !isTerminalReportSequence(data)
   ) {
-    expectedSession.autoLogin?.handleUserInput();
+    expectedSession.autoLogin?.handleUserInput(data);
   }
   const writeIfCurrent = (nextData) => {
     const current = sessions.get(payload.sessionId);

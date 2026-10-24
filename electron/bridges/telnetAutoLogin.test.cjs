@@ -505,3 +505,67 @@ test("telnet auto-login keeps observing login prompts that arrive after expiry",
   assert.equal(incomplete, 1);
   assert.deepEqual(writes, []);
 });
+
+test("telnet auto-login ignores a wake-only newline before any credentials are sent", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  // Silent serial consoles need an Enter to reveal login:. That nudge is not
+  // a takeover while the detector has not yet answered a prompt.
+  autoLogin.handleUserInput("\r");
+  autoLogin.handleUserInput("\n");
+  autoLogin.handleUserInput("\r\n");
+  autoLogin.handleText("login: ");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 0);
+  assert.deepEqual(writes, ["admin\r", "secret\r"]);
+});
+
+test("telnet auto-login still disables on real interactive input", () => {
+  for (const data of ["a", "\x03", "admin\r"]) {
+    const writes = [];
+    let cancelCount = 0;
+    const autoLogin = createTelnetAutoLogin({
+      username: "admin",
+      password: "secret",
+      write: (chunk) => writes.push(chunk),
+      onUserInput: () => { cancelCount += 1; },
+    });
+
+    autoLogin.handleUserInput(data);
+    autoLogin.handleUserInput(data);
+    autoLogin.handleText("login: ");
+    autoLogin.handleText("\r\nPassword: ");
+
+    assert.equal(cancelCount, 1, `expected takeover for ${JSON.stringify(data)}`);
+    assert.deepEqual(writes, []);
+  }
+});
+
+test("telnet auto-login treats Enter as takeover after credentials were sent", () => {
+  const writes = [];
+  let cancelCount = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    onUserInput: () => { cancelCount += 1; },
+  });
+
+  autoLogin.handleText("login: ");
+  assert.deepEqual(writes, ["admin\r"]);
+
+  autoLogin.handleUserInput("\r");
+  autoLogin.handleUserInput("\n");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(writes, ["admin\r"]);
+});

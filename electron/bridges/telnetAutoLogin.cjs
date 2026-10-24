@@ -73,6 +73,12 @@ function normalizePassword(password) {
   return typeof password === "string" ? password : "";
 }
 
+// A lone Enter wakes silent serial consoles. It is not a takeover until the
+// detector has already sent a username or password.
+function isWakeOnlyNewline(data) {
+  return data === "\r" || data === "\n" || data === "\r\n";
+}
+
 function createTelnetAutoLogin(options = {}) {
   const username = normalizeUsername(options.username);
   const password = normalizePassword(options.password);
@@ -207,7 +213,10 @@ function createTelnetAutoLogin(options = {}) {
         notifyIncomplete();
       }
     },
-    handleUserInput() {
+    handleUserInput(data) {
+      if (!sentUsername && !sentPassword && isWakeOnlyNewline(data)) {
+        return;
+      }
       disabled = true;
       clearExpiryTimer();
       notifyUserInput();
