@@ -83,6 +83,7 @@ on:
       - "scripts/resolve-mosh-bin-release.cjs"
       - "scripts/tray-panel-layout.live.test.cjs"
       - "scripts/serial-named-pipe.live.test.cjs"
+      - "scripts/fixtures/serial/**"
       - "scripts/verify-linux-*.sh"
       - "scripts/xterm-macos-column-selection.live.test.cjs"
       - "skills/**"

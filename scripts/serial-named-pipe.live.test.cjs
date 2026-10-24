@@ -12,6 +12,7 @@ if (!process.versions.electron) {
   const os = require('node:os');
   const path = require('node:path');
   const net = require('node:net');
+  const { spawn, execFileSync } = require('node:child_process');
   const { randomUUID } = require('node:crypto');
   const electron = require('electron');
   const { app, BrowserWindow, ipcMain, protocol } = electron;
@@ -24,21 +25,28 @@ if (!process.versions.electron) {
   let win;
   let server;
   let bridge;
+  let busyServer;
+  let busyOwner;
+  let finishing = false;
   const watchdog = setTimeout(() => finish(1, new Error('serial pipe Electron test timed out')), 45000);
   function finish(code, error) {
+    if (finishing) return;
+    finishing = true;
     clearTimeout(watchdog);
     if (error) console.error(error);
     bridge?.cleanupAllSessions();
     for (const peer of peers) peer.destroy();
     server?.close();
+    busyOwner?.destroy();
+    busyServer?.kill();
     if (win && !win.isDestroyed()) win.destroy();
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* Windows may hold cache files until exit. */ }
     app.exit(code);
   }
   const js = (source) => win.webContents.executeJavaScript(source);
-  const subscribe = (sessionId) => js(`window.pipeDataOff?.(); window.pipeExitOff?.(); window.pipeOutput = ''; window.pipeExits = []; window.pipeDataOff = window.netcatty.onSessionData(${JSON.stringify(sessionId)}, data => { window.pipeOutput += data; document.getElementById('output').textContent = window.pipeOutput; }); window.pipeExitOff = window.netcatty.onSessionExit(${JSON.stringify(sessionId)}, event => window.pipeExits.push(event)); void 0;`);
-  async function waitFor(source) {
-    const deadline = Date.now() + 5000;
+  const subscribe = (sessionId) => js(`window.pipeDataOff?.(); window.pipeExitOff?.(); window.pipeOutput = ''; window.pipeExits = []; window.pipeDataOff = window.netcatty.onSessionData(${JSON.stringify(sessionId)}, data => { window.pipeOutput += data; document.getElementById('output').textContent = window.pipeOutput; window.netcatty.ackSessionFlow(${JSON.stringify(sessionId)}, data.length); }); window.pipeExitOff = window.netcatty.onSessionExit(${JSON.stringify(sessionId)}, event => window.pipeExits.push(event)); void 0;`);
+  async function waitFor(source, timeout = 5000) {
+    const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (await js(source)) return;
       await new Promise(resolve => setTimeout(resolve, 25));
@@ -69,8 +77,10 @@ if (!process.versions.electron) {
       return;
     }
     const received = [];
+    let slowReader = false;
     server = net.createServer(peer => {
       peers.add(peer);
+      if (slowReader) peer.pause();
       peer.on('error', () => {});
       peer.on('close', () => peers.delete(peer));
       peer.on('data', data => { received.push(data); peer.write(data); });
@@ -99,6 +109,83 @@ if (!process.versions.electron) {
         await js(`window.netcatty.closeSession(${JSON.stringify(sessionId)})`);
       }
     }
+    // Bound stress to 1 MiB: pause the server reader, then verify exact bytes
+    // through both directions without introducing a different flow-control path.
+    slowReader = true;
+    received.length = 0;
+    await js(`window.netcatty.startSerialSession(${JSON.stringify({ sessionId: 'slow-reader', path: endpoint })})`);
+    await subscribe('slow-reader');
+    const largePayload = '0123456789abcdef'.repeat(65536);
+    await js(`window.netcatty.writeToSession('slow-reader', ${JSON.stringify(largePayload)})`);
+    const queueDeadline = Date.now() + 5000;
+    while (sessions.get('slow-reader').serialPort.writableLength === 0 && Date.now() < queueDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const queuedBytes = sessions.get('slow-reader').serialPort.writableLength;
+    assert.ok(queuedBytes > 0, 'paused reader must leave a pending transport write');
+    assert.ok(queuedBytes <= Buffer.byteLength(largePayload), 'bounded write queue');
+    for (const peer of peers) peer.resume();
+    await waitFor(`window.pipeOutput.length === ${largePayload.length}`, 15000);
+    assert.equal(Buffer.concat(received).toString('utf8'), largePayload);
+    assert.equal(await js('window.pipeOutput'), largePayload);
+    assert.equal(sessions.get('slow-reader').serialPort.writableLength, 0);
+    await js("window.netcatty.closeSession('slow-reader')");
+    console.log(`SERIAL_PIPE_SLOW_READER_PASS: 1048576 exact bytes, observed queued bytes=${queuedBytes}, drained=0`);
+
+    // Node net.Server permits multiple simultaneous clients. Use a tiny .NET
+    // server to reproduce a real single-instance pipe's ERROR_PIPE_BUSY path.
+    const busyName = `netcatty-busy-${randomUUID()}`;
+    const busyPath = String.raw`\\.\pipe\${busyName}`;
+    const fixtureExe = path.join(profile, 'single-instance-pipe.exe');
+    const compiler = path.join(process.env.WINDIR, 'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
+    execFileSync(compiler, ['/nologo', '/target:exe', `/out:${fixtureExe}`,
+      path.join(__dirname, 'fixtures/serial/single-instance-pipe.cs')]);
+    busyServer = spawn(fixtureExe, [busyName], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let fixtureErrors = '';
+    busyServer.stderr.on('data', chunk => { fixtureErrors += chunk; });
+    busyServer.on('exit', code => { if (!finishing) finish(1, new Error(`Pipe fixture exited ${code}: ${fixtureErrors}`)); });
+    await new Promise((resolve, reject) => {
+      let output = '';
+      busyServer.once('error', reject);
+      busyServer.once('exit', code => reject(new Error(`Pipe fixture exited ${code}`)));
+      busyServer.stdout.on('data', chunk => { output += chunk; if (output.includes('READY')) resolve(); });
+    });
+    busyOwner = net.connect(busyPath);
+    await new Promise((resolve, reject) => { busyOwner.once('connect', resolve); busyOwner.once('error', reject); });
+    const { SerialNamedPipe } = require('../electron/bridges/serialNamedPipe.cjs');
+    const originalOpen = SerialNamedPipe.prototype.open;
+    let pendingTransport;
+    let pendingTransportClosed;
+    // Observe the real transport, without replacing its connect/close behavior.
+    SerialNamedPipe.prototype.open = function (callback) {
+      if (this.path === busyPath) {
+        SerialNamedPipe.prototype.open = originalOpen;
+        pendingTransport = this;
+        pendingTransportClosed = new Promise(resolve => this.once('close', resolve));
+      }
+      return originalOpen.call(this, callback);
+    };
+    await js(`window.busyResult = 'pending'; window.busyPromise = window.netcatty.startSerialSession(${JSON.stringify({ sessionId: 'busy', path: busyPath })}).then(() => { window.busyResult = 'connected'; }, error => { window.busyResult = error.message; }); void 0;`);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(await js('window.busyResult'), 'pending', 'single-instance pipe must be busy');
+    await js("window.netcatty.closeSession('busy')");
+    await waitFor("window.busyResult !== 'pending'");
+    assert.match(await js('window.busyResult'), /superseded|closed before opening/i);
+    assert.equal(sessions.has('busy'), false);
+    busyOwner.destroy();
+    assert.ok(pendingTransportClosed, 'observe the pending real transport');
+    await pendingTransportClosed;
+    assert.equal(pendingTransport.destroyed, true);
+    // Reconnect after releasing the occupied pipe. This also proves a cancelled
+    // late connect cannot keep the one server instance occupied indefinitely.
+    assert.equal(await js(`window.netcatty.startSerialSession(${JSON.stringify({ sessionId: 'busy-reconnect', path: busyPath })})`), 'busy-reconnect');
+    await subscribe('busy-reconnect');
+    await js("window.netcatty.writeToSession('busy-reconnect', 'after cancellation')");
+    await waitFor("window.pipeOutput === 'after cancellation'");
+    await js("window.netcatty.closeSession('busy-reconnect')");
+    assert.equal(sessions.has('busy'), false, 'cancelled late connect must not create a session');
+    console.log('SERIAL_PIPE_BUSY_PASS: pending cancel, late-connect cleanup, manual reconnect');
+
     await new Promise(resolve => server.close(resolve));
     server = null;
     await assert.rejects(js(`window.netcatty.startSerialSession(${JSON.stringify({ sessionId: 'missing', path: endpoint })})`), /Failed to open serial port/);
