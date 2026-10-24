@@ -201,6 +201,92 @@ test("serial wake enter is not cancelled when login arrives during interceptor d
   }
 });
 
+test("serial interceptor that rewrites a wake enter into text cancels auto-login", async () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  let interceptorStarted = false;
+  terminalBridge.init({
+    sessions: new Map([["s", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has: () => true,
+      interceptInput: async (_sessionId, data) => {
+        interceptorStarted = true;
+        assert.equal(data, "\r");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        // Enter-to-command macro: the bare wake CR is no longer what is written.
+        return "uptime\r";
+      },
+    },
+  });
+  try {
+    terminalBridge.writeToSession({}, { sessionId: "s", data: "\r" });
+    await Promise.resolve();
+    assert.equal(interceptorStarted, true);
+    // Ingress still sees a wake, so autofill stays armed until the rewrite lands.
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, []);
+
+    const deadline = Date.now() + 500;
+    while (writes.length < 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    assert.deepEqual(events, ["cancelled"]);
+    assert.deepEqual(writes, ["uptime\r"]);
+
+    session.autoLogin.handleText("login: ");
+    session.autoLogin.handleText("\r\nPassword: ");
+    assert.deepEqual(events, ["cancelled"]);
+    assert.deepEqual(writes, ["uptime\r"]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
+test("serial interceptor that rewrites a wake enter into another wake still autofills", async () => {
+  const { session, writes, events } = createSerialAutoLoginSession();
+  let releaseInterceptor = () => {};
+  const interceptorGate = new Promise((resolve) => {
+    releaseInterceptor = resolve;
+  });
+  terminalBridge.init({
+    sessions: new Map([["s", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has: () => true,
+      interceptInput: async (_sessionId, data) => {
+        assert.equal(data, "\r");
+        await interceptorGate;
+        return "\r\n";
+      },
+    },
+  });
+  try {
+    terminalBridge.writeToSession({}, { sessionId: "s", data: "\r" });
+    await Promise.resolve();
+
+    session.autoLogin.handleText("login: ");
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["admin\r"]);
+
+    releaseInterceptor();
+    const deadline = Date.now() + 500;
+    while (writes.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["admin\r", "\r\n"]);
+
+    session.autoLogin.handleText("\r\nPassword: ");
+    assert.deepEqual(events, []);
+    assert.deepEqual(writes, ["admin\r", "\r\n", "secret\r"]);
+  } finally {
+    releaseInterceptor();
+    terminalBridge.cleanupAllSessions();
+  }
+});
+
 test("serial line-mode notification still cancels auto-login without keystroke data", () => {
   const { session, writes, events } = createSerialAutoLoginSession();
   terminalBridge.init({ sessions: new Map([["s", session]]), electronModule: {} });

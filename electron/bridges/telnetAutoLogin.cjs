@@ -73,6 +73,11 @@ function normalizePassword(password) {
   return typeof password === "string" ? password : "";
 }
 
+// Bare CR/LF used to wake a silent serial console before "login:" appears.
+function isAutoLoginWakeInput(data) {
+  return typeof data === "string" && /^[\r\n]+$/.test(data);
+}
+
 function createTelnetAutoLogin(options = {}) {
   const username = normalizeUsername(options.username);
   const password = normalizePassword(options.password);
@@ -211,7 +216,7 @@ function createTelnetAutoLogin(options = {}) {
     // appears. That wake is not a takeover: keep autofill armed and leave the
     // caller's write on the port. Any other user input still cancels.
     handleUserInput(data) {
-      const wakeOnly = typeof data === "string" && /^[\r\n]+$/.test(data);
+      const wakeOnly = isAutoLoginWakeInput(data);
       if (
         wakeOnly
         && !sentUsername
@@ -238,6 +243,7 @@ function createTelnetAutoLogin(options = {}) {
 
 module.exports = {
   createTelnetAutoLogin,
+  isAutoLoginWakeInput,
   isCommandPrompt,
   isContinuePrompt,
   isPasswordPrompt,
