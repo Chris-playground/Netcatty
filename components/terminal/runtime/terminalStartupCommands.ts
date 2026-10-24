@@ -3,6 +3,23 @@ import { normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
 import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
+/**
+ * Host startup is scheduled only after the shell attaches. Restored panes boot
+ * from the session fallback first; vault hydration (including group defaults)
+ * replaces `hostRef` while that dial is still in flight. The boot snapshot
+ * (`ctx.host`) keeps the credentials used to dial, but the command must come
+ * from the host that is current at attach time.
+ * A ref that only carries a write-path toggle (no id) is not a host snapshot.
+ * A different host id is a later pane, not this dial, so keep the snapshot.
+ */
+const resolveStartupHost = (
+  ctx: TerminalSessionStartersContext,
+): TerminalSessionStartersContext["host"] => {
+  const live = ctx.hostRef?.current;
+  if (live && live.id === ctx.host.id) return live;
+  return ctx.host;
+};
+
 const STARTUP_COMMAND_DEFAULT_DELAY_MS = 600;
 const STARTUP_COMMAND_MAX_DELAY_MS = 10000;
 
@@ -38,7 +55,7 @@ export const resolveStartupCommand = (
   ctx: TerminalSessionStartersContext,
   options?: { consumeSuppressHostStartupCommand?: boolean },
 ): string | undefined => {
-  const command = ctx.startupCommand || (ctx.suppressHostStartupCommandRef?.current ? undefined : ctx.host.startupCommand);
+  const command = ctx.startupCommand || (ctx.suppressHostStartupCommandRef?.current ? undefined : resolveStartupHost(ctx).startupCommand);
   if (options?.consumeSuppressHostStartupCommand && ctx.suppressHostStartupCommandRef) {
     ctx.suppressHostStartupCommandRef.current = false;
   }
@@ -96,7 +113,7 @@ export const scheduleStartupCommand = (
 
   const runMode = ctx.startupCommand
     ? (ctx.multiLineRunMode ?? "paste")
-    : (ctx.host.startupCommandRunMode ?? "paste");
+    : (resolveStartupHost(ctx).startupCommandRunMode ?? "paste");
   if (runMode === "paste") {
     timeoutId = setTimeout(() => {
       if (cancelled) return;
