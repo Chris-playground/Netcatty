@@ -213,18 +213,23 @@ function createTelnetAutoLogin(options = {}) {
       }
     },
     // Silent serial consoles need a bare CR/LF to wake getty before "login:"
-    // appears. That wake is not a takeover: keep autofill armed and leave the
-    // caller's write on the port. Any other user input still cancels.
+    // appears. While the detector is still active that wake is not a
+    // takeover: keep autofill armed, leave the caller's write on the port,
+    // and do not consume the one-shot continue-prompt response. A later
+    // "Press RETURN to continue" must still be answered. Once the detector
+    // is disabled (expiry, completion, or a prior cancel), the same Enter
+    // notifies like any other user input so callers can drop a deferred
+    // startup command. Any other user input still cancels.
     handleUserInput(data) {
       const wakeOnly = isAutoLoginWakeInput(data);
       if (
         wakeOnly
+        && !disabled
         && !sentUsername
         && !sentPassword
         && !isUsernamePrompt(tail)
         && !isPasswordPrompt(tail)
       ) {
-        sentWake = true;
         return;
       }
       disabled = true;
