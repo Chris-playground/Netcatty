@@ -296,6 +296,8 @@ test("a full keep count soft-hides the leaving session instead of snapshotting i
   assert.ok(alternateGate !== -1 && alternateGate < imageGate);
   assert.ok(imageGate !== -1 && imageGate < decision);
   assert.ok(decision < softHide && softHide < hide && hide < full);
+  assert.match(body, /evict: \(victim\) => terminalHiddenRendererStore\.evictSoftHidden\(victim\)/);
+  assert.doesNotMatch(body, /requestEviction\(keepDecision/);
   assert.match(
     body,
     /if \(softHiddenRef\.current\) \{\s*if \(statusRef\.current === "disconnected"\) \{\s*upgradeSoftHiddenRuntimeToHibernate\(\);\s*\}\s*return;\s*\}/,

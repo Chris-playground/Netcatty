@@ -2348,13 +2348,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       keepCount,
       softHiddenCount: terminalHiddenRendererStore.getSoftHiddenCount(),
       sessionId,
-      oldestSoftHiddenId: keepCount > 0
-        ? terminalHiddenRendererStore.pickEvictionCandidate(keepCount)
-        : null,
+      candidatesOldestFirst: keepCount > 0
+        ? terminalHiddenRendererStore.listSoftHiddenOldestFirst()
+        : [],
+      // evict reports success only after the victim leaves the soft-hidden set.
+      // Inline-image sessions consume the request and stay, so the policy can
+      // try the next oldest candidate or full-hibernate this session instead.
+      evict: (victim) => terminalHiddenRendererStore.evictSoftHidden(victim),
     });
-    if (keepDecision.evictSessionId) {
-      terminalHiddenRendererStore.requestEviction(keepDecision.evictSessionId);
-    }
     if (keepDecision.action === "soft-hide") {
       hideRuntimeOnly();
       return;

@@ -159,9 +159,12 @@ export function shouldSkipHibernateForAltScreen(
 }
 
 export type HiddenTabKeepCountDecision = {
-  /** Soft-hide the session that just left. Full hibernate only when keepCount is 0. */
+  /**
+   * Soft-hide the session that just left only when the keep set has room, or
+   * when one older session was actually evicted. Otherwise full-hibernate.
+   */
   action: "soft-hide" | "full-hibernate";
-  /** Oldest soft-hidden session to upgrade, when the keep set is already full. */
+  /** Soft-hidden session whose eviction succeeded, when the keep set was full. */
   evictSessionId: string | null;
 };
 
@@ -169,27 +172,34 @@ export type HiddenTabKeepCountDecision = {
  * Keep-count policy for a hidden session that is not already soft-hidden.
  * Callers still handle alternate screen, inline images, and a soft-hidden
  * session that later disconnects before asking. keepCount 0 (disconnected, or
- * the setting) full-hibernates. When the soft-hide set is full, the oldest
- * session is evicted and the session that just left stays soft-hidden, so
- * switching back is a WebGL wake. Wake replay order stays in
- * resolveHibernateWakeHistory (#2762). Atlas clear on that wake stays in
- * wakeSoftHiddenRuntime (#1063).
+ * the setting) full-hibernates. When the soft-hide set is full, walk
+ * candidates oldest-first and soft-hide the leaving session only after
+ * `evict` reports success. A refusal (inline images stay soft-hidden) tries
+ * the next candidate. If none can leave, the leaving session is fully
+ * hibernated so protected renderers cannot grow the set without bound.
+ * Wake replay order stays in resolveHibernateWakeHistory (#2762). Atlas
+ * clear on a soft wake stays in wakeSoftHiddenRuntime (#1063).
  */
 export function decideHiddenTabKeepCountAction(input: {
   keepCount: number;
   softHiddenCount: number;
   sessionId: string;
-  oldestSoftHiddenId: string | null;
+  /** Oldest soft-hidden session first. Snapshot this before evict mutates it. */
+  candidatesOldestFirst: readonly string[];
+  /** True only when that session actually left the soft-hidden set. */
+  evict: (sessionId: string) => boolean;
 }): HiddenTabKeepCountDecision {
-  if (input.keepCount > 0 && input.softHiddenCount < input.keepCount) {
+  if (!(input.keepCount > 0)) {
+    return { action: "full-hibernate", evictSessionId: null };
+  }
+  if (input.softHiddenCount < input.keepCount) {
     return { action: "soft-hide", evictSessionId: null };
   }
-  if (input.keepCount > 0) {
-    const victim = input.oldestSoftHiddenId;
-    return {
-      action: "soft-hide",
-      evictSessionId: victim && victim !== input.sessionId ? victim : null,
-    };
+  for (const candidate of input.candidatesOldestFirst) {
+    if (!candidate || candidate === input.sessionId) continue;
+    if (input.evict(candidate)) {
+      return { action: "soft-hide", evictSessionId: candidate };
+    }
   }
   return { action: "full-hibernate", evictSessionId: null };
 }

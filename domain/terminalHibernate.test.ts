@@ -93,45 +93,98 @@ test("normalizeHibernateHiddenTabsDelaySec clamps to the allowed range", () => {
   assert.equal(normalizeHibernateHiddenTabsDelaySec(9999), TERMINAL_HIBERNATE_DELAY_SEC_MAX);
 });
 
-test("a full keep-count soft-hides the tab that just left and evicts the oldest", () => {
+test("a full keep-count soft-hides the tab that just left only after an eviction succeeds", () => {
+  const underLimitEvictions: string[] = [];
   assert.deepEqual(decideHiddenTabKeepCountAction({
     keepCount: 2,
     softHiddenCount: 1,
     sessionId: "leaving",
-    oldestSoftHiddenId: "older",
+    candidatesOldestFirst: ["older"],
+    evict: (sessionId) => {
+      underLimitEvictions.push(sessionId);
+      return true;
+    },
   }), { action: "soft-hide", evictSessionId: null });
+  assert.deepEqual(underLimitEvictions, []);
 
+  const evicted: string[] = [];
   assert.deepEqual(decideHiddenTabKeepCountAction({
     keepCount: 2,
     softHiddenCount: 2,
     sessionId: "leaving",
-    oldestSoftHiddenId: "oldest",
+    candidatesOldestFirst: ["oldest", "newer"],
+    evict: (sessionId) => {
+      evicted.push(sessionId);
+      return sessionId === "oldest";
+    },
   }), { action: "soft-hide", evictSessionId: "oldest" });
+  assert.deepEqual(evicted, ["oldest"]);
 
   assert.deepEqual(decideHiddenTabKeepCountAction({
     keepCount: 2,
     softHiddenCount: 3,
     sessionId: "leaving",
-    oldestSoftHiddenId: "oldest",
+    candidatesOldestFirst: ["oldest"],
+    evict: () => true,
   }), { action: "soft-hide", evictSessionId: "oldest" });
 });
 
-test("keep-count zero still full-hibernates and does not evict", () => {
-  assert.deepEqual(decideHiddenTabKeepCountAction({
-    keepCount: 0,
-    softHiddenCount: 4,
-    sessionId: "leaving",
-    oldestSoftHiddenId: "oldest",
-  }), { action: "full-hibernate", evictSessionId: null });
-});
-
-test("a full keep-count does not evict the session that is deciding", () => {
+test("a refused eviction tries the next candidate, then full-hibernates", () => {
+  const attempts: string[] = [];
   assert.deepEqual(decideHiddenTabKeepCountAction({
     keepCount: 2,
     softHiddenCount: 2,
     sessionId: "leaving",
-    oldestSoftHiddenId: "leaving",
-  }), { action: "soft-hide", evictSessionId: null });
+    candidatesOldestFirst: ["images", "plain"],
+    evict: (sessionId) => {
+      attempts.push(sessionId);
+      return sessionId === "plain";
+    },
+  }), { action: "soft-hide", evictSessionId: "plain" });
+  assert.deepEqual(attempts, ["images", "plain"]);
+
+  const blocked: string[] = [];
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 2,
+    softHiddenCount: 2,
+    sessionId: "leaving",
+    candidatesOldestFirst: ["images", "also-images"],
+    evict: (sessionId) => {
+      blocked.push(sessionId);
+      return false;
+    },
+  }), { action: "full-hibernate", evictSessionId: null });
+  assert.deepEqual(blocked, ["images", "also-images"]);
+});
+
+test("keep-count zero still full-hibernates and does not evict", () => {
+  const evicted: string[] = [];
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 0,
+    softHiddenCount: 4,
+    sessionId: "leaving",
+    candidatesOldestFirst: ["oldest"],
+    evict: (sessionId) => {
+      evicted.push(sessionId);
+      return true;
+    },
+  }), { action: "full-hibernate", evictSessionId: null });
+  assert.deepEqual(evicted, []);
+});
+
+test("a full keep-count does not evict the session that is deciding", () => {
+  const evicted: string[] = [];
+  assert.deepEqual(decideHiddenTabKeepCountAction({
+    keepCount: 2,
+    softHiddenCount: 2,
+    sessionId: "leaving",
+    candidatesOldestFirst: ["leaving", "other"],
+    evict: (sessionId) => {
+      evicted.push(sessionId);
+      return false;
+    },
+  }), { action: "full-hibernate", evictSessionId: null });
+  assert.deepEqual(evicted, ["other"]);
 });
 
 test("resolveTerminalHibernateDelayMs converts seconds to milliseconds", () => {
