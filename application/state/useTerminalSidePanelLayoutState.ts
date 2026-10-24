@@ -23,33 +23,35 @@ export function useTerminalSidePanelLayoutState() {
 
   // Legacy and external open paths write the focused-tool map. Reconcile that
   // public application boundary into the per-tab tree without disturbing the
-  // other panes in an existing layout.
+  // other panes in an existing layout. Skip the setState when the click path
+  // already stored this selection: scheduling an identical update still
+  // renders again after a paired openTabs write.
   useEffect(() => {
-    setSidePanelLayouts((previous) => {
-      let changed = false;
-      const next = new Map(previous);
+    const previous = sidePanelLayoutsRef.current;
+    let changed = false;
+    const next = new Map(previous);
 
-      for (const tabId of previous.keys()) {
-        if (!sidePanelOpenTabs.has(tabId)) {
-          next.delete(tabId);
-          changed = true;
-        }
+    for (const tabId of previous.keys()) {
+      if (!sidePanelOpenTabs.has(tabId)) {
+        next.delete(tabId);
+        changed = true;
       }
+    }
 
-      for (const [tabId, tool] of sidePanelOpenTabs) {
-        const current = next.get(tabId);
-        const updated = current
-          ? selectSidePanelTool(current, tool)
-          : createSidePanelLayout(tool, crypto.randomUUID());
-        if (updated !== current) {
-          next.set(tabId, updated);
-          changed = true;
-        }
+    for (const [tabId, tool] of sidePanelOpenTabs) {
+      const current = next.get(tabId);
+      const updated = current
+        ? selectSidePanelTool(current, tool)
+        : createSidePanelLayout(tool, crypto.randomUUID());
+      if (updated !== current) {
+        next.set(tabId, updated);
+        changed = true;
       }
+    }
 
-      if (changed) sidePanelLayoutsRef.current = next;
-      return changed ? next : previous;
-    });
+    if (!changed) return;
+    sidePanelLayoutsRef.current = next;
+    setSidePanelLayouts(next);
   }, [sidePanelOpenTabs]);
 
   const commitLayout = useCallback((tabId: string, layout: SidePanelLayout) => {
@@ -61,6 +63,18 @@ export function useTerminalSidePanelLayoutState() {
     setSidePanelLayouts(layouts);
     setSidePanelOpenTabs(openTabs);
   }, []);
+
+  // Click path writes the focused tool and the layout together. The effect
+  // above still reconciles external openTabs writes, and skips when
+  // selectSidePanelTool returns the layout this call just stored.
+  const selectSidePanelToolForTab = useCallback((tabId: string, tool: SidePanelTool) => {
+    const current = sidePanelLayoutsRef.current.get(tabId);
+    const updated = current
+      ? selectSidePanelTool(current, tool)
+      : createSidePanelLayout(tool, crypto.randomUUID());
+    if (updated === current && sidePanelOpenTabsRef.current.get(tabId) === tool) return;
+    commitLayout(tabId, updated);
+  }, [commitLayout]);
 
   const focusPane = useCallback((tabId: string, paneId: string) => {
     const layout = sidePanelLayoutsRef.current.get(tabId);
@@ -129,5 +143,6 @@ export function useTerminalSidePanelLayoutState() {
     splitPane,
     closePane,
     resizeSplit,
+    selectSidePanelToolForTab,
   };
 }
