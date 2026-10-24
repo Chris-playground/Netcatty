@@ -4,19 +4,29 @@ import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
 /**
- * Host startup is scheduled only after the shell attaches. Restored panes boot
- * from the session fallback first; vault hydration (including group defaults)
- * replaces `hostRef` while that dial is still in flight. The boot snapshot
- * (`ctx.host`) keeps the credentials used to dial, but the command must come
- * from the host that is current at attach time.
- * A ref that only carries a write-path toggle (no id) is not a host snapshot.
- * A different host id is a later pane, not this dial, so keep the snapshot.
+ * Host startup is scheduled only after the shell attaches. Restored SSH panes
+ * boot from the session fallback first; vault hydration (including group
+ * defaults) replaces `hostRef` while that dial is still in flight. The boot
+ * snapshot (`ctx.host`) keeps the credentials used to dial, but the SSH
+ * command must come from the host that is current at attach time.
+ *
+ * Serial preflight uses this same resolver to decide whether to wait for
+ * auto-login, then schedules again after the port opens. A command that shows
+ * up on `hostRef` only during that open stays on the snapshot, so it is not
+ * typed into the saved username/password exchange. Other non-SSH transports
+ * keep that snapshot too, so preflight and schedule stay on the same host.
+ * A missing protocol is a legacy SSH host. A ref that only carries a
+ * write-path toggle (no id) is not a host snapshot. A different host id is a
+ * later pane, not this dial, so keep the snapshot.
  */
+const prefersLiveStartupHost = (protocol: string | undefined): boolean =>
+  protocol === "ssh" || protocol === undefined;
+
 const resolveStartupHost = (
   ctx: TerminalSessionStartersContext,
 ): TerminalSessionStartersContext["host"] => {
   const live = ctx.hostRef?.current;
-  if (live && live.id === ctx.host.id) return live;
+  if (prefersLiveStartupHost(ctx.host.protocol) && live && live.id === ctx.host.id) return live;
   return ctx.host;
 };
 
