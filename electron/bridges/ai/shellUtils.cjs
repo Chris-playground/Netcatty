@@ -61,10 +61,11 @@ const POWERSHELL_PROMPT_PATTERN = /^PS(?:\s+\S.*)?>$/;
 // PowerShell's `PS C:\...>` (handled by POWERSHELL_PROMPT_PATTERN first).
 const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 
-// Classic `user@host:...$` / `user@host:...#` login prompt (bash/zsh in WSL,
-// remote Linux, etc.). Intentionally narrow so custom / fish prompts do not
-// flip a Windows DefaultShell soft hint.
-const POSIX_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+(?::[^\n\r]*)?[#$]$/;
+// Default login prompts, kept narrow so custom / fish / starship prompts do
+// not flip a Windows DefaultShell soft hint:
+//   - bash/zsh `user@host[:path][#$]` (colon before the path; `root@host ~#` stays rejected)
+//   - RHEL-family `[\u@\h \W]\$` -> `[user@host path][#$]`, or `[user@host][#$]` with no path
+const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\s\]]+)?\])[#$]$/;
 
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
@@ -149,7 +150,7 @@ function trackSessionIdlePrompt(session, chunk) {
 // Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
 // still ends with it. The cached prompt is updated only when
 // extractTrailingIdlePrompt recognizes a known shape (PowerShell, cmd.exe,
-// or `user@host[:path][#$]`); a remote shell switch into another shell, an
+// `user@host[:path][#$]`, or RHEL `[user@host path][#$]`); a remote shell switch into another shell, an
 // oh-my-posh / starship / custom PS1, or any unrecognized prompt would
 // otherwise leave a stale value behind, which `resolveEffectiveShellKind`
 // would then keep using to coerce future commands into a PowerShell
