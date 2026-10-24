@@ -67,6 +67,9 @@ if (!process.versions.electron) {
     await win.loadURL('app://netcatty/serial-pipe-test');
     assert.equal(await js('typeof window.netcatty.startSerialSession'), 'function');
     const endpoint = String.raw`\\.\pipe\netcatty VM console ${randomUUID()}`;
+    const busyName = `netcatty-busy-${randomUUID()}`;
+    const busyPath = '\\\\.\\pipe\\' + busyName;
+    assert.ok(busyPath.endsWith(busyName) && !busyPath.includes('${'));
     if (process.platform !== 'win32') {
       // Exercise callback registration too; functions must never be returned
       // from executeJavaScript across Electron's structured-clone boundary.
@@ -134,8 +137,6 @@ if (!process.versions.electron) {
 
     // Node net.Server permits multiple simultaneous clients. Use a tiny .NET
     // server to reproduce a real single-instance pipe's ERROR_PIPE_BUSY path.
-    const busyName = `netcatty-busy-${randomUUID()}`;
-    const busyPath = String.raw`\\.\pipe\${busyName}`;
     const fixtureExe = path.join(profile, 'single-instance-pipe.exe');
     const compiler = path.join(process.env.WINDIR, 'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
     execFileSync(compiler, ['/nologo', '/target:exe', `/out:${fixtureExe}`,
