@@ -911,7 +911,7 @@ index ad77592..a249e00 100644
      [ /^OpenSSH_5[.][0-9]+/, COMPAT.DYN_RPORT_BUG ],
      [ /^OpenSSH_7[.]4/, COMPAT.IMPLY_RSA_SHA2_SIGALGS ],
 diff --git a/node_modules/ssh2/lib/protocol/kex.js b/node_modules/ssh2/lib/protocol/kex.js
-index 811e631..acdf74c 100644
+index 811e631..422a198 100644
 --- a/node_modules/ssh2/lib/protocol/kex.js
 +++ b/node_modules/ssh2/lib/protocol/kex.js
 @@ -30,7 +30,10 @@ const {
@@ -926,12 +926,14 @@ index 811e631..acdf74c 100644
  const {
    bufferFill,
    bufferParser,
-@@ -49,6 +52,27 @@ const {
+@@ -49,6 +52,68 @@ const {
  
  let MESSAGE_HANDLERS;
  
-+const RSA_HOST_CERT = /^(?:ssh-rsa|rsa-sha2-256|rsa-sha2-512)-cert-v0[01]@openssh\.com$/;
-+const RSA_HOST_SIGNATURES = new Set([
++const LEGACY_RSA_HOST_CERT = /^ssh-rsa-cert-v0[01]@openssh\.com$/;
++const RSA_SHA2_256_HOST_CERT = /^rsa-sha2-256-cert-v0[01]@openssh\.com$/;
++const RSA_SHA2_512_HOST_CERT = /^rsa-sha2-512-cert-v0[01]@openssh\.com$/;
++const LEGACY_RSA_HOST_SIGNATURES = new Set([
 +  'rsa-sha2-256',
 +  'rsa-sha2-512',
 +  'ssh-rsa',
@@ -940,21 +942,60 @@ index 811e631..acdf74c 100644
 +// Client KEX accepts the negotiated host-key name or, for OpenSSH host
 +// certificates, the underlying key algorithm. Real servers sign with the
 +// embedded key (ssh-ed25519, ecdsa-sha2-*, rsa-sha2-*) rather than the
-+// certificate algorithm name. RSA certs may use any RSA SHA-2 / ssh-rsa
-+// signature, matching the plain rsa-sha2-* exception.
++// certificate algorithm name. OpenSSH allows any RSA signature only for the
++// legacy ssh-rsa certificate. rsa-sha2-256/512 certificates must use the
++// hash that was negotiated.
 +function hostKeySignatureTypeAccepted(negotiatedServerHostKey, sigType) {
++  if (RSA_SHA2_256_HOST_CERT.test(negotiatedServerHostKey))
++    return sigType === 'rsa-sha2-256';
++  if (RSA_SHA2_512_HOST_CERT.test(negotiatedServerHostKey))
++    return sigType === 'rsa-sha2-512';
 +  if (sigType === negotiatedServerHostKey)
 +    return true;
 +  if (sigType === getOpenSSHCertSignatureAlgorithm(negotiatedServerHostKey))
 +    return true;
-+  return RSA_HOST_CERT.test(negotiatedServerHostKey)
-+    && RSA_HOST_SIGNATURES.has(sigType);
++  return LEGACY_RSA_HOST_CERT.test(negotiatedServerHostKey)
++    && LEGACY_RSA_HOST_SIGNATURES.has(sigType);
++}
++
++// Plain rsa-sha2-* keeps an ssh-rsa key blob. An RSA certificate negotiation
++// is KEY_RSA_CERT: the blob must be ssh-rsa-cert-v01@openssh.com, never a
++// plain ssh-rsa key.
++function hostKeyBlobTypeAccepted(negotiatedServerHostKey, hostPubKeyType) {
++  if (hostPubKeyType === negotiatedServerHostKey)
++    return true;
++  switch (negotiatedServerHostKey) {
++    case 'rsa-sha2-256':
++    case 'rsa-sha2-512':
++      return hostPubKeyType === 'ssh-rsa';
++    case 'rsa-sha2-256-cert-v01@openssh.com':
++    case 'rsa-sha2-512-cert-v01@openssh.com':
++      return hostPubKeyType === 'ssh-rsa-cert-v01@openssh.com';
++    default:
++      return false;
++  }
++}
++
++function hashAlgoForHostKey(negotiatedServerHostKey, sigType) {
++  // Negotiated RSA-SHA2 wins over the signature label so a mismatched
++  // signature cannot select a weaker hash.
++  if (negotiatedServerHostKey === 'rsa-sha2-256'
++      || RSA_SHA2_256_HOST_CERT.test(negotiatedServerHostKey))
++    return 'sha256';
++  if (negotiatedServerHostKey === 'rsa-sha2-512'
++      || RSA_SHA2_512_HOST_CERT.test(negotiatedServerHostKey))
++    return 'sha512';
++  if (sigType === 'rsa-sha2-256')
++    return 'sha256';
++  if (sigType === 'rsa-sha2-512')
++    return 'sha512';
++  return undefined;
 +}
 +
  const GEX_MIN_BITS = 2048; // RFC 8270
  const GEX_MAX_BITS = 8192; // RFC 8270
  
-@@ -635,7 +659,7 @@ const createKeyExchange = (() => {
+@@ -635,7 +700,7 @@ const createKeyExchange = (() => {
            );
          }
  
@@ -963,7 +1004,7 @@ index 811e631..acdf74c 100644
            return doFatalError(
              this._protocol,
              `Wrong signature type: ${sigType}, `
-@@ -659,7 +683,10 @@ const createKeyExchange = (() => {
+@@ -659,7 +724,10 @@ const createKeyExchange = (() => {
            );
          }
  
@@ -975,52 +1016,38 @@ index 811e631..acdf74c 100644
            return doFatalError(
              this._protocol,
              'Malformed signature',
-@@ -686,11 +713,25 @@ const createKeyExchange = (() => {
+@@ -685,12 +753,10 @@ const createKeyExchange = (() => {
+           }
          }
  
-         let hashAlgo;
+-        let hashAlgo;
 -        // Check if we need to override the default hash algorithm
 -        switch (this.negotiated.serverHostKey) {
-+        // Prefer the signature's own RSA SHA-2 algorithm. Host certificates
-+        // negotiate rsa-sha2-*-cert-v01@openssh.com but are signed as
-+        // rsa-sha2-256 / rsa-sha2-512 / ssh-rsa.
-+        switch (sigType) {
-           case 'rsa-sha2-256': hashAlgo = 'sha256'; break;
-           case 'rsa-sha2-512': hashAlgo = 'sha512'; break;
-         }
-+        if (hashAlgo === undefined) {
-+          switch (this.negotiated.serverHostKey) {
-+            case 'rsa-sha2-256':
-+            case 'rsa-sha2-256-cert-v01@openssh.com':
-+              hashAlgo = 'sha256';
-+              break;
-+            case 'rsa-sha2-512':
-+            case 'rsa-sha2-512-cert-v01@openssh.com':
-+              hashAlgo = 'sha512';
-+              break;
-+          }
-+        }
+-          case 'rsa-sha2-256': hashAlgo = 'sha256'; break;
+-          case 'rsa-sha2-512': hashAlgo = 'sha512'; break;
+-        }
++        const hashAlgo = hashAlgoForHostKey(
++          this.negotiated.serverHostKey,
++          sigType
++        );
  
          this._protocol._debug
            && this._protocol._debug('Verifying signature ...');
-@@ -720,8 +761,14 @@ const createKeyExchange = (() => {
-         let hashAlgo;
-         // Check if we need to override the default hash algorithm
-         switch (this.negotiated.serverHostKey) {
+@@ -717,12 +783,7 @@ const createKeyExchange = (() => {
+       } else {
+         // Server
+ 
+-        let hashAlgo;
+-        // Check if we need to override the default hash algorithm
+-        switch (this.negotiated.serverHostKey) {
 -          case 'rsa-sha2-256': hashAlgo = 'sha256'; break;
 -          case 'rsa-sha2-512': hashAlgo = 'sha512'; break;
-+          case 'rsa-sha2-256':
-+          case 'rsa-sha2-256-cert-v01@openssh.com':
-+            hashAlgo = 'sha256';
-+            break;
-+          case 'rsa-sha2-512':
-+          case 'rsa-sha2-512-cert-v01@openssh.com':
-+            hashAlgo = 'sha512';
-+            break;
-         }
+-        }
++        const hashAlgo = hashAlgoForHostKey(this.negotiated.serverHostKey);
  
          this._protocol._debug && this._protocol._debug(
-@@ -739,7 +786,12 @@ const createKeyExchange = (() => {
+           'Generating signature ...'
+@@ -739,7 +800,12 @@ const createKeyExchange = (() => {
            );
          }
  
@@ -1034,7 +1061,7 @@ index 811e631..acdf74c 100644
          if (signature === false) {
            return doFatalError(
              this._protocol,
-@@ -759,7 +811,6 @@ const createKeyExchange = (() => {
+@@ -759,7 +825,6 @@ const createKeyExchange = (() => {
            string    <method-specific data>
            string    signature of H
          */
@@ -1042,19 +1069,15 @@ index 811e631..acdf74c 100644
          const sigTypeLen = Buffer.byteLength(sigType);
          const sigLen = 4 + sigTypeLen + 4 + signature.length;
          let p = this._protocol._packetRW.write.allocStartKEX;
-@@ -1168,20 +1219,29 @@ const createKeyExchange = (() => {
+@@ -1167,22 +1232,16 @@ const createKeyExchange = (() => {
+                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
                );
              }
-             if (hostPubKeyType !== this.negotiated.serverHostKey) {
+-            if (hostPubKeyType !== this.negotiated.serverHostKey) {
 -              // Check if we need to make an exception
-+              // RSA SHA-2 negotiates rsa-sha2-* while the blob type stays
-+              // ssh-rsa. RSA host certificates do the same: the negotiable
-+              // name is rsa-sha2-*-cert-v01@openssh.com and the blob type is
-+              // ssh-rsa-cert-v01@openssh.com.
-+              let allowed = false;
-               switch (this.negotiated.serverHostKey) {
-                 case 'rsa-sha2-256':
-                 case 'rsa-sha2-512':
+-              switch (this.negotiated.serverHostKey) {
+-                case 'rsa-sha2-256':
+-                case 'rsa-sha2-512':
 -                  if (hostPubKeyType === 'ssh-rsa')
 -                    break;
 -                // FALLTHROUGH
@@ -1065,25 +1088,21 @@ index 811e631..acdf74c 100644
 -                    'handshake',
 -                    DISCONNECT_REASON.KEY_EXCHANGE_FAILED
 -                  );
-+                  allowed = hostPubKeyType === 'ssh-rsa';
-+                  break;
-+                case 'rsa-sha2-256-cert-v01@openssh.com':
-+                case 'rsa-sha2-512-cert-v01@openssh.com':
-+                  allowed = hostPubKeyType === 'ssh-rsa-cert-v01@openssh.com'
-+                    || hostPubKeyType === 'ssh-rsa';
-+                  break;
-+              }
-+              if (!allowed) {
-+                return doFatalError(
-+                  this._protocol,
-+                  'Host key does not match negotiated type',
-+                  'handshake',
-+                  DISCONNECT_REASON.KEY_EXCHANGE_FAILED
-+                );
-               }
+-              }
++            if (!hostKeyBlobTypeAccepted(
++              this.negotiated.serverHostKey,
++              hostPubKeyType
++            )) {
++              return doFatalError(
++                this._protocol,
++                'Host key does not match negotiated type',
++                'handshake',
++                DISCONNECT_REASON.KEY_EXCHANGE_FAILED
++              );
              }
  
-@@ -1377,8 +1437,13 @@ const createKeyExchange = (() => {
+             this._hostKey = hostPubKey;
+@@ -1377,8 +1436,13 @@ const createKeyExchange = (() => {
        this._generator = null;
        this._minBits = GEX_MIN_BITS;
        this._prefBits = dhEstimate(this.negotiated);
@@ -1098,10 +1117,11 @@ index 811e631..acdf74c 100644
        this._maxBits = GEX_MAX_BITS;
      }
      start() {
-@@ -1868,6 +1933,7 @@ function trySendNEWKEYS(kex) {
+@@ -1868,6 +1932,8 @@ function trySendNEWKEYS(kex) {
  
  module.exports = {
    KexInit,
++  hostKeyBlobTypeAccepted,
 +  hostKeySignatureTypeAccepted,
    kexinit,
    onKEXPayload,

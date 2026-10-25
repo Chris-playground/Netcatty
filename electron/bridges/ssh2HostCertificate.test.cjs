@@ -14,7 +14,10 @@ const {
   parseDERKey,
   parseKey,
 } = require("ssh2/lib/protocol/keyParser.js");
-const { hostKeySignatureTypeAccepted } = require("ssh2/lib/protocol/kex.js");
+const {
+  hostKeyBlobTypeAccepted,
+  hostKeySignatureTypeAccepted,
+} = require("ssh2/lib/protocol/kex.js");
 
 // Manual live check (optional; needs network and real Instabox credentials):
 //   ssh -vv -p 2222 USER@ssh.instabox.sh
@@ -32,6 +35,23 @@ const HOST_CERT_ALGORITHMS = [
   "rsa-sha2-256-cert-v01@openssh.com",
   "ssh-rsa-cert-v01@openssh.com",
 ];
+
+function sshKeygenSkipReason(error) {
+  if (error && error.code === "ENOENT")
+    return "ssh-keygen is not installed";
+  return false;
+}
+
+function detectSshKeygenSkip() {
+  try {
+    execFileSync("ssh-keygen", ["-h"], { stdio: "ignore" });
+    return false;
+  } catch (error) {
+    return sshKeygenSkipReason(error);
+  }
+}
+
+const sshKeygenSkip = detectSshKeygenSkip();
 
 function mintEd25519HostCert(dir) {
   const ca = path.join(dir, "ca");
@@ -83,7 +103,15 @@ test("ssh2 default and supported host key lists offer OpenSSH host certificates"
   );
 });
 
-test("parseDERKey reads an OpenSSH ed25519 host certificate the way KEX does", () => {
+test("missing ssh-keygen skips host-certificate minting instead of failing", () => {
+  const missing = Object.assign(new Error("spawn ssh-keygen ENOENT"), { code: "ENOENT" });
+  assert.equal(sshKeygenSkipReason(missing), "ssh-keygen is not installed");
+  const present = Object.assign(new Error("usage"), { status: 1 });
+  assert.equal(sshKeygenSkipReason(present), false);
+  assert.equal(sshKeygenSkipReason(null), false);
+});
+
+test("parseDERKey reads an OpenSSH ed25519 host certificate the way KEX does", { skip: sshKeygenSkip }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-hostcert-"));
   try {
     const minted = mintEd25519HostCert(dir);
@@ -114,21 +142,67 @@ test("host key signature type accepts the underlying algorithm for host certific
     true,
   );
   assert.equal(
+    hostKeySignatureTypeAccepted("rsa-sha2-256-cert-v01@openssh.com", "rsa-sha2-256"),
+    true,
+  );
+  assert.equal(
+    hostKeySignatureTypeAccepted("rsa-sha2-256-cert-v01@openssh.com", "rsa-sha2-512"),
+    false,
+  );
+  assert.equal(
+    hostKeySignatureTypeAccepted("rsa-sha2-256-cert-v01@openssh.com", "ssh-rsa"),
+    false,
+  );
+  assert.equal(
+    hostKeySignatureTypeAccepted("rsa-sha2-256-cert-v00@openssh.com", "ssh-rsa"),
+    false,
+  );
+  assert.equal(
     hostKeySignatureTypeAccepted("rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-512"),
     true,
   );
   assert.equal(
     hostKeySignatureTypeAccepted("rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-256"),
-    true,
+    false,
   );
   assert.equal(
     hostKeySignatureTypeAccepted("rsa-sha2-512-cert-v01@openssh.com", "ssh-rsa"),
-    true,
+    false,
   );
   assert.equal(
     hostKeySignatureTypeAccepted("ssh-rsa-cert-v01@openssh.com", "rsa-sha2-256"),
     true,
   );
+  assert.equal(
+    hostKeySignatureTypeAccepted("ssh-rsa-cert-v01@openssh.com", "rsa-sha2-512"),
+    true,
+  );
+  assert.equal(
+    hostKeySignatureTypeAccepted("ssh-rsa-cert-v01@openssh.com", "ssh-rsa"),
+    true,
+  );
+  assert.equal(
+    hostKeySignatureTypeAccepted("ssh-rsa-cert-v00@openssh.com", "ssh-rsa"),
+    true,
+  );
+  assert.equal(
+    hostKeyBlobTypeAccepted("rsa-sha2-256-cert-v01@openssh.com", "ssh-rsa-cert-v01@openssh.com"),
+    true,
+  );
+  assert.equal(
+    hostKeyBlobTypeAccepted("rsa-sha2-512-cert-v01@openssh.com", "ssh-rsa-cert-v01@openssh.com"),
+    true,
+  );
+  assert.equal(
+    hostKeyBlobTypeAccepted("rsa-sha2-256-cert-v01@openssh.com", "ssh-rsa"),
+    false,
+  );
+  assert.equal(
+    hostKeyBlobTypeAccepted("rsa-sha2-512-cert-v01@openssh.com", "ssh-rsa"),
+    false,
+  );
+  assert.equal(hostKeyBlobTypeAccepted("rsa-sha2-256", "ssh-rsa"), true);
+  assert.equal(hostKeyBlobTypeAccepted("rsa-sha2-512", "ssh-rsa"), true);
   assert.equal(hostKeySignatureTypeAccepted("ssh-ed25519", "ssh-ed25519"), true);
   assert.equal(hostKeySignatureTypeAccepted("ssh-ed25519", HOST_CERT), false);
   assert.equal(hostKeySignatureTypeAccepted("rsa-sha2-256", "ssh-rsa"), false);
@@ -162,7 +236,7 @@ function loadSsh2WithCertHostKey(pem, certBlob) {
   return ssh2;
 }
 
-test("ssh2 client completes KEX against a cert-only ed25519 host key", async () => {
+test("ssh2 client completes KEX against a cert-only ed25519 host key", { skip: sshKeygenSkip }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-hostcert-kex-"));
   const minted = mintEd25519HostCert(dir);
   assert.equal(minted.privateKey instanceof Error, false, minted.privateKey.message);
