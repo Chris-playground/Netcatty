@@ -9,6 +9,7 @@ import { useSettingsState } from "../../../application/state/useSettingsState";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { Button } from "../../ui/button";
+import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 import {
   SectionHeader,
@@ -51,6 +52,7 @@ export default function SettingsFileAssociationsTab() {
   const associations = getAllAssociations();
   const defaultOpener = getDefaultOpener();
   const [editingExtension, setEditingExtension] = useState<string | null>(null);
+  const [pendingRemoveExtension, setPendingRemoveExtension] = useState<string | null>(null);
   const [isSelectingDefaultApp, setIsSelectingDefaultApp] = useState(false);
 
   const defaultOpenerValue = useMemo(() => {
@@ -60,10 +62,14 @@ export default function SettingsFileAssociationsTab() {
   }, [defaultOpener]);
 
   const handleRemove = useCallback((extension: string) => {
-    if (confirm(t('settings.sftpFileAssociations.removeConfirm', { ext: extension === 'file' ? t('sftp.opener.noExtension') : extension }))) {
-      removeAssociation(extension);
-    }
-  }, [removeAssociation, t]);
+    setPendingRemoveExtension(extension);
+  }, []);
+
+  const handleConfirmRemoveAssociation = useCallback(() => {
+    if (!pendingRemoveExtension) return;
+    removeAssociation(pendingRemoveExtension);
+    setPendingRemoveExtension(null);
+  }, [pendingRemoveExtension, removeAssociation]);
 
   const handleSelectDefaultSystemApp = useCallback(async () => {
     setIsSelectingDefaultApp(true);
@@ -372,6 +378,20 @@ export default function SettingsFileAssociationsTab() {
           </table>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingRemoveExtension !== null}
+        title={pendingRemoveExtension
+          ? t('settings.sftpFileAssociations.removeConfirm', {
+              ext: pendingRemoveExtension === 'file' ? t('sftp.opener.noExtension') : pendingRemoveExtension,
+            })
+          : ''}
+        confirmLabel={t('action.remove')}
+        destructive
+        onOpenChange={(open) => {
+          if (!open) setPendingRemoveExtension(null);
+        }}
+        onConfirm={handleConfirmRemoveAssociation}
+      />
     </SettingsTabContent>
   );
 }
