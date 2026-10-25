@@ -381,7 +381,7 @@ export default function SettingsFileAssociationsTab() {
       <ConfirmDialog
         open={removeConfirmExt !== null}
         title={removeConfirmExt ? t('settings.sftpFileAssociations.removeConfirm', { ext: removeConfirmExt === 'file' ? t('sftp.opener.noExtension') : removeConfirmExt }) : ''}
-        confirmLabel={t('settings.sftpFileAssociations.remove')}
+        confirmLabel={t('action.remove')}
         destructive
         onOpenChange={(open) => {
           if (!open) setRemoveConfirmExt(null);
