@@ -182,6 +182,32 @@ function getFreshIdlePrompt(session) {
   return normalizedTail.endsWith(normalizedCached) ? cached : "";
 }
 
+// Readiness companion to getFreshIdlePrompt. PSReadLine echoes keys (including
+// the pending-input clear prefix) and then erases them with cursor-column +
+// ED/EL without appending a fresh copy of the prompt. stripAnsi removes the
+// erase, so the raw tail no longer ends with the cached prompt while the
+// screen is still an idle default prompt (#3927). Collapse those cursor and
+// erase operations, then accept only the line the cursor is actually on.
+function getVisibleIdlePrompt(session) {
+  const tail = session?._promptTrackTail;
+  if (typeof tail !== "string" || !tail) return "";
+
+  const { terminalCursorLine } = require("../terminalLogSanitizer.cjs");
+  const cursorLine = terminalCursorLine(tail);
+  const rightTrimmed = cursorLine.replace(/\s+$/, "");
+  if (!rightTrimmed) return "";
+  if (
+    !isDefaultPowerShellPromptLine(rightTrimmed)
+    && !isDefaultPosixPromptLine(rightTrimmed)
+    && !isDefaultCmdPromptLine(rightTrimmed)
+  ) {
+    return "";
+  }
+  // Keep one trailing space when the visible prompt has one. Erase-to-end
+  // padding must not become part of the expected prompt.
+  return /\s$/.test(cursorLine) ? `${rightTrimmed} ` : rightTrimmed;
+}
+
 // ── URL helpers ──
 
 function isLocalhostHostname(hostname) {
@@ -1122,6 +1148,7 @@ module.exports = {
   formatSyntheticEcho,
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
+  getVisibleIdlePrompt,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,

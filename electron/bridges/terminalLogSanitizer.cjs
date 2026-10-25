@@ -76,6 +76,11 @@ class TerminalTextRenderer {
     return this.toString();
   }
 
+  getCursorLine() {
+    const line = this.lines[this.row] || [];
+    return line.map((cell) => cell?.ch || " ").join("");
+  }
+
   toString({ includePendingClearedScreen = false, formatLine = (line) => line } = {}) {
     const lines = includePendingClearedScreen ? this.#linesWithPendingClearedScreen() : this.lines;
     return lines
@@ -515,6 +520,16 @@ function terminalDataToPlainText(terminalData) {
   return renderer.finish();
 }
 
+function terminalCursorLine(terminalData) {
+  const renderer = new TerminalTextRenderer();
+  renderer.feed(terminalData || "");
+  renderer.finish();
+  // A full-screen program owns the display. The main buffer may still hold
+  // the shell prompt from before the alternate screen was entered.
+  if (renderer.alternateScreenActive) return "";
+  return renderer.getCursorLine();
+}
+
 function terminalDataToHtmlContent(terminalData) {
   const renderer = new TerminalTextRenderer();
   renderer.feed(terminalData || "");
@@ -531,6 +546,7 @@ module.exports = {
   createTerminalTextRenderer,
   terminalDataToHtmlContent,
   terminalDataToPlainText,
+  terminalCursorLine,
 };
 
 function createDefaultStyle() {
