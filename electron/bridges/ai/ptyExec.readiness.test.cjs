@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { startPtyJob } = require('./ptyExec.cjs');
 const { getFreshIdlePrompt, getVisibleIdlePrompt, trackSessionIdlePrompt } = require('./shellUtils.cjs');
+const { terminalCursorLine } = require('../terminalLogSanitizer.cjs');
 
 function readyPrompt(session) {
   return getFreshIdlePrompt(session) || getVisibleIdlePrompt(session);
@@ -233,6 +234,36 @@ test('the next PowerShell exec runs after the clear-prefix echo is erased on scr
   assert.equal(secondResult.ok, true);
   assert.equal(secondResult.stdout, 'ok');
   assert.equal(pty.writes.length, 2);
+});
+
+test('alt-screen paint is not ready after the entry sequence leaves the prompt tail', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = 'PS C:\\Users\\alice> ';
+  // A full-screen app can emit more than the 4096-byte prompt tail. Once the
+  // alternate-screen entry scrolls off, a painted idle prompt must not unlock
+  // ptyExec and type into the still-running program.
+  trackSessionIdlePrompt(session, prompt);
+  trackSessionIdlePrompt(session, `\x1b[?1049h${'x'.repeat(4200)}`);
+  trackSessionIdlePrompt(session, `\r\n${prompt}\r`);
+  assert.equal(session._promptTrackTail.includes('\x1b[?1049h'), false);
+  assert.equal(terminalCursorLine(session._promptTrackTail).trimEnd(), prompt.trimEnd());
+  assert.equal(getFreshIdlePrompt(session), '');
+  assert.equal(getVisibleIdlePrompt(session), '');
+  assert.equal(readyPrompt(session), '');
+
+  const job = startPtyJob(pty, 'Write-Output ok', {
+    shellKind: 'powershell',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 50,
+    timeoutMs: 1000,
+  });
+  t.mock.timers.tick(50);
+  const result = await job.resultPromise;
+  assert.equal(result.code, 'SHELL_NOT_READY');
+  assert.match(result.error, /no command was sent/);
+  assert.deepEqual(pty.writes, []);
 });
 
 test('real pending PowerShell input is still not sent', async (t) => {
