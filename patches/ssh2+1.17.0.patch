@@ -1258,7 +1258,7 @@ index a276c1a..c8ff9d1 100644
 +    signedData.set(dataHash, p);
 +
 +    let toVerify = rawSig;
-+    if (this.type === 'sk-ecdsa-sha2-nistp256@openssh.com') {
++    if (getOpenSSHCertBaseType(this.type) === 'sk-ecdsa-sha2-nistp256@openssh.com') {
 +      // Convert SSH ECDSA r,s blob to ASN.1 for OpenSSL
 +      const { sigSSHToASN1 } = require('./utils.js');
 +      toVerify = sigSSHToASN1(rawSig, 'ecdsa-sha2-nistp256');
