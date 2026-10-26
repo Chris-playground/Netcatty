@@ -50,10 +50,30 @@ The table reports milliseconds. Median is the eighth sorted observation. P95 use
 
 These are local end-to-end SSH echo completion times for this fixture. They are not native app paste latency, remote processing time, a throughput benchmark, or evidence that the previous behavior caused lag. Client write-call counts do not establish SSH packet boundaries, server read boundaries, or SSH channel-data block counts.
 
-## Native desktop evidence status
+## Native desktop results
 
-The interim native QA report for code commit `bd5f27ff42d29b18c0e9cb3513415da3243dd636` confirms bidirectional save/reconnect and full hibernate/wake checks. The native fixture's 37-byte short sample retained identical content in both modes and produced 1 / 13 observed SSH channel-data blocks. Those block counts are a different observation from the implementation fixture's 1 / 21 client write calls. The native 128 KiB long sample also retained identical content; it is not the 110,592-byte timing sample above. The interim report does not provide repetition counts or timings for these native observations, so no native median or P95 is reported.
+The final native report tested production code commit `bd5f27ff42d29b18c0e9cb3513415da3243dd636` against two owned loopback SSH endpoints in an isolated profile. The following checks passed:
 
-The native run's measured receive or completion times, when supplied, must state their own start and end boundaries. They cannot be substituted for the implementation fixture's client echo timings. Actual OS IME coverage must be stated separately from synthetic DOM-event coverage and native clipboard/paste coverage.
+- New hosts defaulted to standard mode. Duplicate, save, and application restart preserved each host's choice.
+- Saving during a connection did not change its input mode. A real reconnect adopted the saved mode in both directions.
+- Full hibernation used a 5-second hidden-tab delay and zero retained renderers, with xterm absence confirmed. Wake/reattach retained the old connection choice in both directions; a subsequent reconnect adopted the saved choice.
+- A missing-field legacy record was seeded into the isolated host store. Real application startup migrated it to `true`. After the user disabled compatibility, saved, and restarted, the value remained `false`.
+- The Chinese setting label, help text, and reconnect notice matched the required text and were captured in screenshots. Arrow and Ctrl+C bytes remained intact.
 
-The isolated-profile legacy-record startup migration check and the final native report are pending. Native acceptance is not marked complete. Qianxin hardware was unavailable during implementation, so compatibility with that endpoint remains unverified.
+| Native sample | Received-content result | Observed SSH channel-data blocks, standard / compatibility |
+|---|---|---|
+| `中文测试🙂é输入兼容模式` — 37 UTF-8 bytes, 13 code points | Hashes matched between modes | 1 / 13 |
+| Long sample — 131,072 bytes | Hashes matched between modes | Four 32,768-byte frames / four 32,768-byte frames |
+| Negotiated bracketed paste — 49 bytes | Preserved | 1 / 1 |
+
+The native short sample differs from the implementation fixture's 37-byte sample above. Its 1 / 13 SSH channel-data block observation is not the implementation fixture's 1 / 21 client write-call count. The native 131,072-byte long sample is also distinct from the 110,592-byte timing sample.
+
+The native timing observation was one PTY first-to-last receive span per mode: standard **3.408724 ms**, compatibility **1.600044 ms**. It starts at the first received PTY payload and ends at the last received payload. It excludes the input-to-first-receive interval and is not total GUI paste latency. One observation per mode does not provide a median, P95, or causal performance comparison. These spans cannot be substituted for the 15-repetition client echo timings above. Neither run establishes throughput superiority or that the previous workaround caused lag.
+
+Actual OS IME input and Qianxin hardware were not tested. Native networked cloud sync, import, and jump-chain behavior were also not tested; those data flows have automated coverage rather than claimed native validation. Synthetic DOM composition events, native GUI/paste coverage, client write calls, SSH data blocks, and receive timing remain separate evidence categories.
+
+Independent review confirmed the three reported P2 findings resolved, with no new blocking findings. The native application, SSH and clipboard fixture processes, isolated profile, and test keys were cleaned up; the source tree was clean after that run.
+
+## CI result
+
+The `test` workflow completed successfully for documentation commit `38c5f4744cb5fc3ecdd4e624b323587a471e4333`: [run 40319492139](https://github.com/binaricat/Netcatty/actions/runs/40319492139). That workflow includes `npm run lint`, `npm test`, generated-spec checks, and `npm run build`. The production code is unchanged from the native-tested `bd5f27ff` commit. Subsequent acceptance-text edits change documentation only. The PR remains draft and unmerged.
