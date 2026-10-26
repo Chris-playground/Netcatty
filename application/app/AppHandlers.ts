@@ -424,11 +424,15 @@ export async function handleKeyboardInteractiveSubmitImpl(
     // Save password to host if requested - never for second-factor / EDR prompts
     // (allowSavePassword === false) so a secondary secret cannot overwrite the
     // host login password (#2150 / Codex review on #2151).
+    // Detach a Keychain identity when one is attached. resolveHostAuth prefers
+    // identity.password over host.password, so leaving identityId set would
+    // keep using the stale shared secret (#3982). Do not mutate the identity.
     if (savePassword && host && request?.allowSavePassword !== false) {
       updateHosts(latestHosts.map((h: Host) => h.id === host.id ? {
         ...h,
         password: savePassword,
         savePassword: true,
+        ...(h.identityId ? { identityId: '' } : {}),
       } : h));
     }
     // Remove from queue by requestId

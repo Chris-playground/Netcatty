@@ -7,8 +7,9 @@ import {
   handleKeyboardInteractiveSubmitImpl,
   handleTrayPanelConnectRequestImpl,
 } from './app/AppHandlers.ts';
+import { resolveHostAuth } from '../domain/sshAuth.ts';
 import { resolveShellSetting } from '../lib/useDiscoveredShells.ts';
-import type { Host } from '../types';
+import type { Host, Identity } from '../types';
 
 const baseHost: Host = {
   id: 'host-1',
@@ -192,6 +193,81 @@ test('keyboard-interactive submit can save login password for the session host',
   });
   assert.deepEqual(queue, []);
   assert.equal(bridgeResponses.length, 1);
+});
+
+test('keyboard-interactive submit detaches keychain identity when remembering a password change', async () => {
+  const sharedIdentity: Identity = {
+    id: 'id-1',
+    label: 'shared',
+    username: 'root',
+    authMethod: 'password',
+    password: 'stale-keychain-password',
+    created: 0,
+  };
+  let hosts: Host[] = [{
+    ...baseHost,
+    identityId: 'id-1',
+    password: 'old-host-password',
+    savePassword: false,
+  }];
+  let queue = [{
+    requestId: 'ki-rotate',
+    sessionId: 'session-1',
+    hostname: baseHost.hostname,
+    allowSavePassword: true,
+  }];
+  let identityUpdates = 0;
+
+  // resolveHostAuth prefers identity.password, so the stale keychain secret
+  // shadows whatever is already stored on the host.
+  assert.equal(
+    resolveHostAuth({ host: hosts[0], keys: [], identities: [sharedIdentity] }).password,
+    'stale-keychain-password',
+  );
+
+  await handleKeyboardInteractiveSubmitImpl(
+    () => ({
+      hosts,
+      identities: [sharedIdentity],
+      keyboardInteractiveQueue: queue,
+      netcattyBridge: {
+        get: () => ({
+          respondKeyboardInteractive: () => ({ success: true }),
+        }),
+      },
+      sessions: [{
+        id: 'session-1',
+        hostId: baseHost.id,
+        hostname: baseHost.hostname,
+      }],
+      setKeyboardInteractiveQueue: (updater: (items: typeof queue) => typeof queue) => {
+        queue = updater(queue);
+      },
+      t: (key: string) => key,
+      toast: { error: () => {} },
+      updateHosts: (nextHosts: Host[]) => {
+        hosts = nextHosts;
+      },
+      updateIdentities: () => {
+        identityUpdates += 1;
+      },
+    }),
+    'ki-rotate',
+    ['rotated-password'],
+    'rotated-password',
+  );
+
+  assert.equal(hosts[0].identityId, '');
+  assert.equal(hosts[0].password, 'rotated-password');
+  assert.equal(hosts[0].savePassword, true);
+  assert.equal(hosts[0].username, baseHost.username);
+  assert.equal(identityUpdates, 0);
+  assert.equal(sharedIdentity.password, 'stale-keychain-password');
+  assert.equal(
+    resolveHostAuth({ host: hosts[0], keys: [], identities: [sharedIdentity] }).password,
+    'rotated-password',
+  );
+  assert.deepEqual(queue, []);
 });
 
 test('keyboard-interactive submit does not save secondary password when allowSavePassword is false', async () => {
