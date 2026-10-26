@@ -1554,7 +1554,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
 
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
-        for (const chunk of getTextInputWireChunks(outData, usePerCharacterInput && options?.perCharacterWrites === true)) {
+        for (const chunk of getTextInputWireChunks(outData, usePerCharacterInput && options?.perCharacterWrites === true, ctx.host.protocol === undefined || ctx.host.protocol === "ssh")) {
           ctx.terminalBackend.writeToSession(id, chunk, {
             sensitive,
             serialEraseChar,

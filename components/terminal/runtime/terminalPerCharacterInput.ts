@@ -11,9 +11,10 @@ export const MAX_RAW_PASTE_PER_CHARACTER_LENGTH = 32;
 // Terminal control bytes are intentional: never fragment shortcuts or reports.
 // eslint-disable-next-line no-control-regex
 const TERMINAL_CONTROL = /[\x00-\x1f\x7f-\x9f]/;
+const ESC = "\x1b";
 
-/** True while the payload only carries plain text and no terminal control. */
-export const isPlainTerminalInputText = (data: string): boolean => !TERMINAL_CONTROL.test(data);
+/** True while the payload only carries plain text and no escape sequence. */
+export const isPlainTerminalInputText = (data: string): boolean => !data.includes(ESC);
 
 /** One chunk per Unicode code point so surrogate pairs stay intact. */
 export const splitTextIntoCodePointWrites = (data: string): string[] => Array.from(data);
@@ -37,11 +38,13 @@ export const shouldSplitRawPasteInputForWire = (data: string): boolean => {
   return true;
 };
 
-/** Chunks to write for one input payload; escape sequences are never split. */
+/** Escape sequences never split. SSH callers also preserve terminal controls. */
 export const getTextInputWireChunks = (
   data: string,
   perCharacterWrites: boolean,
+  preserveTerminalControls = false,
 ): string[] =>
   perCharacterWrites && isPlainTerminalInputText(data)
+    && !(preserveTerminalControls && TERMINAL_CONTROL.test(data))
     ? splitTextIntoCodePointWrites(data)
     : [data];

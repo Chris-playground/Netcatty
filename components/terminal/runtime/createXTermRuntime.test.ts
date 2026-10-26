@@ -990,7 +990,7 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   assert.match(source, /perCharacterWrites\?: boolean/);
   assert.match(
     source,
-    /getTextInputWireChunks\(outData, usePerCharacterInput && options\?\.perCharacterWrites === true\)/,
+    /getTextInputWireChunks\(outData, usePerCharacterInput && options\?\.perCharacterWrites === true, ctx\.host\.protocol === undefined \|\| ctx\.host\.protocol === "ssh"\)/,
   );
   // Every chunk carries the same write options as the original single write.
   const writeLoopIdx = source.indexOf("for (const chunk of getTextInputWireChunks(outData");

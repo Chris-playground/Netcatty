@@ -91,7 +91,7 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
         term.input('中国',true); check(pane,'中国',mode,'composition onData fallback');
         ta.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:''})); await wait();
         pane.writes.length=0; pane.logical.length=0;
-        for (const data of ['\\x1b[A','\\x03','\\x1b[0;;200u']) {
+        for (const data of ['\\x1b[A','\\x03','\\x03\\x04','\\x1b[0;;200u']) {
           term.input(data,true); check(pane,data,false,'terminal control');
         }
         await new Promise(resolve=>term.write('\\x1b[?2004h',resolve));
@@ -115,6 +115,12 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
         const reconnected=make(host);
         reconnected.term.paste('中文'); check(reconnected,'中文',!mode,'reconnect reads saved mode');
         metrics.push({mode,entryPoints:5,reconnectedMode:!mode});
+      }
+      // The SSH-only field cannot change other transports' existing policy.
+      for (const protocol of ['local','telnet','serial']) {
+        const pane=make({id:'other-'+protocol,label:protocol,hostname:'localhost',protocol,sshInputCompatibility:false});
+        pane.term.paste('中文'); check(pane,'中文',true,protocol+' retains legacy short paste');
+        pane.term.input('a\\rb',true); check(pane,'a\\rb',true,protocol+' retains legacy control-containing text');
       }
       for (const pane of panes) { try {pane.dispose();} catch {} }
       return JSON.stringify(metrics);
