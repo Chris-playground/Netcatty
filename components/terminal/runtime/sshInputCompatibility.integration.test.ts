@@ -11,7 +11,7 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
   const root = fileURLToPath(new URL("../../..", import.meta.url));
   const bundle = buildSync({
     stdin: {
-      contents: 'export {createXTermRuntime} from "./components/terminal/runtime/createXTermRuntime"; export {DEFAULT_TERMINAL_SETTINGS} from "./domain/models/terminal"; export {dispatchTerminalLinePaste} from "./components/terminal/runtime/terminalUserPaste";',
+      contents: 'export {createXTermRuntime} from "./components/terminal/runtime/createXTermRuntime"; export {DEFAULT_TERMINAL_SETTINGS} from "./domain/models/terminal"; export {dispatchTerminalLinePaste} from "./components/terminal/runtime/terminalUserPaste"; export {wakeTerminalFromHibernate} from "./components/terminal/terminalRuntimeMount";',
       loader: "ts", resolveDir: root,
     },
     bundle: true, format: "iife", globalName: "runtimeTest", platform: "browser", write: false,
@@ -36,13 +36,13 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
     `);
     dom.window.eval(bundle);
     const result = await dom.window.eval(`(async () => {
-      const {createXTermRuntime, DEFAULT_TERMINAL_SETTINGS, dispatchTerminalLinePaste} = runtimeTest;
+      const {createXTermRuntime, DEFAULT_TERMINAL_SETTINGS, dispatchTerminalLinePaste, wakeTerminalFromHibernate} = runtimeTest;
       const ref = current => ({current});
       const panes = [];
       const make = host => {
         const el = document.createElement('div'); document.body.appendChild(el);
         const writes = [], logical = [], broadcasts = [];
-        const runtime = createXTermRuntime({
+        const context = {
           container:el, host, getHost:()=>host,
           fontFamilyId:'jetbrains-mono', resolvedFontFamily:'monospace', fontSize:14,
           terminalTheme:{colors:{background:'#111111',foreground:'#eeeeee',cursor:'#ffffff',selection:'#444444'}},
@@ -54,8 +54,9 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
           onOutputTriggerUserInputRef:ref(data=>logical.push(data)),
           sessionId:host.id,statusRef:ref('connected'),commandBufferRef:ref(''),requestSearchFocus(){},
           kittyKeyboardProtocolEnabled:true,
-        });
-        const pane={...runtime,writes,logical,broadcasts}; panes.push(pane); return pane;
+        };
+        const runtime = createXTermRuntime(context);
+        const pane={...runtime,writes,logical,broadcasts,context,el}; panes.push(pane); return pane;
       };
       const equal = (actual, expected, label) => {
         if (JSON.stringify(actual) !== JSON.stringify(expected)) throw Error(label+': '+JSON.stringify({actual,expected}));
@@ -115,6 +116,39 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
         const reconnected=make(host);
         reconnected.term.paste('中文'); check(reconnected,'中文',!mode,'reconnect reads saved mode');
         metrics.push({mode,entryPoints:5,reconnectedMode:!mode});
+      }
+      // Exercise the actual wake entry that recreates xterm but only reattaches
+      // the existing backend. Its context contains the newly saved host record.
+      for (const mode of [false,true]) {
+        const connectedHost={id:'hibernate-'+mode,label:'Hibernate',hostname:'127.0.0.1',protocol:'ssh',sshInputCompatibility:mode};
+        const savedHost={...connectedHost,sshInputCompatibility:!mode};
+        let pane=make(connectedHost), reattached=0;
+        const wake = async old => {
+          old.dispose();
+          const refs={xtermRuntimeRef:ref(null),termRef:ref(null),fitAddonRef:ref(null),
+            serializeAddonRef:ref(null),searchAddonRef:ref(null),hasRuntimeRef:ref(false)};
+          const context={...old.context,host:savedHost};
+          const success=await wakeTerminalFromHibernate({
+            refs,runtimeContext:context,container:old.el,
+            getPayload:()=>({snapshot:'',alternateScreen:false,pendingBuffer:''}),
+            prepareWakeFlow:async()=>true,takePendingBuffer:()=>'',
+            stopHibernateDataListener(){},stopHibernateListeners(){},
+            reattachSession(){reattached++;},safeFit(){},resizeSession(){},forceSyncRenderAfterResize(){},
+            lastFittedSizeRef:ref(null),isBootActiveRef:ref(false),sessionId:connectedHost.id,updateStatus(){},
+          });
+          equal(success,true,'hibernate wake succeeds');
+          equal(context.sessionRef.current,connectedHost.id,'hibernate retains backend session');
+          const next={...refs.xtermRuntimeRef.current,context,el:old.el,
+            writes:old.writes,logical:old.logical,broadcasts:old.broadcasts};
+          panes.push(next); next.writes.length=0; next.logical.length=0; return next;
+        };
+        pane=await wake(pane);
+        pane.term.paste('中文');check(pane,'中文',mode,'wake retains connection-time mode');
+        pane.resetConnectionInputState(savedHost);
+        pane.term.paste('中文');check(pane,'中文',!mode,'real reconnect refreshes mode after wake');
+        pane=await wake(pane);
+        pane.term.paste('中文');check(pane,'中文',!mode,'next wake retains refreshed connection mode');
+        equal(reattached,2,'both wakes reattach the existing backend');
       }
       // The SSH-only field cannot change other transports' existing policy.
       for (const protocol of ['local','telnet','serial','mosh','et','ssh-mosh','ssh-et']) {

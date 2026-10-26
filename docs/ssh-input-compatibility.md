@@ -17,7 +17,7 @@ The setting belongs to the terminal endpoint host. A host used only as an SSH ne
 
 New host creation paths save `false`. Duplicates copy the source value. JSON vault backups and cloud sync retain the field. CSV exports include `SshInputCompatibility`; imports accept `true` and `false`. External imports without that column create standard-mode hosts.
 
-The runtime captures the host's setting when it opens a connection. Reconnect refreshes that setting through `resetConnectionInputState(host)`, including reconnects that reuse the existing runtime.
+The connection captures the host's setting under its session-owned terminal settings ref. This snapshot survives xterm disposal and the actual hibernate wake/reattach path. Reconnect refreshes the setting through `resetConnectionInputState(host)`, including reconnects that reuse the existing runtime.
 
 ## Historical evidence
 
@@ -27,7 +27,7 @@ The [Xshell 7 manual](https://cdn.netsarang.net/docs/Xshell7_manual.pdf), sectio
 
 ## Verification boundaries
 
-`sshInputCompatibility.integration.test.ts` runs real xterm and `createXTermRuntime` callbacks under JSDOM. It covers raw paste, literal `insertText`, key code 229, composition events, composition fallback, long IME text, terminal controls, bracketed paste, Kitty text, and reconnect with a reused runtime. Local, Telnet, serial, Mosh, and Eternal Terminal cases verify that the SSH field leaves their legacy text and control-containing payload behavior unchanged. Canvas measurement is stubbed. These tests do not exercise native input methods or application windows.
+`sshInputCompatibility.integration.test.ts` runs real xterm and `createXTermRuntime` callbacks under JSDOM. It covers raw paste, literal `insertText`, key code 229, composition events, composition fallback, long IME text, terminal controls, bracketed paste, Kitty text, reconnect with a reused runtime, and the actual `wakeTerminalFromHibernate` entry after a saved setting changes. Local, Telnet, serial, Mosh, and Eternal Terminal cases verify that the SSH field leaves their legacy text and control-containing payload behavior unchanged. Canvas measurement is stubbed. These tests do not exercise native input methods or application windows.
 
 `useVaultState.inputCompatibility.test.ts` exercises the actual vault hook's asynchronous save, reload, duplicate, JSON backup, local backup payload, and cloud payload apply paths. It uses test localStorage and no native safeStorage key. CSV and endpoint selection have separate round-trip and jump-host tests.
 

@@ -252,6 +252,9 @@ type TerminalBackendApi = {
 // renderer hibernation. Weak ownership keeps negotiated keyboard state alive
 // for that session without introducing a process-wide session registry.
 const kittyKeyboardStates = createKittyKeyboardSessionStateStore();
+// The same session-owned ref also keeps the connection's input choice alive
+// when hibernation destroys xterm. Only a real reconnect refreshes this choice.
+const inputCompatibilityStates = new WeakMap<object, boolean>();
 
 const resolveKittyKeyboardModeState = (
   ctx: Pick<
@@ -307,8 +310,7 @@ export type XTermRuntime = {
    * terminal reset or FIFO eviction.
    */
   hasInlineImages: () => boolean;
-  /** Clear local/per-target keyboard state before reusing this runtime. */
-  /** Reset input state and snapshot the endpoint settings for a fresh connection. */
+  /** Reset keyboard state and snapshot endpoint settings for a fresh connection. */
   resetConnectionInputState: (host: Host) => void;
   /** Emit any owed releases before detaching or closing this renderer. */
   flushKittyKeyboardReleases: () => void;
@@ -520,7 +522,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const usesPerCharacterInput = (host: Host) =>
     (host.protocol !== undefined && host.protocol !== "ssh") || host.moshEnabled === true
     || host.etEnabled === true || host.sshInputCompatibility === true;
-  let usePerCharacterInput = usesPerCharacterInput(ctx.host);
+  let usePerCharacterInput = inputCompatibilityStates.get(ctx.terminalSettingsRef)
+    ?? usesPerCharacterInput(ctx.host);
+  inputCompatibilityStates.set(ctx.terminalSettingsRef, usePerCharacterInput);
   const windowsPty =
     platform === "win32" && isLocalTerminalHost
       ? bridge?.getWindowsPtyInfo?.() ?? { backend: "conpty" as const }
@@ -3486,6 +3490,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     hasInlineImages,
     resetConnectionInputState: (host) => {
       usePerCharacterInput = usesPerCharacterInput(host);
+      inputCompatibilityStates.set(ctx.terminalSettingsRef, usePerCharacterInput);
       clearKittyConnectionInputState();
     },
     flushKittyKeyboardReleases: clearKittyTransientInputState,
