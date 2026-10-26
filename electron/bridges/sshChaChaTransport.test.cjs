@@ -58,7 +58,9 @@ async function connect(t, {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
-  const runtime = process.env.NETCATTY_SSH_TEST_RUNTIME || process.execPath;
+  const runtime = process.env.NETCATTY_SSH_TEST_RUNTIME === "electron"
+    ? require("electron")
+    : path.resolve(process.env.NETCATTY_SSH_TEST_RUNTIME || process.execPath);
   const child = spawn(runtime, ["scripts/fixtures/ssh-chacha-client.cjs"], {
     cwd: root,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
@@ -71,6 +73,7 @@ async function connect(t, {
   child.stderr.on("data", (data) => { stderr += data; });
   child.stdin.end(JSON.stringify({
     port: server.address().port,
+    appRoot: process.env.NETCATTY_SSH_TEST_APP_ROOT,
     homeDir,
     // Cross several SSH packets, exercising both nonce/counter directions.
     input: "synthetic SSH echo\r\n".repeat(4000),

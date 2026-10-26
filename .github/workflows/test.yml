@@ -54,7 +54,7 @@ jobs:
 
       - name: Test SSH cipher negotiation in Electron's crypto runtime
         env:
-          NETCATTY_SSH_TEST_RUNTIME: ./node_modules/electron/dist/electron
+          NETCATTY_SSH_TEST_RUNTIME: electron
         run: node --test electron/bridges/sshChaChaTransport.test.cjs
 
       - name: Test browser first-link lifecycle
@@ -145,7 +145,7 @@ jobs:
 
       - name: Test SSH cipher negotiation in Windows Electron's crypto runtime
         env:
-          NETCATTY_SSH_TEST_RUNTIME: ./node_modules/electron/dist/electron.exe
+          NETCATTY_SSH_TEST_RUNTIME: electron
         run: node --test electron/bridges/sshChaChaTransport.test.cjs
 
       - name: Exercise two SSH password prompts in the desktop app

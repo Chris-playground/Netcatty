@@ -1,6 +1,7 @@
 // Runs in a separate Node/Electron process so ssh2 detects its actual crypto
 // capabilities at module load. The parent owns the disposable loopback server.
 const os = require("node:os");
+const path = require("node:path");
 const crypto = require("node:crypto");
 
 async function main(config) {
@@ -18,7 +19,7 @@ async function main(config) {
       };
     }
   }
-  const bridge = require("../../electron/bridges/sshBridge.cjs");
+  const bridge = require(path.join(config.appRoot || path.resolve(__dirname, "../.."), "electron/bridges/sshBridge.cjs"));
   const sessions = new Map();
   let output = "";
   let resolveOutput;
