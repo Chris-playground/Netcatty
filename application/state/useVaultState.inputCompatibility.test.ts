@@ -24,7 +24,7 @@ test("host input choices survive save, restart, duplicate, backup and cloud sync
   const { buildSyncPayload, applySyncPayload, buildLocalVaultPayload, applyLocalVaultPayload } = await import("../syncPayload");
   const { buildVaultHostFromDraft } = await import("../../domain/vaultHostCreate");
   const legacy: Host = { id: "legacy", label: "Legacy", hostname: "localhost", username: "agent", protocol: "ssh", tags: [], os: "linux" };
-  localStorage.setItem(STORAGE_KEY_HOSTS, JSON.stringify([legacy]));
+  dom.window.localStorage.setItem(STORAGE_KEY_HOSTS, JSON.stringify([legacy]));
   let state: ReturnType<typeof useVaultState>;
   let renderer: ReactTestRenderer | undefined;
   const Probe = () => { state = useVaultState({ syncConnectionLogTerminalData: false }); return null; };
