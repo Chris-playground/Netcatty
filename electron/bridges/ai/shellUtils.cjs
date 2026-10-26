@@ -69,6 +69,13 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// macOS ships zsh with `%n@%m %1~ %#`, which renders as
+// `user@host ~ %` / `user@host src %` (space before the path and a `%`
+// terminator). Require exactly one path token and no prompt delimiters in it:
+// a prompt with a partially typed command (`user@host ~ % echo`) has extra
+// tokens, and output such as `user@host 100%` has no space before `%`.
+const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+\s+[^\s%#$]+\s+%$/;
+
 // Host line of a two-line bash PS1 (`\u@\h: \w` then a following `$` or `#`).
 // Same user@host[:path] class as POSIX_PROMPT_PATTERN's first alternative,
 // without a prompt marker on this line. A bare `$`/`#` alone is not a prompt.
@@ -95,7 +102,8 @@ function isDefaultPosixPromptLine(line) {
   const withoutEnvPrefix = normalized.replace(/^\([^()\n\r]+\)\s+/, "");
   return (
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix)
+    ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    ZSH_PROMPT_PATTERN.test(withoutEnvPrefix)
   );
 }
 
