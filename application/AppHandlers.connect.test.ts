@@ -270,7 +270,7 @@ test('keyboard-interactive submit detaches keychain identity when remembering a 
   assert.deepEqual(queue, []);
 });
 
-test('keyboard-interactive submit keeps a set host username when detaching a different keychain identity', async () => {
+test('keyboard-interactive submit snapshots a different keychain username when remembering a password', async () => {
   const sharedIdentity: Identity = {
     id: 'id-1',
     label: 'shared',
@@ -322,20 +322,20 @@ test('keyboard-interactive submit keeps a set host username when detaching a dif
       },
     }),
     'ki-rotate-user',
-    ['rotated-password'],
-    'rotated-password',
+    ['new-password'],
+    'new-password',
   );
 
   assert.equal(hosts[0].identityId, '');
-  assert.equal(hosts[0].password, 'rotated-password');
+  assert.equal(hosts[0].password, 'new-password');
   assert.equal(hosts[0].savePassword, true);
-  assert.equal(hosts[0].username, 'root');
+  assert.equal(hosts[0].username, 'deploy');
   assert.equal(identityUpdates, 0);
   assert.equal(sharedIdentity.username, 'deploy');
   assert.equal(sharedIdentity.password, 'stale-keychain-password');
   const resolved = resolveHostAuth({ host: hosts[0], keys: [], identities: [sharedIdentity] });
-  assert.equal(resolved.password, 'rotated-password');
-  assert.equal(resolved.username, 'root');
+  assert.equal(resolved.password, 'new-password');
+  assert.equal(resolved.username, 'deploy');
   assert.deepEqual(queue, []);
 });
 
