@@ -76,6 +76,26 @@ test("host input choices survive save, restart, duplicate, backup and cloud sync
     await act(async () => { renderer!.unmount(); });
     await mount();
     assert.deepEqual(choices(), [["cloud-legacy", false]]);
+    // These drafts enter HostDetailsPanel as initialData, then the real vault
+    // save/normalization path. They must not be mistaken for legacy records.
+    const { buildSshDeepLinkHostDraft, parseSshDeepLink } = await import("../../domain/sshDeepLink");
+    const { normalizePluginImporterRecords } = await import("../../domain/pluginImporter");
+    const linkDraft = buildSshDeepLinkHostDraft(parseSshDeepLink("ssh://agent@new.test")!, { id: "new-link", now: 1 });
+    const imported = normalizePluginImporterRecords([undefined, false, true].map(choice => ({
+      type: "draft" as const, draft: { kind: "host" as const, value: {
+        hostname: `import-${choice}.test`, protocol: "ssh",
+        ...(choice === undefined ? {} : { sshInputCompatibility: choice }),
+      } },
+    })));
+    assert.deepEqual(imported.errors, []);
+    const explicitCopy = { ...imported.hosts[2], id: "copy-explicit-input" };
+    const drafts = [linkDraft, ...imported.hosts, explicitCopy];
+    const draftChoices = drafts.map(host => [host.id, host.sshInputCompatibility]);
+    assert.deepEqual(drafts.map(host => host.sshInputCompatibility), [false, false, false, true, true]);
+    await act(async () => { await state!.updateHosts([...state!.hosts, ...drafts]); });
+    await act(async () => { renderer!.unmount(); });
+    await mount();
+    assert.deepEqual(choices(), [["cloud-legacy", false], ...draftChoices]);
   } finally {
     await act(async () => { renderer?.unmount(); });
     dom.window.close();
