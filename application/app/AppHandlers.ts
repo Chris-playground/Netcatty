@@ -393,6 +393,7 @@ export async function handleKeyboardInteractiveSubmitImpl(
   const {
     hosts,
     hostsRef,
+    identities,
     keyboardInteractiveQueue,
     sessions,
     setKeyboardInteractiveQueue,
@@ -425,15 +426,26 @@ export async function handleKeyboardInteractiveSubmitImpl(
     // (allowSavePassword === false) so a secondary secret cannot overwrite the
     // host login password (#2150 / Codex review on #2151).
     // Detach a Keychain identity when one is attached. resolveHostAuth prefers
-    // identity.password over host.password, so leaving identityId set would
-    // keep using the stale shared secret (#3982). Do not mutate the identity.
+    // identity.password and identity.username over the host fields, so copy the
+    // identity username onto the host and clear identityId (#3982). Do not
+    // mutate the shared identity.
     if (savePassword && host && request?.allowSavePassword !== false) {
-      updateHosts(latestHosts.map((h: Host) => h.id === host.id ? {
-        ...h,
-        password: savePassword,
-        savePassword: true,
-        ...(h.identityId ? { identityId: '' } : {}),
-      } : h));
+      updateHosts(latestHosts.map((h: Host) => {
+        if (h.id !== host.id) return h;
+        const identity = h.identityId
+          ? identities?.find((item: { id?: string; username?: string }) => item.id === h.identityId)
+          : undefined;
+        const detachedUsername = identity?.username?.trim();
+        return {
+          ...h,
+          password: savePassword,
+          savePassword: true,
+          ...(h.identityId ? {
+            identityId: '',
+            ...(detachedUsername ? { username: detachedUsername } : {}),
+          } : {}),
+        };
+      }));
     }
     // Remove from queue by requestId
     setKeyboardInteractiveQueue(prev => prev.filter(r => r.requestId !== requestId));

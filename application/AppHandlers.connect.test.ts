@@ -270,6 +270,75 @@ test('keyboard-interactive submit detaches keychain identity when remembering a 
   assert.deepEqual(queue, []);
 });
 
+test('keyboard-interactive submit snapshots the keychain username when it differs from the host', async () => {
+  const sharedIdentity: Identity = {
+    id: 'id-1',
+    label: 'shared',
+    username: 'deploy',
+    authMethod: 'password',
+    password: 'stale-keychain-password',
+    created: 0,
+  };
+  let hosts: Host[] = [{
+    ...baseHost,
+    username: 'root',
+    identityId: 'id-1',
+    password: 'old-host-password',
+    savePassword: false,
+  }];
+  let queue = [{
+    requestId: 'ki-rotate-user',
+    sessionId: 'session-1',
+    hostname: baseHost.hostname,
+    allowSavePassword: true,
+  }];
+  let identityUpdates = 0;
+
+  await handleKeyboardInteractiveSubmitImpl(
+    () => ({
+      hosts,
+      identities: [sharedIdentity],
+      keyboardInteractiveQueue: queue,
+      netcattyBridge: {
+        get: () => ({
+          respondKeyboardInteractive: () => ({ success: true }),
+        }),
+      },
+      sessions: [{
+        id: 'session-1',
+        hostId: baseHost.id,
+        hostname: baseHost.hostname,
+      }],
+      setKeyboardInteractiveQueue: (updater: (items: typeof queue) => typeof queue) => {
+        queue = updater(queue);
+      },
+      t: (key: string) => key,
+      toast: { error: () => {} },
+      updateHosts: (nextHosts: Host[]) => {
+        hosts = nextHosts;
+      },
+      updateIdentities: () => {
+        identityUpdates += 1;
+      },
+    }),
+    'ki-rotate-user',
+    ['rotated-password'],
+    'rotated-password',
+  );
+
+  assert.equal(hosts[0].identityId, '');
+  assert.equal(hosts[0].password, 'rotated-password');
+  assert.equal(hosts[0].savePassword, true);
+  assert.equal(hosts[0].username, 'deploy');
+  assert.equal(identityUpdates, 0);
+  assert.equal(sharedIdentity.username, 'deploy');
+  assert.equal(sharedIdentity.password, 'stale-keychain-password');
+  const resolved = resolveHostAuth({ host: hosts[0], keys: [], identities: [sharedIdentity] });
+  assert.equal(resolved.password, 'rotated-password');
+  assert.equal(resolved.username, 'deploy');
+  assert.deepEqual(queue, []);
+});
+
 test('keyboard-interactive submit does not save secondary password when allowSavePassword is false', async () => {
   let hosts: Host[] = [{
     ...baseHost,
