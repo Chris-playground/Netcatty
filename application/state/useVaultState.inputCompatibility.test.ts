@@ -68,6 +68,14 @@ test("host input choices survive save, restart, duplicate, backup and cloud sync
     await mount();
     assert.deepEqual(choices(), expected);
     assert.deepEqual((await state!.readPersistedHosts()).map(host => [host.id, host.sshInputCompatibility]), expected);
+    // Older cloud snapshots enter through the same per-record migration.
+    cloud.hosts = [{ ...legacy, id: "cloud-legacy" }];
+    await act(async () => { await applySyncPayload(cloud, { importVaultData: state!.importDataFromString }); });
+    assert.deepEqual(choices(), [["cloud-legacy", true]]);
+    await act(async () => { await state!.updateHosts(state!.hosts.map(host => ({ ...host, sshInputCompatibility: false }))); });
+    await act(async () => { renderer!.unmount(); });
+    await mount();
+    assert.deepEqual(choices(), [["cloud-legacy", false]]);
   } finally {
     await act(async () => { renderer?.unmount(); });
     dom.window.close();
