@@ -202,6 +202,7 @@ export const SettingCard: React.FC<SettingCardProps> = ({
 
 interface SettingRowProps {
   label?: string;
+  className?: string;
   description?: string;
   children: React.ReactNode;
   align?: "center" | "start";
@@ -211,6 +212,7 @@ interface SettingRowProps {
 
 export const SettingRow: React.FC<SettingRowProps> = ({
   label,
+  className,
   description,
   children,
   align = "center",
@@ -223,6 +225,7 @@ export const SettingRow: React.FC<SettingRowProps> = ({
       // Keep square corners: rounded rows bend divide-y separators at both ends.
       "flex justify-between py-3 gap-4",
       align === "start" ? "items-start" : "items-center",
+      className,
     )}
   >
     <div className="flex-1 min-w-0">
