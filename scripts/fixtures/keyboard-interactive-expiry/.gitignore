@@ -1,0 +1,4 @@
+/ca-certificates.crt
+/docker-config/
+/private-fixture.json
+/__pycache__/
