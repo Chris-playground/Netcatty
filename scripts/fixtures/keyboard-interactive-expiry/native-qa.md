@@ -2,13 +2,36 @@
 
 Run this recipe in the parent's native GUI session on PR #3983 head `2096e93420f547be6491b7fb5df90f20f75a9545`.
 Use a fresh Netcatty profile and the two disposable local servers from this kit.
+The OpenSSH/PAM fixture requires Docker.
 Keep private-fixture.json out of screenshots, recordings, uploads, and reports.
 
 1. Run `python3 build.py` in this directory.
 2. Run `python3 manage.py start`.
 3. Read private-fixture.json locally for the synthetic account and connection details. Do not copy those values into the report.
 4. Build the app at the exact PR head with `npm ci` and `npm run build`.
-5. Launch the native app through `electron/launch.cjs --user-data-dir=/absolute/path/to/disposable-profile`. Keep the sandbox enabled. Coordinate the GUI session through the parent.
+5. From the app checkout, launch Electron directly with a new disposable profile:
+
+   ```bash
+   node <<'NODE'
+   const { spawn } = require('node:child_process');
+   const { mkdtempSync } = require('node:fs');
+   const { applyElectronLaunchEnv } = require('./electron/launchEnv.cjs');
+   const { getTempFilePath } = require('./electron/bridges/tempDirBridge.cjs');
+   const profile = mkdtempSync(getTempFilePath('ki-expiry-profile-'));
+   console.log('Disposable app profile:', profile);
+   const child = spawn(require('electron'), ['.', `--user-data-dir=${profile}`], {
+     stdio: 'inherit',
+     env: applyElectronLaunchEnv(process.env),
+   });
+   child.on('error', (error) => { console.error(error.message); process.exit(1); });
+   child.on('exit', (code) => process.exit(code ?? 1));
+   for (const signal of ['SIGINT', 'SIGTERM']) {
+     process.on(signal, () => { if (!child.killed) child.kill(signal); });
+   }
+   NODE
+   ```
+
+   `electron/launch.cjs` does not forward command-line arguments. Do not pass the profile flag to that script. Keep the sandbox enabled. Coordinate the GUI session through the parent.
 6. In **Keychain**, create one password identity from the kit's current account.
 7. In **Hosts**, add the kit's target and control servers. Link both hosts to that identity.
 8. Enable **Prioritize keyboard-interactive authentication** on the target host.
