@@ -70,11 +70,11 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
 // macOS ships zsh with `%n@%m %1~ %#`, which renders as
-// `user@host ~ %` / `user@host src %` (space before the path and a `%`
-// terminator). Require exactly one path token and no prompt delimiters in it:
-// a prompt with a partially typed command (`user@host ~ % echo`) has extra
-// tokens, and output such as `user@host 100%` has no space before `%`.
-const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+\s+[^\s%#$]+\s+%$/;
+// `user@host ~ %` / `user@host My Project %`; privileged shells end in `#`.
+// Allow spaces in the path, but keep prompt delimiters excluded so a prompt
+// followed by input (`user@host ~ % echo %`) cannot count as idle. Requiring
+// whitespace before the marker also rejects output such as `user@host 100%`.
+const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [%#]$/;
 
 // Host line of a two-line bash PS1 (`\u@\h: \w` then a following `$` or `#`).
 // Same user@host[:path] class as POSIX_PROMPT_PATTERN's first alternative,

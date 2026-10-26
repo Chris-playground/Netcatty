@@ -157,6 +157,9 @@ test("isDefaultPosixPromptLine matches the macOS zsh default prompt", () => {
     "hexiao@JosephdeMacBook-Pro-2 ~ % ",
     "alice@MacBook-Pro ~/src % ",
     "alice@MacBook-Pro /tmp %",
+    "alice@MacBook-Pro My Project % ",
+    "root@MacBook-Pro ~ # ",
+    "root@MacBook-Pro My Project # ",
     "(venv) alice@MacBook-Pro ~/src % ",
   ]) {
     assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
@@ -168,7 +171,16 @@ test("zsh default prompt recognition rejects pending input and non-prompt output
     "user@host ~ % echo",
     "user@host ~ %echo",
     "user@host ~ % printf busy%",
+    "user@host My Project % echo %",
+    "root@host My Project # echo #",
+    "user@host My Project % echo #",
+    "user@host My Project % echo $",
     "user@host 100%",
+    "user@host 100#",
+    "progress 50 %",
+    "user@host   %",
+    "#",
+    "%",
     "progress@build 50%",
   ]) {
     assert.equal(isDefaultPosixPromptLine(line), false, line);
@@ -184,6 +196,14 @@ test("extracts the macOS zsh default prompt and preserves trailing whitespace", 
   assert.equal(
     extractTrailingIdlePrompt("welcome\r\nhexiao@MacBook-Pro ~/git %"),
     "hexiao@MacBook-Pro ~/git %",
+  );
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\nalice@MacBook-Pro My Project % "),
+    "alice@MacBook-Pro My Project % ",
+  );
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\nroot@MacBook-Pro My Project # "),
+    "root@MacBook-Pro My Project # ",
   );
   assert.equal(extractTrailingIdlePrompt("welcome\r\nhexiao@MacBook-Pro ~ % echo"), "");
   assert.equal(extractTrailingIdlePrompt("welcome\r\nhexiao@MacBook-Pro ~ %\r\n"), "");
