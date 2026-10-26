@@ -19,6 +19,18 @@ async function main(config) {
       };
     }
   }
+  if (config.appRoot) {
+    // RUN_AS_NODE supports ASAR files, but does not expose Electron's main
+    // process APIs. The packaged bridge imports sessionLogsBridge's dialog/shell
+    // even with logging disabled. Supply only that unrelated UI host seam;
+    // ssh2, crypto, algorithm selection, and sockets remain the shipped code.
+    const Module = require("node:module");
+    const load = Module._load;
+    Module._load = function loadWithHeadlessElectron(request, ...args) {
+      if (request === "electron") return { dialog: {}, shell: {} };
+      return load.call(this, request, ...args);
+    };
+  }
   const bridge = require(path.join(config.appRoot || path.resolve(__dirname, "../.."), "electron/bridges/sshBridge.cjs"));
   const sessions = new Map();
   let output = "";
