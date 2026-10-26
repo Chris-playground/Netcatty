@@ -426,23 +426,25 @@ export async function handleKeyboardInteractiveSubmitImpl(
     // (allowSavePassword === false) so a secondary secret cannot overwrite the
     // host login password (#2150 / Codex review on #2151).
     // Detach a Keychain identity when one is attached. resolveHostAuth prefers
-    // identity.password and identity.username over the host fields, so copy the
-    // identity username onto the host and clear identityId (#3982). Do not
-    // mutate the shared identity.
+    // identity.password, and identity.username over a blank host username.
+    // Mirror detachEffectiveHostIdentity: clear identityId and fill username
+    // only when the host username is blank (#3982). Do not mutate the identity.
     if (savePassword && host && request?.allowSavePassword !== false) {
       updateHosts(latestHosts.map((h: Host) => {
         if (h.id !== host.id) return h;
         const identity = h.identityId
           ? identities?.find((item: { id?: string; username?: string }) => item.id === h.identityId)
           : undefined;
-        const detachedUsername = identity?.username?.trim();
+        const effectiveUsername = identity?.username?.trim() || h.username?.trim() || '';
         return {
           ...h,
           password: savePassword,
           savePassword: true,
           ...(h.identityId ? {
             identityId: '',
-            ...(detachedUsername ? { username: detachedUsername } : {}),
+            ...(!h.username?.trim() && effectiveUsername
+              ? { username: effectiveUsername }
+              : {}),
           } : {}),
         };
       }));

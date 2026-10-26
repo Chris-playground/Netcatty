@@ -270,7 +270,7 @@ test('keyboard-interactive submit detaches keychain identity when remembering a 
   assert.deepEqual(queue, []);
 });
 
-test('keyboard-interactive submit snapshots the keychain username when it differs from the host', async () => {
+test('keyboard-interactive submit keeps a set host username when detaching a different keychain identity', async () => {
   const sharedIdentity: Identity = {
     id: 'id-1',
     label: 'shared',
@@ -329,13 +329,82 @@ test('keyboard-interactive submit snapshots the keychain username when it differ
   assert.equal(hosts[0].identityId, '');
   assert.equal(hosts[0].password, 'rotated-password');
   assert.equal(hosts[0].savePassword, true);
-  assert.equal(hosts[0].username, 'deploy');
+  assert.equal(hosts[0].username, 'root');
   assert.equal(identityUpdates, 0);
   assert.equal(sharedIdentity.username, 'deploy');
   assert.equal(sharedIdentity.password, 'stale-keychain-password');
   const resolved = resolveHostAuth({ host: hosts[0], keys: [], identities: [sharedIdentity] });
   assert.equal(resolved.password, 'rotated-password');
-  assert.equal(resolved.username, 'deploy');
+  assert.equal(resolved.username, 'root');
+  assert.deepEqual(queue, []);
+});
+
+test('keyboard-interactive submit fills a blank host username from the keychain identity', async () => {
+  const sharedIdentity: Identity = {
+    id: 'id-1',
+    label: 'shared',
+    username: 'alice',
+    authMethod: 'password',
+    password: 'stale-keychain-password',
+    created: 0,
+  };
+  let hosts: Host[] = [{
+    ...baseHost,
+    username: '',
+    identityId: 'id-1',
+    password: 'old-host-password',
+    savePassword: false,
+  }];
+  let queue = [{
+    requestId: 'ki-blank-user',
+    sessionId: 'session-1',
+    hostname: baseHost.hostname,
+    allowSavePassword: true,
+  }];
+  let identityUpdates = 0;
+
+  await handleKeyboardInteractiveSubmitImpl(
+    () => ({
+      hosts,
+      identities: [sharedIdentity],
+      keyboardInteractiveQueue: queue,
+      netcattyBridge: {
+        get: () => ({
+          respondKeyboardInteractive: () => ({ success: true }),
+        }),
+      },
+      sessions: [{
+        id: 'session-1',
+        hostId: baseHost.id,
+        hostname: baseHost.hostname,
+      }],
+      setKeyboardInteractiveQueue: (updater: (items: typeof queue) => typeof queue) => {
+        queue = updater(queue);
+      },
+      t: (key: string) => key,
+      toast: { error: () => {} },
+      updateHosts: (nextHosts: Host[]) => {
+        hosts = nextHosts;
+      },
+      updateIdentities: () => {
+        identityUpdates += 1;
+      },
+    }),
+    'ki-blank-user',
+    ['new-password'],
+    'new-password',
+  );
+
+  assert.equal(hosts[0].identityId, '');
+  assert.equal(hosts[0].username, 'alice');
+  assert.equal(hosts[0].password, 'new-password');
+  assert.equal(hosts[0].savePassword, true);
+  assert.equal(identityUpdates, 0);
+  assert.equal(sharedIdentity.username, 'alice');
+  assert.equal(sharedIdentity.password, 'stale-keychain-password');
+  const resolved = resolveHostAuth({ host: hosts[0], keys: [], identities: [sharedIdentity] });
+  assert.equal(resolved.password, 'new-password');
+  assert.equal(resolved.username, 'alice');
   assert.deepEqual(queue, []);
 });
 
