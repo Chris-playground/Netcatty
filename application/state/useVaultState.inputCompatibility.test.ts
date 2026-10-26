@@ -58,10 +58,10 @@ test("host input choices survive save, restart, duplicate, backup and cloud sync
     await act(async () => { await state!.updateHosts([]); await state!.importDataFromString(exported); });
     assert.deepEqual(choices(), expected);
     // Use the real sync payload builder and apply importer, not JSON alone.
-    const cloud = JSON.parse(JSON.stringify(buildSyncPayload({ ...state!.exportData(), identities: state!.identities })));
+    const cloud = JSON.parse(JSON.stringify(buildSyncPayload({ ...state!.exportData(), identities: state!.identities, knownHosts: state!.knownHosts })));
     await act(async () => { await state!.updateHosts([]); await applySyncPayload(cloud, { importVaultData: state!.importDataFromString }); });
     assert.deepEqual(choices(), expected);
-    const backup = JSON.parse(JSON.stringify(buildLocalVaultPayload({ ...state!.exportData(), identities: state!.identities })));
+    const backup = JSON.parse(JSON.stringify(buildLocalVaultPayload({ ...state!.exportData(), identities: state!.identities, knownHosts: state!.knownHosts })));
     await act(async () => { await state!.updateHosts([]); await applyLocalVaultPayload(backup, { importVaultData: state!.importDataFromString }); });
     assert.deepEqual(choices(), expected);
     await act(async () => { renderer!.unmount(); });
