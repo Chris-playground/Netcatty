@@ -19,7 +19,9 @@ async function main(config) {
       };
     }
   }
+  let packagedDependency;
   if (config.appRoot) {
+    config.appRoot = require("node:fs").realpathSync(config.appRoot);
     // RUN_AS_NODE supports ASAR files, but does not expose Electron's main
     // process APIs. The packaged bridge imports sessionLogsBridge's dialog/shell
     // even with logging disabled. Supply only that unrelated UI host seam;
@@ -30,6 +32,12 @@ async function main(config) {
       if (request === "electron") return { dialog: {}, shell: {} };
       return load.call(this, request, ...args);
     };
+    const packagedRequire = Module.createRequire(path.join(config.appRoot, "node_modules/ssh2/lib/protocol/crypto/chacha20.js"));
+    const noblePath = packagedRequire.resolve("@noble/ciphers/chacha.js");
+    if (!noblePath.startsWith(`${config.appRoot}${path.sep}`)) {
+      throw new Error("ChaCha20 dependency resolved outside the packaged app");
+    }
+    packagedDependency = path.relative(config.appRoot, noblePath).replaceAll("\\", "/");
   }
   const bridge = require(path.join(config.appRoot || path.resolve(__dirname, "../.."), "electron/bridges/sshBridge.cjs"));
   const sessions = new Map();
@@ -73,6 +81,7 @@ async function main(config) {
       echoed: output === config.input,
       electron: process.versions.electron,
       nativeChacha: crypto.getCiphers().includes("chacha20"),
+      packagedDependency,
     };
   } finally {
     for (const session of sessions.values()) session.conn?.destroy();

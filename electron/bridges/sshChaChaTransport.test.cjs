@@ -88,7 +88,11 @@ async function connect(t, {
   assert.equal(code, 0, stderr || stdout);
   const resultLine = stdout.split("\n").find((line) => line.startsWith("NETCATTY_TRANSPORT_RESULT="));
   assert.ok(resultLine, stderr || stdout);
-  return { ...JSON.parse(resultLine.slice("NETCATTY_TRANSPORT_RESULT=".length)), offered, negotiated };
+  const result = JSON.parse(resultLine.slice("NETCATTY_TRANSPORT_RESULT=".length));
+  if (process.env.NETCATTY_SSH_TEST_APP_ROOT && result.connected) {
+    assert.equal(result.packagedDependency, "node_modules/@noble/ciphers/chacha.js");
+  }
+  return { ...result, offered, negotiated };
 }
 
 for (const entrypoint of ["netcatty:start", "netcatty:test-connection"]) {
