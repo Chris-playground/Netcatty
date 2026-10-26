@@ -117,8 +117,10 @@ test("SSH host mode gates every interactive text entry and stays fixed until rec
         metrics.push({mode,entryPoints:5,reconnectedMode:!mode});
       }
       // The SSH-only field cannot change other transports' existing policy.
-      for (const protocol of ['local','telnet','serial']) {
-        const pane=make({id:'other-'+protocol,label:protocol,hostname:'localhost',protocol,sshInputCompatibility:false});
+      for (const protocol of ['local','telnet','serial','mosh','et','ssh-mosh','ssh-et']) {
+        const pane=make({id:'other-'+protocol,label:protocol,hostname:'127.0.0.1',
+          protocol:protocol.startsWith('ssh-')?'ssh':protocol,
+          moshEnabled:protocol==='ssh-mosh',etEnabled:protocol==='ssh-et',sshInputCompatibility:false});
         pane.term.paste('中文'); check(pane,'中文',true,protocol+' retains legacy short paste');
         pane.term.input('a\\rb',true); check(pane,'a\\rb',true,protocol+' retains legacy control-containing text');
       }

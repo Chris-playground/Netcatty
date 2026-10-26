@@ -503,7 +503,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             enabled={!!form.showLineTimestamps}
             onToggle={() => update("showLineTimestamps", !form.showLineTimestamps)}
           />
-          {(form.protocol === undefined || form.protocol === "ssh") && (
+          {(form.protocol === undefined || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
             <>
               <ToggleRow
                 label={t("hostDetails.sshInputCompatibility")}

@@ -518,7 +518,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const isLocalTerminalHost = ctx.host.protocol === "local";
   // Capture the terminal endpoint's choice for this connection, never a chain hop.
   const usesPerCharacterInput = (host: Host) =>
-    (host.protocol !== undefined && host.protocol !== "ssh") || host.sshInputCompatibility === true;
+    (host.protocol !== undefined && host.protocol !== "ssh") || host.moshEnabled === true
+    || host.etEnabled === true || host.sshInputCompatibility === true;
   let usePerCharacterInput = usesPerCharacterInput(ctx.host);
   const windowsPty =
     platform === "win32" && isLocalTerminalHost
@@ -1554,7 +1555,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
 
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
-        for (const chunk of getTextInputWireChunks(outData, usePerCharacterInput && options?.perCharacterWrites === true, ctx.host.protocol === undefined || ctx.host.protocol === "ssh")) {
+        for (const chunk of getTextInputWireChunks(outData, usePerCharacterInput && options?.perCharacterWrites === true, (ctx.host.protocol === undefined || ctx.host.protocol === "ssh") && !ctx.host.moshEnabled && !ctx.host.etEnabled)) {
           ctx.terminalBackend.writeToSession(id, chunk, {
             sensitive,
             serialEraseChar,
