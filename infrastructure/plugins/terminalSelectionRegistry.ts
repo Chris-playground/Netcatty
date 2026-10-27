@@ -15,12 +15,12 @@ export function publishTerminalSelectionTarget() {
   const target = targets.length === 1 ? targets[0] : { sessionId: null };
   const bridge = netcattyBridge.get();
   const diagnostics = import.meta.env?.VITE_NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === '1';
-  if (diagnostics) console.info('[Plugins:TerminalTarget]', { stage: 'renderer-publication', sourceCount: sources.size,
-    eligibleCount: targets.length, apiAvailable: typeof bridge?.setPluginTerminalTarget === 'function', hasTarget: target.sessionId !== null });
+  if (diagnostics) console.info('[Plugins:TerminalTarget] ' + JSON.stringify({ stage: 'renderer-publication', sourceCount: sources.size,
+    eligibleCount: targets.length, apiAvailable: typeof bridge?.setPluginTerminalTarget === 'function', hasTarget: target.sessionId !== null }));
   void bridge?.setPluginTerminalTarget?.(target).then((accepted) => {
-    if (diagnostics) console.info('[Plugins:TerminalTarget]', { stage: 'renderer-ack', accepted: accepted === true });
+    if (diagnostics) console.info('[Plugins:TerminalTarget] ' + JSON.stringify({ stage: 'renderer-ack', accepted: accepted === true }));
   }).catch(() => {
-    if (diagnostics) console.info('[Plugins:TerminalTarget]', { stage: 'renderer-ack', accepted: false });
+    if (diagnostics) console.info('[Plugins:TerminalTarget] ' + JSON.stringify({ stage: 'renderer-ack', accepted: false }));
   });
 }
 

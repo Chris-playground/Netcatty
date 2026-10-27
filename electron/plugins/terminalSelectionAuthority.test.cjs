@@ -75,7 +75,12 @@ test('opt-in capture diagnostics distinguish a missing target from a sender mism
   const previousFlag = process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS, previousInfo = console.info;
   try {
     process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS = '1';
-    console.info = (tag, flags) => { events.push([tag, flags]); };
+    console.info = (line, ...extra) => {
+      assert.equal(extra.length, 0, 'one string survives Chromium console formatting');
+      assert.ok(line.startsWith('[Plugins:TerminalTarget] '));
+      assert.equal(line.includes('\n'), false);
+      events.push(['[Plugins:TerminalTarget]', JSON.parse(line.slice('[Plugins:TerminalTarget] '.length))]);
+    };
     f.authority.setTarget(f.sender, { sessionId: null });
     assert.throws(() => f.capture(), /Select a live terminal/);
     assert.deepEqual(events.at(-1), ['[Plugins:TerminalTarget]', {

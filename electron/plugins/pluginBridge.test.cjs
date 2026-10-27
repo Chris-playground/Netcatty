@@ -37,7 +37,12 @@ test("target diagnostics categorize rejected IPC without logging sender, payload
   });
   try {
     process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS = "1";
-    console.info = (tag, flags) => events.push([tag, flags]);
+    console.info = (line, ...extra) => {
+      assert.equal(extra.length, 0, 'one string survives Chromium console formatting');
+      assert.ok(line.startsWith('[Plugins:TerminalTarget] '));
+      assert.equal(line.includes('\n'), false);
+      events.push(['[Plugins:TerminalTarget]', JSON.parse(line.slice('[Plugins:TerminalTarget] '.length))]);
+    };
     await assert.rejects(ipc.handlers.get(CHANNELS.terminalTarget)({ senderFrame: { url: "https://untrusted.invalid/" } }, privatePayload), /Untrusted/);
     await assert.rejects(ipc.handlers.get(CHANNELS.terminalTarget)({ senderFrame: { url: "app://netcatty/index.html" } }, privatePayload), /disabled or unavailable/);
     assert.deepEqual(events, [

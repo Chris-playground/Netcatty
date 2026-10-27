@@ -292,13 +292,13 @@ function registerPluginBridge(ipcMain, options) {
     ipcMain.handle(channel, async (event, payload) => {
       const diagnoseTarget = channel === CHANNELS.terminalTarget && process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === "1";
       if (!isTrustedSender(event)) {
-        if (diagnoseTarget) console.info("[Plugins:TerminalTarget]", { stage: "main-ipc", accepted: false, reason: "untrusted-sender" });
+        if (diagnoseTarget) console.info('[Plugins:TerminalTarget] ' + JSON.stringify({ stage: "main-ipc", accepted: false, reason: "untrusted-sender" }));
         throw new Error("Untrusted plugin management sender");
       }
       let activeManager;
       try { activeManager = await resolveManager(); }
       catch (error) {
-        if (diagnoseTarget) console.info("[Plugins:TerminalTarget]", { stage: "main-ipc", accepted: false, reason: "manager-unavailable" });
+        if (diagnoseTarget) console.info('[Plugins:TerminalTarget] ' + JSON.stringify({ stage: "main-ipc", accepted: false, reason: "manager-unavailable" }));
         throw error;
       }
       return callback(activeManager, payload, event);

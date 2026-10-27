@@ -10,7 +10,7 @@ const DRAFT_FEATURE = schema.$defs.TerminalInputDraftFeature.const;
 const validateTarget = createDefinitionValidator("HostTerminalTarget");
 const fail = (code, message) => new PluginRpcError(RPC_ERRORS[code], message);
 function diagnose(flags) {
-  if (process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === "1") console.info("[Plugins:TerminalTarget]", flags);
+  if (process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === "1") console.info("[Plugins:TerminalTarget] " + JSON.stringify(flags));
 }
 
 /** Host-only references. Selected text is retained only by the pending dialog. */
