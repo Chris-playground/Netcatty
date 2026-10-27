@@ -10,8 +10,68 @@ capture guard combines a missing target with a different target sender; the
 recorded error alone does not distinguish them.
 
 This isolated continuation adds diagnostics and exercises the complete target
-transport. It does not claim to fix or identify the native cause. The frozen
-candidate and prior feature branches remain unchanged.
+transport. The subsequent evidence below identifies a fixture-induced sensitive
+input stop. No production behavior correction is warranted by that evidence.
+The frozen candidate and prior feature branches remain unchanged.
+
+## Native discriminator and fixture verification
+
+At diagnostic runtime head `587bc9f3f9979dfc89c0389e21b0951425d2f875`, the parent
+reported a visible, pane-owned, connected and attached solo source with both
+session and terminal refs present. `sensitiveClear` was false. The registry had
+one source, zero eligible targets and an available API; main accepted its clear,
+and the renderer received a successful acknowledgement. This establishes source
+ineligibility and rules out a rejected publication for that observation.
+
+The parent supplied the fixture's final prompt `fixture-A> ` and confirmed the
+baseline used the same output. The complete native output bytes are not present
+in this worktree. Direct invocation of the production renderer and shared main
+classifiers verifies the exact supplied prompt (ordinary SSH options,
+`allowHostStyleGreaterThan: false`, `alternateScreen: false`):
+
+| Synthetic prompt | Confirmed shell | Untrusted input | Shared main untrusted |
+| --- | --- | --- | --- |
+| `fixture-A> ` | false | true | true |
+| `fixture-B> ` | false | true | true |
+| `fixture@owned-A:~$ ` | true | false | false |
+| `fixture@owned-B:~$ ` | true | false | false |
+
+These prompts contain no recognized sensitive vocabulary. The existing policy
+also treats an ambiguous prompt-shaped `>` boundary as untrusted, protecting
+custom authentication challenges. Host-name-style `>` prompts are confirmed only
+for actual network-device mode. The fixture is exercising that deliberate guard.
+
+[`Terminal.observeTerminalInputPrompt`](../../components/Terminal.tsx#L2054)
+folds the output and sets `passwordPromptActiveRef.current = true` for an untrusted
+prompt; the selected-terminal source receives that same flag at line 939.
+[`isConfirmedTerminalShellPrompt`](../../domain/terminalPromptSecurity.ts#L150)
+and [`isUntrustedTerminalInputPrompt`](../../domain/terminalPromptSecurity.ts#L292)
+produce the classifications above. The source's `sensitive !== false` guard then
+correctly yields no target. This matches the native diagnostic sequence.
+
+The regression in `application/state/pluginTerminalSelection.test.ts` uses the
+real output folder and classifiers with constructed synthetic marker lines and
+the exact reported prompt. Both whole-stream and character-by-character delivery
+(including split CRLF) latch sensitivity and block the real selection source.
+A subsequent ordinary shell prompt clears the latch; a later password boundary
+blocks it again. Classification never reads the selection.
+
+### Minimal fixture correction and recheck
+
+Change only the owned SSH fixture server's emitted prompt literals from
+`fixture-A> ` / `fixture-B> ` to `fixture@owned-A:~$ ` /
+`fixture@owned-B:~$ `. Keep the unique selected content, transport ownership and
+all product settings unchanged. Start fresh fixture sessions and repeat the
+parent-coordinated native check. Do not send commands to make a prompt, label the
+fixture as a network device, override sensitivity metadata, or relax any guard.
+
+The fixture source and reserved GUI slot belong to the native worker and are
+not available in this worktree; the edit and native recheck remain pending there.
+Runtime head `587bc9f3f` can be reused with that separately recorded fixture
+change: this follow-up changes tests and this record only. The earlier matrix
+failures with the unchanged prompt are retained as **fixture-induced safety
+stops**. They do not establish failure of the corrected ordinary-shell fixture,
+whose native preview, consent, draft and zero-input checks remain pending.
 
 ## Reproduce without the native GUI
 
@@ -117,11 +177,11 @@ cause from the shared error message or assume palette focus clears selection.
 
 ## State and next action
 
-Actual native cause: **uncertain**. Native replay of this diagnostic build:
-**pending parent coordination**. No action was denied or bypassed. A behavioral
-fix and fail-before/pass-after native evidence remain pending that discriminator.
-The source/runtime/connection guards, explicit preview, consent and input-only
-host draft behavior are unchanged.
+Observed cause: **fixture prompt deliberately classified as untrusted input**.
+Corrected fixture edit and native recheck: **pending parent/native-worker
+coordination**. No action was denied or bypassed. No behavioral production patch
+is warranted for this evidence. The source/runtime/connection guards, explicit
+preview, consent and input-only host draft behavior are unchanged.
 
 ## Validation and sample
 
@@ -134,7 +194,10 @@ The JSON collection delta passed 61 focused bridge/authority/installed-entrypoin
 launcher tests, changed-file lint and a fresh diagnostic production build. A
 bundled synthetic renderer probe round-tripped source, publication and ack JSON
 as single-line strings and checked that no identities or text entered the records.
-Native log collection has not been run in this continuation.
+Native log collection was performed by the parent/native worker at `587bc9f3f`;
+this continuation consumes its fixed diagnostic fields and runs no native GUI.
+The fixture-prompt follow-up passed 16 classifier/selection-source tests and
+changed-file lint; it changes no runtime file.
 
 The unchanged two-file sample built to archive SHA-256
 `4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e`

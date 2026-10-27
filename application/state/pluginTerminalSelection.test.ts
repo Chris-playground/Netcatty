@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createPluginTerminalSelectionSource } from './usePluginTerminalSelection';
 import { readPluginTerminalSelection, registerTerminalSelectionSource } from '../../infrastructure/plugins/terminalSelectionRegistry';
 import type { Terminal } from '@xterm/xterm';
+import { foldTerminalPromptSecurityOutput, isConfirmedTerminalShellPrompt, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity';
 
 function fixture() {
   let reads = 0;
@@ -15,6 +16,39 @@ function fixture() {
   const source = createPluginTerminalSelectionSource(() => state, 'renderer');
   return { term, state, source, get reads() { return reads; } };
 }
+
+test('reported native fixture prompts deliberately block sharing until an ordinary shell prompt is observed', () => {
+  const options = { allowHostStyleGreaterThan: false, alternateScreen: false };
+  for (const name of ['A', 'B']) {
+    const prompt = `fixture-${name}> `;
+    const output = `${name}_UNIQUE_SELECTION_ONLY\r\n${prompt}`;
+    for (const chunks of [[output], [...output]]) {
+      const f = fixture();
+      let state = { origin: '', current: '', promptText: '', pendingCr: false };
+      const observe = (chunk: string) => {
+        state = foldTerminalPromptSecurityOutput(state, chunk);
+        // Same latch ordering/options as Terminal.observeTerminalInputPrompt; no metadata override.
+        if (isUntrustedTerminalInputPrompt(state.promptText, options)) f.state.sensitive = true;
+        else if (isConfirmedTerminalShellPrompt(state.promptText, options)) f.state.sensitive = false;
+      };
+      for (const chunk of chunks) observe(chunk);
+      assert.equal(state.promptText, prompt);
+      assert.equal(isConfirmedTerminalShellPrompt(state.promptText, options), false);
+      assert.equal(isUntrustedTerminalInputPrompt(state.promptText, options), true);
+      assert.equal(f.state.sensitive, true);
+      assert.equal(f.source.target(), null, 'ambiguous fixture prompt remains fail-closed');
+      // Synthetic server output, never terminal input or a plugin exception to the guard.
+      observe(`\r\nfixture@owned-${name}:~$ `);
+      assert.equal(isConfirmedTerminalShellPrompt(state.promptText, options), true);
+      assert.equal(isUntrustedTerminalInputPrompt(state.promptText, options), false);
+      assert.equal(f.state.sensitive, false);
+      assert.ok(f.source.target());
+      observe('\r\nPassword> ');
+      assert.equal(f.source.target(), null, 'a subsequent sensitive boundary still revokes eligibility');
+      assert.equal(f.reads, 0, 'classification and publication never read terminal selection');
+    }
+  }
+});
 
 test('registered reader honors explicit false normalization and reads only on Preview', () => {
   const f = fixture();
