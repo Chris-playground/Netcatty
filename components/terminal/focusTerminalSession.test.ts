@@ -170,3 +170,27 @@ test("focusTerminalSessionInput ignores empty or unavailable targets", () => {
     });
   });
 });
+
+
+test('deferred terminal focus preserves an inline session rename opened after the click', () => {
+  let renaming = false;
+  let focuses = 0;
+  let retry: () => void;
+  focusTerminalSessionInput('session', {
+    document: {
+      activeElement: { matches: () => renaming },
+      querySelector: selector => selector.startsWith('[data-session-id=')
+        ? { querySelector: () => ({ focus: () => { focuses += 1; } }) }
+        : null,
+    },
+    requestAnimationFrame: cb => cb(),
+    setTimeout: cb => { retry = cb; },
+  });
+  assert.equal(focuses, 1);
+  renaming = true;
+  retry!();
+  assert.equal(focuses, 1, 'the delayed retry must not commit and dismiss the rename');
+  renaming = false;
+  retry!();
+  assert.equal(focuses, 2);
+});

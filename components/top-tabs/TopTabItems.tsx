@@ -970,6 +970,7 @@ SessionTopTab.displayName = 'SessionTopTab';
 
 interface WorkspaceTopTabProps {
   workspace: Workspace;
+  primaryHost?: Host;
   paneCount: number;
   workspaceSessionIds: readonly string[];
   isBeingDragged: boolean;
@@ -1019,6 +1020,7 @@ WorkspaceDetachSessionMenuItem.displayName = 'WorkspaceDetachSessionMenuItem';
 
 export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
   workspace,
+  primaryHost,
   paneCount,
   workspaceSessionIds,
   workspaceSessions,
@@ -1054,6 +1056,8 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
   );
   const detachSessions = workspaceSessions ?? [];
   const tabLabel = resolveWorkspaceTabLabel(workspace, detachSessions);
+  const isTabbedWorkspace = workspace.viewMode === 'focus' && workspace.focusLayout === 'tabs';
+  const tabbedSession = isTabbedWorkspace ? detachSessions[0] : undefined;
 
   return (
     <ContextMenu>
@@ -1119,6 +1123,15 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           <div className="flex items-center gap-2 truncate">
             {shortcutNumber != null ? (
               <TabShortcutNumberBadge number={shortcutNumber} />
+            ) : tabbedSession ? (
+              <SessionTabIcon
+                host={primaryHost}
+                session={tabbedSession}
+                isActive={isActive}
+                protocol={tabbedSession.protocol}
+                shellIcon={tabbedSession.localShellIcon}
+                dynamicTabTitleMode="off"
+              />
             ) : (
               <LayoutGrid
                 size={14}
@@ -1130,7 +1143,21 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {hasActivity && sessionStatusDot('connected', true)}
-            <div
+            {isTabbedWorkspace ? (
+              <button
+                type="button"
+                onMouseDown={handleTabCloseButtonMouseDown}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseWorkspace(workspace.id);
+                }}
+                onDoubleClick={stopCloseButtonDoubleClickPropagation}
+                className="shrink-0 p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+                aria-label={t('common.close')}
+              >
+                <X size={12} />
+              </button>
+            ) : <div
               className="text-[10px] px-1.5 py-0.5 rounded-full min-w-[22px] text-center"
               style={{
                 border: '1px solid color-mix(in srgb, var(--top-tabs-fg, hsl(var(--foreground))) 18%, transparent)',
@@ -1138,7 +1165,7 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
               }}
             >
               {paneCount}
-            </div>
+            </div>}
           </div>
         </div>
       </ContextMenuTrigger>

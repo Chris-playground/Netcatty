@@ -989,6 +989,7 @@ export const useSessionState = ({
     options?: {
       localShellType?: TerminalSession['shellType'];
       inheritedCwd?: string;
+      tabbed?: boolean;
     },
   ) => {
     const newSessionId = crypto.randomUUID();
@@ -997,10 +998,17 @@ export const useSessionState = ({
       position: direction === 'horizontal' ? 'bottom' : 'right',
     };
     const standaloneWorkspace = createWorkspaceEntity(sessionId, newSessionId, standaloneHint);
+    if (options?.tabbed) {
+      standaloneWorkspace.viewMode = 'focus';
+      standaloneWorkspace.focusLayout = 'tabs';
+      standaloneWorkspace.focusedSessionId = newSessionId;
+    }
 
 	    setSessions(prevSessions => {
       const session = prevSessions.find(s => s.id === sessionId);
       if (!session) return prevSessions;
+      const inheritedCwd = options?.tabbed && session.protocol !== 'local'
+        ? undefined : options?.inheritedCwd;
       
       // If session is already in a workspace, split within that workspace
       if (session.workspaceId) {
@@ -1008,7 +1016,7 @@ export const useSessionState = ({
         const newSession = createSplitTerminalSessionClone(session, {
           id: newSessionId,
           localShellType: options?.localShellType,
-          inheritedCwd: options?.inheritedCwd,
+          inheritedCwd,
           workspaceId: session.workspaceId,
         });
 
@@ -1020,7 +1028,12 @@ export const useSessionState = ({
         };
         
         setWorkspaces(prevWorkspaces => {
-          return insertWorkspacePaneIfMissing(prevWorkspaces, session.workspaceId, newSession.id, hint);
+          const updated = insertWorkspacePaneIfMissing(prevWorkspaces, session.workspaceId, newSession.id, hint);
+          return options?.tabbed ? updated.map(ws => ws.id === session.workspaceId
+            ? { ...ws, viewMode: 'focus', focusLayout: 'tabs', focusedSessionId: newSessionId }
+            : ws) : updated.map(ws => ws.id === session.workspaceId && ws.focusLayout === 'tabs'
+              ? { ...ws, viewMode: 'split' }
+              : ws);
         });
         
         return addTerminalSessionIfMissing(prevSessions, newSession);
@@ -1030,10 +1043,12 @@ export const useSessionState = ({
       const newSession = createSplitTerminalSessionClone(session, {
         id: newSessionId,
         localShellType: options?.localShellType,
-        inheritedCwd: options?.inheritedCwd,
+        inheritedCwd,
       });
 
-      setWorkspaces(prev => addWorkspaceIfMissing(prev, standaloneWorkspace));
+      setWorkspaces(prev => addWorkspaceIfMissing(prev, options?.tabbed
+        ? { ...standaloneWorkspace, title: session.hostLabel, autoTitle: false }
+        : standaloneWorkspace));
       setActiveTabId(standaloneWorkspace.id);
       
       return prevSessions.map(s => {

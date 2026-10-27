@@ -940,6 +940,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           <WorkspaceTopTab
             key={workspace.id}
             workspace={workspace}
+            primaryHost={workspaceSessions[0] ? hostMap.get(workspaceSessions[0].hostId) : undefined}
             paneCount={paneCount}
             workspaceSessionIds={workspaceSessionIds}
             workspaceSessions={workspaceSessions}

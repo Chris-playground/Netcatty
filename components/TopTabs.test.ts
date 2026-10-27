@@ -1,3 +1,5 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -31,6 +33,7 @@ const {
   isPointInsideRect,
 } = await import("../application/state/terminalDragData.ts");
 const {
+  WorkspaceTopTab,
   activateLogViewTab,
   createTopTabSessionDoubleClickHandler,
   formatSessionTopTabLabel,
@@ -304,15 +307,15 @@ test("draggable top-tab close buttons cancel the drag gesture on mousedown", () 
 
   assert.equal(
     topTabItemsSource.match(/onMouseDown=\{handleTabCloseButtonMouseDown\}/g)?.length,
-    4,
+    5,
   );
 
   const workspaceSource = topTabItemsSource.slice(
     topTabItemsSource.indexOf("export const WorkspaceTopTab"),
     topTabItemsSource.indexOf("WorkspaceTopTab.displayName"),
   );
-  assert.equal(workspaceSource.includes("handleTabCloseButtonMouseDown"), false);
-  assert.equal(workspaceSource.includes("<button"), false);
+  assert.equal(workspaceSource.includes("handleTabCloseButtonMouseDown"), true);
+  assert.equal(workspaceSource.includes("<button"), true);
 });
 
 test("draggable top tab roots activate sub-threshold presses and still reorder past the threshold", () => {
@@ -763,4 +766,29 @@ test("bulk close context menu offers symmetric close-to-left option", () => {
     );
     assert.match(source, /'tabs\.closeToLeft':/);
   }
+});
+
+
+test('tabbed SSH groups retain the host icon while split workspaces use the grid icon', () => {
+  const noop = () => {};
+  const session = { id: 's1', hostId: 'host', hostLabel: 'Production', hostname: 'example.test', username: 'root', status: 'connected' as const, protocol: 'ssh' as const };
+  const workspace = { id: 'ws', title: 'Production', viewMode: 'focus' as const, focusLayout: 'tabs' as const, root: { id: 'pane', type: 'pane' as const, sessionId: 's1' } };
+  const props = {
+    workspace, primaryHost: { id: 'host', label: 'Production', hostname: 'example.test', username: 'root', protocol: 'ssh' as const, os: 'linux' as const, distro: 'ubuntu', tags: [] },
+    paneCount: 2, workspaceSessionIds: ['s1'], workspaceSessions: [session],
+    isBeingDragged: false, isDraggingForReorder: false, shiftStyle: {},
+    showDropIndicatorBefore: false, showDropIndicatorAfter: false, isHostDropTarget: false,
+    onTabDragStart: noop, onTabDragEnd: noop, onTabDragOver: noop, onTabDragLeave: noop, onTabDrop: noop,
+    onRenameWorkspace: noop, onCopyWorkspace: noop, onCloseWorkspace: noop,
+    renderBulkCloseItems: () => null, t: (key: string) => key,
+  };
+  const tabbed = renderToStaticMarkup(React.createElement(WorkspaceTopTab, props));
+  assert.match(tabbed, /alt="ubuntu"/);
+  assert.doesNotMatch(tabbed, /lucide-layout-grid/);
+  assert.match(tabbed, /aria-label="common.close"/);
+  assert.doesNotMatch(tabbed, /min-w-\[22px\]/);
+  const split = renderToStaticMarkup(React.createElement(WorkspaceTopTab, { ...props, workspace: { ...workspace, viewMode: 'split' } }));
+  assert.match(split, /lucide-layout-grid/);
+  assert.doesNotMatch(split, /alt="ubuntu"/);
+  assert.match(split, /min-w-\[22px\]/);
 });

@@ -1,4 +1,5 @@
 type QueryRoot = {
+  activeElement?: { matches?: (selector: string) => boolean } | null;
   querySelector: (selector: string) => unknown | null;
 };
 
@@ -48,7 +49,7 @@ export const focusTerminalSessionInput = (
 ): void => {
   if (!sessionId) return;
 
-  const doc = options.document ?? (typeof document !== "undefined" ? document : null);
+  const doc: QueryRoot | null = options.document ?? (typeof document !== "undefined" ? document : null);
   if (!doc) return;
 
   const raf = options.requestAnimationFrame
@@ -69,6 +70,8 @@ export const focusTerminalSessionInput = (
   const paneSelector = `[data-session-id="${escapeAttributeValue(sessionId)}"]`;
 
   const focusTarget = () => {
+    // Click retries must not blur the inline editor opened by a double-click.
+    if (doc.activeElement?.matches?.('[data-session-inline-rename="true"]')) return;
     if (hasOpenAppDialog(doc)) {
       dispatchTerminalSessionRestoreFocus(sessionId);
       return;

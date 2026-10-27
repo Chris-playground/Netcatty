@@ -389,6 +389,7 @@ const restoreWorkspace = (workspace: Workspace, root: WorkspaceNode, sessionIds:
     title: workspace.title,
     root,
     ...(workspace.viewMode === "focus" || workspace.viewMode === "split" ? { viewMode: workspace.viewMode } : {}),
+    ...(workspace.focusLayout === 'tabs' ? { focusLayout: 'tabs' as const } : {}),
     focusedSessionId: workspace.focusedSessionId && sessionIdSet.has(workspace.focusedSessionId)
       ? workspace.focusedSessionId
       : sessionIds[0],

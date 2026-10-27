@@ -714,7 +714,7 @@ export interface TerminalLayerProps {
     sessionId: string,
     tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
   ) => void;
-  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection, options?: { tabbed?: boolean }) => void;
   onConnectToHost: (host: Host) => string | void;
   onCreateLocalTerminal?: () => void;
   // Broadcast mode
@@ -826,7 +826,7 @@ interface TerminalPaneProps {
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
-  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection, options?: { tabbed?: boolean }) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   isComposeSendToAll?: (workspaceId: string) => boolean;
   isGlobalBroadcastEnabled?: boolean;
@@ -1673,7 +1673,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onDetach={inActiveWorkspace ? handleDetach : undefined}
         onStartSessionDrag={inActiveWorkspace ? onStartSessionDrag : undefined}
         onEndSessionDrag={inActiveWorkspace ? onEndSessionDrag : undefined}
-        onDetachPointerDown={inActiveWorkspace ? handleDetachPointerDown : undefined}
+        onDetachPointerDown={inActiveWorkspace && !(isFocusMode && layoutWorkspace?.focusLayout === 'tabs') ? handleDetachPointerDown : undefined}
         onDetachDragStart={inActiveWorkspace ? handleDetachDragStart : undefined}
         onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
@@ -1745,7 +1745,7 @@ interface TerminalPanesHostProps {
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
-  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection, options?: { tabbed?: boolean }) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   isComposeSendToAll?: (workspaceId: string) => boolean;
   isGlobalBroadcastEnabled?: boolean;

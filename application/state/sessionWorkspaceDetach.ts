@@ -90,7 +90,8 @@ export function closeSessionWorkspaceLayoutState(
       }
 
       const remainingSessionIds = collectSessionIds(prunedRoot);
-      if (remainingSessionIds.length === 1) {
+      // A tab group keeps its host identity even with one terminal left.
+      if (remainingSessionIds.length === 1 && workspace.focusLayout !== 'tabs') {
         dissolvedWorkspaceId = workspace.id;
         lastRemainingSessionId = remainingSessionIds[0];
         return null;

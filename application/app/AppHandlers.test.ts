@@ -4,7 +4,7 @@ import { copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, dup
 import { createCopiedTerminalSessionClone } from "../state/terminalConnectionReuse";
 import type { TerminalSession } from "../../domain/models";
 
-type CloneOpts = { localShellType?: string; inheritedCwd?: string; reuseConnection?: boolean };
+type CloneOpts = { localShellType?: string; inheritedCwd?: string; reuseConnection?: boolean; tabbed?: boolean };
 type Calls = {
   copy?: { id: string; opts: CloneOpts };
   split?: { id: string; dir: string; opts: CloneOpts };
@@ -234,4 +234,30 @@ test("copyWorkspaceWithCurrentShell no-ops when the workspace closes during cwd 
   workspaces = [];
   await pending;
   assert.equal(called, false);
+});
+
+
+for (const protocol of ['ssh', undefined] as const) {
+  test(`new SSH sub-tabs skip directory probes and cd injection (${protocol})`, async () => {
+    let cwdReads = 0;
+    const { getCtx, calls } = ctxFactory({
+      sessions: [{ id: 'src', protocol, status: 'connected', lastCwd: '/root' }],
+      getSessionRestoreCwd: () => { cwdReads += 1; return '/root'; },
+    });
+    await splitSessionWithCurrentShellImpl(getCtx, 'src', 'vertical', { tabbed: true });
+    assert.equal(calls.split?.opts.tabbed, true);
+    assert.equal(calls.split?.opts.inheritedCwd, undefined);
+    assert.equal(cwdReads, 0);
+    assert.equal(calls.probed, false);
+  });
+}
+
+test('new local sub-tabs retain the working directory through the launch option', async () => {
+  const { getCtx, calls } = ctxFactory({
+    sessions: [{ id: 'src', protocol: 'local', status: 'connected' }],
+    getSessionRestoreCwd: () => '/work/project',
+  });
+  await splitSessionWithCurrentShellImpl(getCtx, 'src', 'vertical', { tabbed: true });
+  assert.equal(calls.split?.opts.inheritedCwd, '/work/project');
+  assert.equal(calls.probed, false);
 });

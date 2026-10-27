@@ -604,14 +604,18 @@ async function captureCtxInheritedCwd(getCtx: AppContextGetter, sessionId: strin
   return captureInheritedCwd(source, probe, { liveCwd, allowSshProbe });
 }
 
-export async function splitSessionWithCurrentShellImpl(getCtx: AppContextGetter, sessionId: string, direction: 'horizontal' | 'vertical') {
+export async function splitSessionWithCurrentShellImpl(getCtx: AppContextGetter, sessionId: string, direction: 'horizontal' | 'vertical', options?: { tabbed?: boolean }) {
   const { classifyLocalShellType, discoveredShells, resolveShellSetting, splitSession, terminalSettings } = getCtx();
   const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
-  const inheritedCwd = await captureCtxInheritedCwd(getCtx, sessionId);
+  const source = getCtx().sessions?.find((session: TerminalSession) => session.id === sessionId);
+  // New SSH tabs start at the login directory; only splits inherit via a PTY cd.
+  const inheritCwd = !options?.tabbed || source?.protocol === 'local';
+  const inheritedCwd = inheritCwd ? await captureCtxInheritedCwd(getCtx, sessionId) : undefined;
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   return splitSession(sessionId, direction, {
     localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, userAgent),
     inheritedCwd,
+    ...(options?.tabbed ? { tabbed: true } : {}),
   });
 }
 

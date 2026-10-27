@@ -7,7 +7,7 @@ import { terminalLayerFocusSidebarPropsEqual } from './terminalLayerViewMemo';
 type FocusSidebarContext = Record<string, any>;
 
 function TerminalLayerFocusSidebarSectionInner({ ctx }: { ctx: FocusSidebarContext }) {
-  if (!ctx.isFocusMode || !ctx.activeWorkspace) return null;
+  if (!ctx.isFocusMode || !ctx.activeWorkspace || ctx.activeWorkspace.focusLayout === 'tabs') return null;
 
   return (
     <TerminalFocusSidebar
