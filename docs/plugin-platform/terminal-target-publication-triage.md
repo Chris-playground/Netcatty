@@ -58,6 +58,7 @@ its bounded range. Stop after the first decisive failure and preserve only the
 | `renderer-source` | Visibility, pane ownership, connected state, sensitive-clear state, session/terminal-ref presence, DOM attachment |
 | `renderer-publication` | Registered/eligible counts, API presence, target-versus-clear intent |
 | `renderer-ack` | IPC accepted or rejected; no raw exception |
+| `main-ipc` | Fixed `untrusted-sender` or `manager-unavailable` rejection before authority |
 | `main-publication` | Accepted target/clear, or fixed `invalid-target` / `other-window` reason |
 | `main-release` | Target cleared by owner-window release |
 | `main-capture` | `targetPresent`, `targetSenderMatchesCaller`, `callerIsMain` at the failing guard |
@@ -84,7 +85,7 @@ host draft behavior are unchanged.
 
 ## Validation and sample
 
-Local checks: 677 plugin-runtime tests passed, one native test skipped, zero
+Local checks: 678 plugin-runtime tests passed, one native test skipped, zero
 failures; seven focused renderer/dialog tests passed; contract, capability-tool
 and Codex schema generation checks left no generated changes; lint passed with
 seven existing warnings; the diagnostic production build passed.

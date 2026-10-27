@@ -89,6 +89,10 @@ test('opt-in capture diagnostics distinguish a missing target from a sender mism
     assert.equal(JSON.stringify(events).includes('Synthetic'), false);
     assert.equal(JSON.stringify(events).includes('renderer-a'), false);
     assert.equal(JSON.stringify(events).includes(f.context.pluginId), false);
+    assert.throws(() => f.authority.setTarget(f.sender, { sessionId: 'synthetic-private-session' }), /Invalid/);
+    assert.deepEqual(events.at(-1)[1], { stage: 'main-publication', accepted: false, reason: 'invalid-target' });
+    assert.throws(() => f.authority.setTarget({ id: 99 }, { sessionId: null }), /another window/);
+    assert.deepEqual(events.at(-1)[1], { stage: 'main-publication', accepted: false, reason: 'other-window' });
     delete process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS;
     const count = events.length;
     f.authority.setTarget(f.sender, { sessionId: null });

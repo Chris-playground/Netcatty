@@ -28,6 +28,32 @@ function createIpcMain() {
   };
 }
 
+test("target diagnostics categorize rejected IPC without logging sender, payload or exception", async () => {
+  const ipc = createIpcMain(), events = [];
+  const previousFlag = process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS, previousInfo = console.info;
+  const privatePayload = { sessionId: "synthetic-private-session", rendererId: "synthetic-private-renderer", label: "synthetic private label" };
+  registerPluginBridge(ipc, { manager: { async initialize() { throw new Error("synthetic private initialization detail"); } },
+    isTrustedSender: createTrustedPluginBridgeSender(),
+  });
+  try {
+    process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS = "1";
+    console.info = (tag, flags) => events.push([tag, flags]);
+    await assert.rejects(ipc.handlers.get(CHANNELS.terminalTarget)({ senderFrame: { url: "https://untrusted.invalid/" } }, privatePayload), /Untrusted/);
+    await assert.rejects(ipc.handlers.get(CHANNELS.terminalTarget)({ senderFrame: { url: "app://netcatty/index.html" } }, privatePayload), /disabled or unavailable/);
+    assert.deepEqual(events, [
+      ["[Plugins:TerminalTarget]", { stage: "main-ipc", accepted: false, reason: "untrusted-sender" }],
+      ["[Plugins:TerminalTarget]", { stage: "main-ipc", accepted: false, reason: "manager-unavailable" }],
+    ]);
+    delete process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS;
+    await assert.rejects(ipc.handlers.get(CHANNELS.terminalTarget)({}, privatePayload), /Untrusted/);
+    assert.equal(events.length, 2);
+  } finally {
+    console.info = previousInfo;
+    if (previousFlag === undefined) delete process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS;
+    else process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS = previousFlag;
+  }
+});
+
 test("plugin management bridge is unavailable unless the local development gate is explicit", async () => {
   const ipcMain = createIpcMain();
   registerPluginBridge(ipcMain, {
