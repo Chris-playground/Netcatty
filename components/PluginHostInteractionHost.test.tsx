@@ -22,17 +22,19 @@ test('host dialog drives choice/input/copy and the two-phase clipboard share usi
   const { I18nProvider } = await import('../application/i18n/I18nProvider');
   const { PluginHostInteractionHost } = await import('./plugins/PluginHostInteractionHost');
   const { PluginHostInteractionService, assertInteractionRequest } = await import('../electron/plugins/hostInteractionService.cjs');
+  const { createPreloadApi } = await import('../electron/preload/api.cjs');
+  const { registerPluginBridge, createTrustedPluginBridgeSender } = await import('../electron/plugins/pluginBridge.cjs');
   const { getTerminalPaneRenderSnapshot, parseTerminalPaneRenderSnapshot, resolveTerminalPaneInputProps } = await import('./terminalPaneVisibility');
   const { createPluginTerminalSelectionSource } = await import('../application/state/usePluginTerminalSelection');
   const { registerTerminalSelectionSource } = await import('../infrastructure/plugins/terminalSelectionRegistry');
   const { privateOwner, LOCAL_SOURCE } = await import('../electron/plugins/sourceIdentity.cjs');
   let selectionReads = 0;
   let selectionText = 'synthetic terminal selection\nsecond line';
-  let listener: ((event: unknown) => void) | null = null;
+  const rendererEvents = new EventEmitter();
   let reads = 0;
   const writes: string[] = [];
   const audits: unknown[] = [];
-  const sender = Object.assign(new EventEmitter(), { id: 7, isDestroyed: () => false, send(_channel: string, payload: unknown) { listener?.(payload); } });
+  const sender = Object.assign(new EventEmitter(), { id: 7, isDestroyed: () => false, send(channel: string, payload: unknown) { rendererEvents.emit(channel, {}, payload); } });
   const owner = Object.assign(new EventEmitter(), { webContents: sender, isFocused: () => true, isVisible: () => true, isDestroyed: () => false });
   const terminalManager = { getPluginSessionBinding: (id: string, owner: number) => id === 'terminal-a' && owner === 7 ? { epoch: 'worker-a', generation: 1 } : null };
   const service = new PluginHostInteractionService({
@@ -43,12 +45,17 @@ test('host dialog drives choice/input/copy and the two-phase clipboard share usi
     quotaManager: { chargeBytes() {} },
     clipboard: { readText() { reads++; return 'synthetic private text'; }, writeText(value: string) { writes.push(value); } },
   });
-  Object.assign(dom.window, { netcatty: {
-    async setPluginTerminalTarget(target: unknown) { return service.setTerminalTarget(sender, target); },
-    onPluginInteraction(callback: (event: unknown) => void) { listener = callback; return () => { listener = null; }; },
-    async setPluginInteractionReady(ready: boolean) { return service.setReady(sender, ready); },
-    async respondPluginInteraction(response: unknown) { return service.respond(sender, response); },
-  } });
+  const handlers = new Map();
+  registerPluginBridge({ handle(channel: string, handler: unknown) { handlers.set(channel, handler); }, on() {} }, {
+    manager: { async initialize() {} }, interactionService: service,
+    isTrustedSender: createTrustedPluginBridgeSender(),
+  });
+  Object.assign(dom.window, { netcatty: createPreloadApi({ ipcRenderer: {
+    async invoke(channel: string, payload: unknown) {
+      return handlers.get(channel)({ sender, senderFrame: { url: 'app://netcatty/index.html' } }, payload);
+    },
+    on: rendererEvents.on.bind(rendererEvents), removeListener: rendererEvents.removeListener.bind(rendererEvents),
+  } }) });
   const context = { pluginId: 'com.example.synthetic', pluginVersion: '1.0.0', runtimeId: 'runtime-synthetic', manifest: { features: { required: ['terminal.selection-sharing', 'terminal.input-drafts'] } }, signal: new AbortController().signal, async assertActive() {} };
   const root = createRoot(document.getElementById('root')!);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -99,6 +106,7 @@ test('host dialog drives choice/input/copy and the two-phase clipboard share usi
     assert.equal(inputProps.isFocused, false);
     const selectionState = { term: terminal, sessionId: 'terminal-a', bootEpoch: 1, visible: inputProps.isVisible, isFocusedPane: inputProps.isFocusedPane, connected: true, sensitive: false, normalize: false, label: 'Synthetic selected terminal' };
     const cleanupSelection = registerTerminalSelectionSource('terminal-a', createPluginTerminalSelectionSource(() => selectionState, 'renderer-a'));
+    await settle(); // Production preload publication crosses an asynchronous IPC boundary.
     try {
       const noShare = await begin({ kind: 'terminal.selection.read', title: 'Synthetic terminal share' });
       assert.match(document.querySelector('[role="dialog"]')?.textContent ?? '', /passwords, tokens/);

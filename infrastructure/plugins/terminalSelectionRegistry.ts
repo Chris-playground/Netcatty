@@ -13,7 +13,15 @@ const MAX_BYTES = 4096;
 export function publishTerminalSelectionTarget() {
   const targets = [...sources.values()].map((source) => source.target()).filter((target) => target !== null);
   const target = targets.length === 1 ? targets[0] : { sessionId: null };
-  void netcattyBridge.get()?.setPluginTerminalTarget?.(target).catch(() => {});
+  const bridge = netcattyBridge.get();
+  const diagnostics = import.meta.env?.VITE_NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === '1';
+  if (diagnostics) console.info('[Plugins:TerminalTarget]', { stage: 'renderer-publication', sourceCount: sources.size,
+    eligibleCount: targets.length, apiAvailable: typeof bridge?.setPluginTerminalTarget === 'function', hasTarget: target.sessionId !== null });
+  void bridge?.setPluginTerminalTarget?.(target).then((accepted) => {
+    if (diagnostics) console.info('[Plugins:TerminalTarget]', { stage: 'renderer-ack', accepted: accepted === true });
+  }).catch(() => {
+    if (diagnostics) console.info('[Plugins:TerminalTarget]', { stage: 'renderer-ack', accepted: false });
+  });
 }
 
 export function registerTerminalSelectionSource(key: string, source: TerminalSelectionSource) {

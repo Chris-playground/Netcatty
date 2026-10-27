@@ -69,3 +69,34 @@ test('quotas, undeclared features and malformed targets fail before issuing a re
   for (let i = 0; i < LIMITS.handlesPerRuntime; i++) f.authority.issue(target, f.context);
   assert.throws(() => f.authority.issue(target, f.context), /limit/);
 });
+
+test('opt-in capture diagnostics distinguish a missing target from a sender mismatch without identities or text', (t) => {
+  const f = fixture(t), events = [];
+  const previousFlag = process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS, previousInfo = console.info;
+  try {
+    process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS = '1';
+    console.info = (tag, flags) => { events.push([tag, flags]); };
+    f.authority.setTarget(f.sender, { sessionId: null });
+    assert.throws(() => f.capture(), /Select a live terminal/);
+    assert.deepEqual(events.at(-1), ['[Plugins:TerminalTarget]', {
+      stage: 'main-capture', targetPresent: false, targetSenderMatchesCaller: false, callerIsMain: true,
+    }]);
+    f.select();
+    assert.throws(() => f.authority.capture({ id: 99 }, f.context), /Select a live terminal/);
+    assert.deepEqual(events.at(-1), ['[Plugins:TerminalTarget]', {
+      stage: 'main-capture', targetPresent: true, targetSenderMatchesCaller: false, callerIsMain: false,
+    }]);
+    assert.equal(JSON.stringify(events).includes('Synthetic'), false);
+    assert.equal(JSON.stringify(events).includes('renderer-a'), false);
+    assert.equal(JSON.stringify(events).includes(f.context.pluginId), false);
+    delete process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS;
+    const count = events.length;
+    f.authority.setTarget(f.sender, { sessionId: null });
+    assert.throws(() => f.capture(), /Select a live terminal/);
+    assert.equal(events.length, count, 'normal launches emit no diagnostic events');
+  } finally {
+    console.info = previousInfo;
+    if (previousFlag === undefined) delete process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS;
+    else process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS = previousFlag;
+  }
+});

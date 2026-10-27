@@ -9,8 +9,13 @@ const { createPluginHostService } = require("./hostService.cjs");
 const { inProcessBrowserRuntime } = require("./fixtures/inProcessBrowserRuntime.cjs");
 const { createTerminalWorkerManager } = require("../bridges/terminalWorkerManager.cjs");
 const { createTerminalWorkerRuntime } = require("../terminalWorker/runtime.cjs");
+const { createPreloadApi } = require("../preload/api.cjs");
+const { registerPluginBridge, createTrustedPluginBridgeSender } = require("./pluginBridge.cjs");
 
 async function fixture(t) {
+  const { tsImport } = await import('tsx/esm/api');
+  const { createPluginTerminalSelectionSource } = await tsImport('../../application/state/usePluginTerminalSelection.ts', __filename);
+  const { registerTerminalSelectionSource, publishTerminalSelectionTarget, readPluginTerminalSelection } = await tsImport('../../infrastructure/plugins/terminalSelectionRegistry.ts', __filename);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'netcatty-terminal-entry-'));
   const writes = [], prompts = [], decisions = [], responses = [];
   let service, mode = 'share', selection = 'synthetic owned selection\nsecond line', allow = true, nextSession = 'terminal-a';
@@ -35,8 +40,14 @@ async function fixture(t) {
     if (mode === 'pending') return;
     queueMicrotask(() => {
       const action = mode === 'cancel' ? 'cancel' : prompt.request.kind === 'terminal.selection.read' && prompt.phase === 'request' ? 'preview' : 'submit';
+      let value;
+      try { if (action === 'preview') value = readPluginTerminalSelection(prompt.terminalSessionId, prompt.terminalRendererId); }
+      catch {
+        responses.push(service.interactionService.respond(sender, { requestId: prompt.requestId, actionToken: prompt.actionToken, action: 'cancel' }));
+        return;
+      }
       responses.push(service.interactionService.respond(sender, { requestId: prompt.requestId, actionToken: prompt.actionToken, action,
-        ...(action === 'preview' ? { value: selection } : {}),
+        ...(action === 'preview' ? { value } : {}),
       }).catch(async () => {
         await service.interactionService.respond(sender, { requestId: prompt.requestId, actionToken: prompt.actionToken, action: 'cancel' }).catch(() => false);
         return false;
@@ -57,11 +68,39 @@ async function fixture(t) {
   });
   service.runtimeSupervisor.runtimeFactories.browser = inProcessBrowserRuntime;
   await service.manager.initialize();
-  service.interactionService.setReady(sender, true);
+  const ipcHandlers = new Map(), rendererEvents = new EventEmitter(), publications = [];
+  registerPluginBridge({ handle(channel, handler) { ipcHandlers.set(channel, handler); }, on() {} }, {
+    manager: service.manager, interactionService: service.interactionService,
+    isTrustedSender: createTrustedPluginBridgeSender(),
+  });
+  const api = createPreloadApi({ ipcRenderer: {
+    invoke(channel, payload) {
+      const result = ipcHandlers.get(channel)({ sender, senderFrame: { url: 'app://netcatty/index.html' } }, payload);
+      if (channel === 'netcatty:plugins:terminal-target') publications.push(result);
+      return result;
+    }, on: rendererEvents.on.bind(rendererEvents), removeListener: rendererEvents.removeListener.bind(rendererEvents),
+  } });
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { netcatty: api } });
+  await api.setPluginInteractionReady(true);
   await manager.request('netcatty:local:start', {}, { webContentsId: 7 });
-  const select = (sessionId = 'terminal-a', rendererId = 'renderer-a') => service.interactionService.setTerminalTarget(sender, { sessionId, rendererId, label: `Synthetic ${sessionId}` });
-  select();
+  let disposeSource;
+  let state;
+  const select = async (sessionId = 'terminal-a', rendererId = 'renderer-a') => {
+    disposeSource?.();
+    state = { sessionId, bootEpoch: 1, visible: true, isFocusedPane: undefined, connected: true, sensitive: false, normalize: false, label: 'Synthetic selected terminal',
+      term: { cols: 80, element: { isConnected: true },
+        getSelectionPosition: () => ({ start: { x: 0, y: 0 }, end: { x: Math.min(selection.length, 4097), y: 0 } }),
+        getSelection: () => selection },
+    };
+    disposeSource = registerTerminalSelectionSource('synthetic-entrypoint', createPluginTerminalSelectionSource(() => state, rendererId));
+    await Promise.all(publications);
+  };
+  await select();
   t.after(async () => {
+    disposeSource?.(); await Promise.all(publications);
+    await api.setPluginInteractionReady(false);
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow); else Reflect.deleteProperty(globalThis, 'window');
     await service.manager.shutdown();
     manager.stop();
     runtime.closeUrgentInputPortsForTest();
@@ -79,7 +118,9 @@ async function fixture(t) {
   };
   return { root, service, sender, window, manager, runtime, select, install, writes, prompts, decisions, responses,
     mode(value) { mode = value; }, selection(value) { selection = value; }, allow(value) { allow = value; },
-    async startB() { nextSession = 'terminal-b'; await manager.request('netcatty:local:start', {}, { webContentsId: 7 }); select('terminal-b', 'renderer-b'); },
+    async startB() { nextSession = 'terminal-b'; await manager.request('netcatty:local:start', {}, { webContentsId: 7 }); await select('terminal-b', 'renderer-b'); },
+    async availability(changes) { Object.assign(state, changes); publishTerminalSelectionTarget(); await Promise.all(publications); },
+    api, ipcHandlers,
   };
 }
 
@@ -127,7 +168,7 @@ test('installed entrypoint keeps consent, exact snapshots, separate references a
   assert.equal(proposal.terminalSessionId, 'terminal-a');
   assert.deepEqual(f.writes, []);
   f.selection('');
-  await assert.rejects(run('share'), /Select terminal text/);
+  assert.deepEqual(await run('share'), { cancelled: true });
   f.selection('x'.repeat(4097));
   assert.deepEqual(await run('share'), { cancelled: true });
   f.selection('synthetic B'); await f.startB();
@@ -159,7 +200,7 @@ test('installed references revoke across worker reconnect, attached owner, hidde
   await f.manager.request('netcatty:local:reconnect', { sessionId: 'terminal-a' }, { webContentsId: 7 });
   assert.notEqual(f.manager.getPluginSessionBinding('terminal-a', 7).generation, first.generation);
   await assert.rejects(run('draftFirst'), /unavailable/);
-  await run('share'); f.select('terminal-a', 'replacement-renderer');
+  await run('share'); await f.select('terminal-a', 'replacement-renderer');
   await assert.rejects(run('draftLast'), /unavailable/);
   await run('share');
   assert.equal((await f.manager.rebindOutputSession('terminal-a', 9)).success, true);
@@ -167,7 +208,7 @@ test('installed references revoke across worker reconnect, attached owner, hidde
   await assert.rejects(run('draftLast'), /unavailable/);
   assert.equal((await f.manager.rebindOutputSession('terminal-a', 7)).success, true);
   await run('share');
-  f.service.interactionService.setTerminalTarget(f.sender, { sessionId: null });
+  await f.availability({ visible: false });
   await assert.rejects(run('share'), /Select a live terminal/);
   await assert.rejects(run('draftLast'), /unavailable/);
   assert.deepEqual(f.writes, []);
@@ -218,9 +259,39 @@ test('changing the selected renderer cancels an installed preview and rejects la
   assert.equal(await f.service.interactionService.respond(f.sender, { requestId: first.requestId, actionToken: first.actionToken, action: 'preview', value: 'synthetic snapshot' }), true);
   const preview = f.prompts.filter((p) => !p.closed).at(-1);
   assert.equal(preview.phase, 'preview');
-  f.select('terminal-a', 'new-renderer');
+  await f.select('terminal-a', 'new-renderer');
   await assert.rejects(pending, /cancel|changed/);
   assert.equal(await f.service.interactionService.respond(f.sender, { requestId: preview.requestId, actionToken: preview.actionToken, action: 'submit' }), false);
   assert.equal(f.service.interactionService.terminalSelection.handles.size, 0);
+  assert.deepEqual(f.writes, []);
+});
+
+test('real publisher, preload and trusted main IPC preserve a live target across palette blur and reject ineligible sources', { timeout: 15_000 }, async (t) => {
+  const f = await fixture(t); await f.install(source, manifest);
+  const run = () => f.service.contributionService.executeCommand(`${id}.share`);
+  f.window.emit('blur'); // Palette/native-prompt focus loss must not erase the host target.
+  assert.equal((await run()).text, 'synthetic owned selection\nsecond line');
+  await assert.rejects(f.ipcHandlers.get('netcatty:plugins:terminal-target')({
+    sender: f.sender, senderFrame: { url: 'https://untrusted.invalid/' },
+  }, { sessionId: null }), /Untrusted/);
+  await assert.rejects(f.ipcHandlers.get('netcatty:plugins:terminal-target')({
+    sender: { id: 9, isDestroyed: () => false }, senderFrame: { url: 'app://netcatty/index.html' },
+  }, { sessionId: null }), /another window/);
+  assert.equal((await run()).text, 'synthetic owned selection\nsecond line');
+  for (const changes of [{ visible: false }, { isFocusedPane: false }, { connected: false }, { sensitive: true }, { term: null }]) {
+    await f.select();
+    await f.availability(changes);
+    const before = f.decisions.length;
+    await assert.rejects(run(), /Select a live terminal/);
+    assert.equal(f.decisions.length, before, 'ineligible source fails before selection permission');
+  }
+  await f.select();
+  await f.availability({ isFocusedPane: true }); // Selected split pane, alongside the solo/Focus undefined case above.
+  assert.equal((await run()).text, 'synthetic owned selection\nsecond line');
+  await f.api.setPluginInteractionReady(false);
+  await f.api.setPluginInteractionReady(true);
+  await assert.rejects(run(), /Select a live terminal/, 'owner release requires a fresh publication');
+  await f.select();
+  assert.equal((await run()).text, 'synthetic owned selection\nsecond line');
   assert.deepEqual(f.writes, []);
 });

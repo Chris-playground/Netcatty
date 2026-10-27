@@ -19,6 +19,12 @@ type SelectionState = {
 export function createPluginTerminalSelectionSource(readState: () => SelectionState, instanceId: string) {
   const target = () => {
     const state = readState();
+    if (import.meta.env?.VITE_NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === '1') {
+      // Fixed flags only: never include labels, identities, selection or terminal output.
+      console.info('[Plugins:TerminalTarget]', { stage: 'renderer-source', visible: state.visible === true,
+        paneOwned: state.isFocusedPane !== false, connected: state.connected === true, sensitiveClear: state.sensitive === false,
+        hasSession: Boolean(state.sessionId), hasTerminal: Boolean(state.term), attached: state.term?.element?.isConnected === true });
+    }
     // Undefined means solo/Focus mode; only a visible selected split pane may use true.
     if (state.visible !== true || state.isFocusedPane === false || state.connected !== true || state.sensitive !== false
       || !state.sessionId || !state.term || state.term.element?.isConnected !== true) return null;

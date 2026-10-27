@@ -9,6 +9,9 @@ const FEATURE = schema.$defs.TerminalSelectionSharingFeature.const;
 const DRAFT_FEATURE = schema.$defs.TerminalInputDraftFeature.const;
 const validateTarget = createDefinitionValidator("HostTerminalTarget");
 const fail = (code, message) => new PluginRpcError(RPC_ERRORS[code], message);
+function diagnose(flags) {
+  if (process.env.NETCATTY_TERMINAL_TARGET_DIAGNOSTICS === "1") console.info("[Plugins:TerminalTarget]", flags);
+}
 
 /** Host-only references. Selected text is retained only by the pending dialog. */
 class TerminalSelectionAuthority {
@@ -55,10 +58,15 @@ class TerminalSelectionAuthority {
     if (!features.includes(feature)) throw fail("unsupported", "Terminal sharing feature was not declared");
   }
   setTarget(sender, payload) {
-    if (!validateTarget(payload)) throw fail("invalidArgument", "Invalid selected terminal target");
+    if (!validateTarget(payload)) {
+      diagnose({ stage: "main-publication", accepted: false, reason: "invalid-target" });
+      throw fail("invalidArgument", "Invalid selected terminal target");
+    }
     if (!sender || this.getWindow()?.webContents !== sender || sender.isDestroyed?.()) {
+      diagnose({ stage: "main-publication", accepted: false, reason: "other-window" });
       throw fail("permissionDenied", "Selected terminal belongs to another window");
     }
+    diagnose({ stage: "main-publication", accepted: true, hasTarget: payload.sessionId !== null });
     if (this.target?.sender === sender && this.target.sessionId === payload.sessionId
       && this.target.rendererId === payload.rendererId && this.target.label === payload.label) return true;
     this.target = payload.sessionId === null ? null : Object.freeze({ sender, ...payload });
@@ -69,7 +77,11 @@ class TerminalSelectionAuthority {
     this.assertFeature(context, FEATURE);
     const manager = this.getManager();
     this.observe(manager);
-    if (!this.target || this.target.sender !== sender) throw fail("failedPrecondition", "Select a live terminal in the main window first");
+    if (!this.target || this.target.sender !== sender) {
+      diagnose({ stage: "main-capture", targetPresent: this.target !== null,
+        targetSenderMatchesCaller: this.target?.sender === sender, callerIsMain: this.getWindow()?.webContents === sender });
+      throw fail("failedPrecondition", "Select a live terminal in the main window first");
+    }
     const { sessionId, rendererId, label } = this.target;
     const binding = manager?.getPluginSessionBinding?.(sessionId, sender.id);
     if (!binding) throw fail("unavailable", "Selected terminal has no active owned worker connection");
@@ -122,7 +134,10 @@ class TerminalSelectionAuthority {
   }
   releaseRuntime(runtimeId) { for (const [key, entry] of this.handles) if (entry.runtimeId === runtimeId) this.handles.delete(key); }
   releasePlugin(pluginId) { for (const [key, entry] of this.handles) if (entry.target.pluginId === pluginId) this.handles.delete(key); }
-  releaseWindow(sender) { if (this.target?.sender === sender) this.target = null; this.invalidate(); }
+  releaseWindow(sender) {
+    if (this.target?.sender === sender) { this.target = null; diagnose({ stage: "main-release", reason: "owner-window" }); }
+    this.invalidate();
+  }
   clearHandles() { this.handles.clear(); }
   shutdown() {
     clearInterval(this.timer);
