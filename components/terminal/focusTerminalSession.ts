@@ -1,5 +1,4 @@
 type QueryRoot = {
-  activeElement?: { matches?: (selector: string) => boolean } | null;
   querySelector: (selector: string) => unknown | null;
 };
 
@@ -18,6 +17,10 @@ export const hasOpenAppDialog = (
   if (!doc) return false;
   return doc.querySelector('[role="dialog"][data-state="open"]') !== null;
 };
+
+export const hasInlineSessionRename = (
+  doc: QueryRoot | null = typeof document !== "undefined" ? document : null,
+): boolean => Boolean(doc?.querySelector('[data-session-inline-rename="true"]'));
 
 interface FocusTerminalSessionInputOptions {
   document?: QueryTarget | null;
@@ -49,7 +52,7 @@ export const focusTerminalSessionInput = (
 ): void => {
   if (!sessionId) return;
 
-  const doc: QueryRoot | null = options.document ?? (typeof document !== "undefined" ? document : null);
+  const doc = options.document ?? (typeof document !== "undefined" ? document : null);
   if (!doc) return;
 
   const raf = options.requestAnimationFrame
@@ -70,8 +73,9 @@ export const focusTerminalSessionInput = (
   const paneSelector = `[data-session-id="${escapeAttributeValue(sessionId)}"]`;
 
   const focusTarget = () => {
-    // Click retries must not blur the inline editor opened by a double-click.
-    if (doc.activeElement?.matches?.('[data-session-inline-rename="true"]')) return;
+    // A click preceding double-click/F2 may already have queued a retry.
+    // Do not focus xterm or dispatch its restore event while a name is edited.
+    if (hasInlineSessionRename(doc)) return;
     if (hasOpenAppDialog(doc)) {
       dispatchTerminalSessionRestoreFocus(sessionId);
       return;

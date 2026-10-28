@@ -91,7 +91,6 @@ function activeWorkspaceEqual(a: any, b: any): boolean {
   return a.id === b.id
     && a.title === b.title
     && a.viewMode === b.viewMode
-    && a.focusLayout === b.focusLayout
     && a.focusedSessionId === b.focusedSessionId
     && a.snippetId === b.snippetId
     && arrayEqual(a.focusSessionOrder, b.focusSessionOrder)
@@ -194,7 +193,6 @@ function sidePanelWorkspaceByIdEqual(a: any, b: any): boolean {
     if (prevWorkspace.id !== nextWorkspace.id) return false;
     if (prevWorkspace.title !== nextWorkspace.title) return false;
     if (prevWorkspace.viewMode !== nextWorkspace.viewMode) return false;
-    if (prevWorkspace.focusLayout !== nextWorkspace.focusLayout) return false;
     if (prevWorkspace.snippetId !== nextWorkspace.snippetId) return false;
     if (!workspaceNodeEqual(prevWorkspace.root, nextWorkspace.root)) return false;
   }
@@ -443,7 +441,6 @@ const WORKSPACE_CTX_KEYS = [
   'setResizing',
   'Array',
   'cn',
-  'onSubmitSessionRename',
   'onStartSessionRename',
   'onRemoveSessionFromWorkspace',
   'onReorderTabs',
@@ -512,7 +509,6 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
   if (prevWs && nextWs) {
     if (prevWs.id !== nextWs.id) return false;
     if (prevWs.viewMode !== nextWs.viewMode) return false;
-    if (prevWs.focusLayout !== nextWs.focusLayout) return false;
     if (prevWs.root !== nextWs.root) return false;
     if (prevWs.focusSessionOrder !== nextWs.focusSessionOrder) return false;
   }

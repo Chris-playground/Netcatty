@@ -1,3 +1,5 @@
+import { getSessionSnapshot } from '../../application/state/sessionSnapshotStore';
+import { getSessionTabId } from '../../domain/sessionGroup';
 import { Copy, FileCode, FileText, LayoutGrid, Minus, Server, Square, SquareArrowOutUpRight, Terminal, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { activeTabStore, useActiveTabId, useIsTabActive } from '../../application/state/activeTabStore';
@@ -824,12 +826,16 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
     () => terminalReconnectRegistry.isActive(session.id),
     () => false,
   );
-  const isActive = useIsTabActive(session.id);
+  const tabId = getSessionTabId(session);
+  const isActive = React.useSyncExternalStore(activeTabStore.subscribe, () => {
+    const activeId = activeTabStore.getActiveTabId();
+    return activeId === tabId || activeId === session.id || getSessionSnapshot().sessions.some(candidate => candidate.id === activeId && getSessionTabId(candidate) === tabId);
+  }, () => false);
   // Per-session store snapshot so sibling activity dots do not re-render this tab.
   const hasActivity = useSessionActivity(session.id);
   const handleClick = useCallback(() => {
-    activeTabStore.setActiveTabId(session.id);
-  }, [session.id]);
+    activeTabStore.setActiveTabId(tabId);
+  }, [tabId]);
   const handleDoubleClick = useMemo(
     () => createTopTabSessionDoubleClickHandler({
       behavior: tabDoubleClickBehavior,
@@ -840,11 +846,11 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
     [tabDoubleClickBehavior, onCopySession, onDuplicateSession, session.id],
   );
   const addressTooltip = formatSessionTopTabTooltip(session);
-  const tabTitle = formatSessionTopTabLabel(session, dynamicTabTitleMode);
+  const tabTitle = session.sessionGroupId && host ? host.label : formatSessionTopTabLabel(session, dynamicTabTitleMode);
 
   const tabBody = (
     <div
-      data-tab-id={session.id}
+      data-tab-id={tabId}
       data-tab-type="session"
       data-state={isActive ? 'active' : 'inactive'}
       data-active={topTabActiveValue(isActive)}
@@ -856,19 +862,19 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
       draggable
       onDragStart={(event) => {
         handleTabDragThresholdDragStart(event);
-        onTabDragStart(event, session.id);
+        onTabDragStart(event, tabId);
       }}
       onDrag={(event) => {
         if (!handleTabDragThresholdDrag(event)) return;
-        onTabDragStart(event, session.id);
+        onTabDragStart(event, tabId);
       }}
       onDragEnd={(event) => {
         handleTabDragThresholdRelease(event, handleClick);
         onTabDragEnd();
       }}
-      onDragOver={(e) => onTabDragOver(e, session.id)}
+      onDragOver={(e) => onTabDragOver(e, tabId)}
       onDragLeave={onTabDragLeave}
-      onDrop={(e) => onTabDrop(e, session.id)}
+      onDrop={(e) => onTabDrop(e, tabId)}
       className={cn(
         TOP_TAB_ITEM_CLASS,
         "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
@@ -960,7 +966,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         onRenameSession={onRenameSession}
         editHost={host}
         onEditHost={onEditHost}
-        renderBulkCloseItems={renderBulkCloseItems}
+        renderBulkCloseItems={() => renderBulkCloseItems(tabId)}
         t={t}
       />
     </ContextMenu>
@@ -970,7 +976,6 @@ SessionTopTab.displayName = 'SessionTopTab';
 
 interface WorkspaceTopTabProps {
   workspace: Workspace;
-  primaryHost?: Host;
   paneCount: number;
   workspaceSessionIds: readonly string[];
   isBeingDragged: boolean;
@@ -1020,7 +1025,6 @@ WorkspaceDetachSessionMenuItem.displayName = 'WorkspaceDetachSessionMenuItem';
 
 export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
   workspace,
-  primaryHost,
   paneCount,
   workspaceSessionIds,
   workspaceSessions,
@@ -1056,8 +1060,6 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
   );
   const detachSessions = workspaceSessions ?? [];
   const tabLabel = resolveWorkspaceTabLabel(workspace, detachSessions);
-  const isTabbedWorkspace = workspace.viewMode === 'focus' && workspace.focusLayout === 'tabs';
-  const tabbedSession = isTabbedWorkspace ? detachSessions[0] : undefined;
 
   return (
     <ContextMenu>
@@ -1123,15 +1125,6 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           <div className="flex items-center gap-2 truncate">
             {shortcutNumber != null ? (
               <TabShortcutNumberBadge number={shortcutNumber} />
-            ) : tabbedSession ? (
-              <SessionTabIcon
-                host={primaryHost}
-                session={tabbedSession}
-                isActive={isActive}
-                protocol={tabbedSession.protocol}
-                shellIcon={tabbedSession.localShellIcon}
-                dynamicTabTitleMode="off"
-              />
             ) : (
               <LayoutGrid
                 size={14}
@@ -1143,21 +1136,7 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {hasActivity && sessionStatusDot('connected', true)}
-            {isTabbedWorkspace ? (
-              <button
-                type="button"
-                onMouseDown={handleTabCloseButtonMouseDown}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseWorkspace(workspace.id);
-                }}
-                onDoubleClick={stopCloseButtonDoubleClickPropagation}
-                className="shrink-0 p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-                aria-label={t('common.close')}
-              >
-                <X size={12} />
-              </button>
-            ) : <div
+            <div
               className="text-[10px] px-1.5 py-0.5 rounded-full min-w-[22px] text-center"
               style={{
                 border: '1px solid color-mix(in srgb, var(--top-tabs-fg, hsl(var(--foreground))) 18%, transparent)',
@@ -1165,7 +1144,7 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
               }}
             >
               {paneCount}
-            </div>}
+            </div>
           </div>
         </div>
       </ContextMenuTrigger>

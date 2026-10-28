@@ -125,6 +125,8 @@ test("buildSessionRestorePayload only stores allowlisted session fields", () => 
     "id",
     "protocol",
     "restoreState",
+    "sessionGroupId",
+    "sessionGroupFocused",
     "status",
     "username",
   ].sort());
@@ -892,25 +894,4 @@ test("restore retains absent local display snapshots while legacy fields remain 
   assert.equal(restored.sessions[1].localShellIcon, "bash");
   assert.equal(restored.sessions[2].localShellName, undefined);
   assert.equal(restored.sessions[2].localShellIcon, undefined);
-});
-
-
-test('session restore preserves the horizontal tab layout and renamed session', () => {
-  const payload = buildSessionRestorePayload({
-    sessions: [session('s1', 'ws'), { ...session('s2', 'ws'), customName: 'Deploy' }],
-    workspaces: [{
-      id: 'ws', title: 'Production', viewMode: 'focus', focusLayout: 'tabs',
-      autoTitle: false, focusedSessionId: 's2',
-      root: { id: 'split', type: 'split', direction: 'vertical', children: [
-        { id: 'p1', type: 'pane', sessionId: 's1' },
-        { id: 'p2', type: 'pane', sessionId: 's2' },
-      ] },
-    }],
-    tabOrder: ['ws'], activeTabId: 'ws',
-  });
-  const restored = sanitizeSessionRestorePayload(payload);
-  assert.equal(restored.workspaces[0].focusLayout, 'tabs');
-  assert.equal(restored.workspaces[0].focusedSessionId, 's2');
-  assert.equal(restored.workspaces[0].title, 'Production');
-  assert.equal(restored.sessions[1].customName, 'Deploy');
 });

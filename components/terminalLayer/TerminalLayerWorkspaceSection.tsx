@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useEffect, useState, useSyncExternalStore } from 'react';
+import { TerminalSessionGroupSection } from './TerminalSessionGroupSection';
 import { createPortal } from 'react-dom';
-import { TerminalSessionTabs } from './TerminalSessionTabs';
-import { resolveWorkspaceFocusSessionOrder } from '../../domain/workspace';
-import type { TerminalSession } from '../../types';
 
 import {
   getSidePanelLiveSnapshot,
@@ -124,7 +122,6 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     Array,
     cn,
     onStartSessionRename,
-    onSubmitSessionRename,
     onRemoveSessionFromWorkspace,
     onReorderTabs,
     onStartSessionDrag,
@@ -153,29 +150,9 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     return () => window.clearTimeout(timerId);
   }, [activeMagnifiedTerminal]);
 
-  const tabSessions: TerminalSession[] = activeWorkspace?.focusLayout === 'tabs' && isFocusMode
-    ? resolveWorkspaceFocusSessionOrder(activeWorkspace.root, activeWorkspace.focusSessionOrder).map(id => sessions.find((session: TerminalSession) => session.id === id)).filter(Boolean)
-    : !activeWorkspace ? sessions.filter((session: TerminalSession) => session.id === activeTabId && !session.workspaceId) : [];
-  const selectedTabId = activeWorkspace?.focusedSessionId || tabSessions[0]?.id;
-
   return (
     <div data-section="terminal-workspace-column" className="flex-1 min-h-0 flex flex-col">
-    {tabSessions.length > 0 && (
-      <TerminalSessionTabs
-        key={activeWorkspace?.id || tabSessions[0].id}
-        sessions={tabSessions}
-        selectedSessionId={selectedTabId}
-        onSelect={(id) => {
-          if (activeWorkspace) onSetWorkspaceFocusedSession?.(activeWorkspace.id, id);
-          refocusTerminalSession(id);
-        }}
-        onAdd={() => selectedTabId && onSplitSession?.(selectedTabId, 'vertical', { tabbed: true })}
-        onClose={handleCloseSession}
-        onRename={onSubmitSessionRename}
-        theme={live.resolvedPreviewTheme || terminalTheme}
-        t={t}
-      />
-    )}
+    <TerminalSessionGroupSection theme={live.resolvedPreviewTheme || terminalTheme} t={t} />
     <div ref={workspaceInnerRef} className="flex-1 min-h-0 overflow-hidden relative">
         {draggingSessionId && !isFocusMode && (
           <div

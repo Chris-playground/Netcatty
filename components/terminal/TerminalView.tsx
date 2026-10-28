@@ -1407,7 +1407,10 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
 
           {/* ZMODEM transfer progress indicator */}
           {zmodem.active && (
-            <div className="absolute bottom-4 right-4 z-[25] pointer-events-auto">
+            <div
+              className="absolute right-4 z-[25] pointer-events-auto"
+              style={{ bottom: terminalBottomInset + 16 }}
+            >
               <ZmodemProgressIndicator
                 transferType={zmodem.transferType}
                 filename={zmodem.filename}

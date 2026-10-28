@@ -1,3 +1,4 @@
+import { resolveSessionGroupSession } from '../../domain/sessionGroup';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type React from 'react';
 import type { Host, HostProtocol, TerminalSession } from '../../types';
@@ -136,6 +137,10 @@ export async function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sess
   if (session.workspaceId) {
     setActiveTabId(session.workspaceId);
     setWorkspaceFocusedSession(session.workspaceId, sessionId);
+    return;
+  }
+  if (getCtx().selectSessionTab) {
+    getCtx().selectSessionTab(sessionId);
     return;
   }
   setActiveTabId(sessionId);
@@ -604,18 +609,14 @@ async function captureCtxInheritedCwd(getCtx: AppContextGetter, sessionId: strin
   return captureInheritedCwd(source, probe, { liveCwd, allowSshProbe });
 }
 
-export async function splitSessionWithCurrentShellImpl(getCtx: AppContextGetter, sessionId: string, direction: 'horizontal' | 'vertical', options?: { tabbed?: boolean }) {
+export async function splitSessionWithCurrentShellImpl(getCtx: AppContextGetter, sessionId: string, direction: 'horizontal' | 'vertical') {
   const { classifyLocalShellType, discoveredShells, resolveShellSetting, splitSession, terminalSettings } = getCtx();
   const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
-  const source = getCtx().sessions?.find((session: TerminalSession) => session.id === sessionId);
-  // New SSH tabs start at the login directory; only splits inherit via a PTY cd.
-  const inheritCwd = !options?.tabbed || source?.protocol === 'local';
-  const inheritedCwd = inheritCwd ? await captureCtxInheritedCwd(getCtx, sessionId) : undefined;
+  const inheritedCwd = await captureCtxInheritedCwd(getCtx, sessionId);
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   return splitSession(sessionId, direction, {
     localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, userAgent),
     inheritedCwd,
-    ...(options?.tabbed ? { tabbed: true } : {}),
   });
 }
 
@@ -751,7 +752,7 @@ export async function confirmIfBusyLocalTerminalImpl(getCtx: AppContextGetter, s
  * they contain; standalone session ids pass through.
  */
 export function collectBatchBusyProbeSessionIds(
-  sessions: readonly { id: string; workspaceId?: string | null }[],
+  sessions: readonly { id: string; workspaceId?: string | null; sessionGroupId?: string }[],
   workspaces: readonly { id: string }[],
   targetIds: readonly string[],
 ): string[] {
@@ -762,8 +763,8 @@ export function collectBatchBusyProbeSessionIds(
       for (const s of sessions) {
         if (s.workspaceId === tabId) sessionIdsToProbe.push(s.id);
       }
-    } else if (sessions.find((s) => s.id === tabId)) {
-      sessionIdsToProbe.push(tabId);
+    } else {
+      sessionIdsToProbe.push(...sessions.filter(s => !s.workspaceId && (s.sessionGroupId ?? s.id) === tabId).map(s => s.id));
     }
   }
   return sessionIdsToProbe;
@@ -805,7 +806,7 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
       workspaces.some((workspace) => workspace.id === id) &&
       sessions.some((session) => session.workspaceId === id && keepTabIds.has(session.id))
     ));
-    const standaloneSessionIds = effectiveRegularIds.filter((id) => sessions.some((session) => session.id === id));
+    const standaloneSessionIds = sessions.filter(session => !session.workspaceId && effectiveRegularIds.includes(session.sessionGroupId ?? session.id)).map(session => session.id);
     if (standaloneSessionIds.length) closeSessions(standaloneSessionIds);
     for (const id of effectiveRegularIds) {
       if (workspaces.some((workspace) => workspace.id === id)) closeWorkspace(id);
@@ -884,7 +885,7 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
           break;
         }
 
-        const session = sessions.find((s) => s.id === currentId) ?? null;
+        const session = resolveSessionGroupSession(sessions, currentId) ?? null;
         const workspace = workspaces.find((w) => w.id === currentId) ?? null;
 
         const focusIsInsideTerminal = !!document.activeElement?.closest('[data-session-id]');
@@ -900,8 +901,12 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         (async () => {
           try {
             switch (intent.kind) {
-              case 'closeTerminal':
               case 'closeSingleTab': {
+                const ids = sessions.filter(candidate => !candidate.workspaceId && (candidate.sessionGroupId ?? candidate.id) === currentId).map(candidate => candidate.id);
+                if (await confirmIfBusyLocalTerminal(ids)) getCtx().closeSessions(ids);
+                return;
+              }
+              case 'closeTerminal': {
                 const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
                 if (ok) closeSession(intent.sessionId);
                 return;
@@ -928,7 +933,7 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         if (!currentId || currentId === 'vault' || currentId === 'sftp') break;
         if (closeTabInFlightRef.current) break;
 
-        const session = sessions.find((s) => s.id === currentId) ?? null;
+        const session = resolveSessionGroupSession(sessions, currentId) ?? null;
         const workspace = workspaces.find((w) => w.id === currentId) ?? null;
 
         closeTabInFlightRef.current = true;
@@ -1004,7 +1009,7 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
           const currentId = activeTabStore.getActiveTabId();
           const intent = resolveSnippetsShortcutIntent({
             activeTabId: currentId,
-            sessionForTab: sessions.find((s) => s.id === currentId) ?? null,
+            sessionForTab: resolveSessionGroupSession(sessions, currentId) ?? null,
             workspaceForTab: workspaces.find((w) => w.id === currentId) ?? null,
             terminalScriptsToggleAvailable: !!toggleScriptsSidePanelRef.current,
           });

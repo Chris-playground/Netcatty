@@ -1,10 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, splitSessionWithCurrentShellImpl } from "./AppHandlers";
+import { collectBatchBusyProbeSessionIds, copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, splitSessionWithCurrentShellImpl } from "./AppHandlers";
 import { createCopiedTerminalSessionClone } from "../state/terminalConnectionReuse";
 import type { TerminalSession } from "../../domain/models";
 
-type CloneOpts = { localShellType?: string; inheritedCwd?: string; reuseConnection?: boolean; tabbed?: boolean };
+type CloneOpts = { localShellType?: string; inheritedCwd?: string; reuseConnection?: boolean };
+
+test('closing a group probes every member even after its original session is gone', () => {
+  const sessions = [
+    { id: 'second', sessionGroupId: 'closed-original' },
+    { id: 'third', sessionGroupId: 'closed-original' },
+    { id: 'other', sessionGroupId: 'other' },
+    { id: 'pane', workspaceId: 'workspace' },
+  ];
+  assert.deepEqual(collectBatchBusyProbeSessionIds(sessions, [{ id: 'workspace' }], ['closed-original']), ['second', 'third']);
+  assert.deepEqual(collectBatchBusyProbeSessionIds(sessions, [{ id: 'workspace' }], ['workspace']), ['pane']);
+});
 type Calls = {
   copy?: { id: string; opts: CloneOpts };
   split?: { id: string; dir: string; opts: CloneOpts };
@@ -234,30 +245,4 @@ test("copyWorkspaceWithCurrentShell no-ops when the workspace closes during cwd 
   workspaces = [];
   await pending;
   assert.equal(called, false);
-});
-
-
-for (const protocol of ['ssh', undefined] as const) {
-  test(`new SSH sub-tabs skip directory probes and cd injection (${protocol})`, async () => {
-    let cwdReads = 0;
-    const { getCtx, calls } = ctxFactory({
-      sessions: [{ id: 'src', protocol, status: 'connected', lastCwd: '/root' }],
-      getSessionRestoreCwd: () => { cwdReads += 1; return '/root'; },
-    });
-    await splitSessionWithCurrentShellImpl(getCtx, 'src', 'vertical', { tabbed: true });
-    assert.equal(calls.split?.opts.tabbed, true);
-    assert.equal(calls.split?.opts.inheritedCwd, undefined);
-    assert.equal(cwdReads, 0);
-    assert.equal(calls.probed, false);
-  });
-}
-
-test('new local sub-tabs retain the working directory through the launch option', async () => {
-  const { getCtx, calls } = ctxFactory({
-    sessions: [{ id: 'src', protocol: 'local', status: 'connected' }],
-    getSessionRestoreCwd: () => '/work/project',
-  });
-  await splitSessionWithCurrentShellImpl(getCtx, 'src', 'vertical', { tabbed: true });
-  assert.equal(calls.split?.opts.inheritedCwd, '/work/project');
-  assert.equal(calls.probed, false);
 });

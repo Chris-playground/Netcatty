@@ -248,6 +248,7 @@ export function AppSideEffects() {
   knownHostsRef.current = effectiveKnownHosts;
 
   const sessionState = useAppSessionRuntime();
+  const { selectSessionTab } = sessionState;
   const {
     sessions,
     workspaces,
@@ -599,6 +600,7 @@ export function AppSideEffects() {
     return handleTrayJumpToSessionImpl(() => ({
       sessionId,
       sessions,
+      selectSessionTab,
       setActiveTabId,
       setWorkspaceFocusedSession,
       getActiveTabId: () => activeTabStore.getActiveTabId(),
@@ -1013,7 +1015,7 @@ export function AppSideEffects() {
 
   const createLocalTerminalWithCurrentShell = useCallback(() => { return createLocalTerminalWithCurrentShellImpl(() => ({ classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, terminalSettings })); }, [createLocalTerminal, terminalSettings, discoveredShells]);
 
-  const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical', options?: { tabbed?: boolean }) => { return splitSessionWithCurrentShellImpl(() => ({ classifyLocalShellType, direction, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessionId, sessions, splitSession, terminalSettings }), sessionId, direction, options); }, [splitSession, terminalSettings, discoveredShells, sessions, getSessionRestoreCwd, hostById, terminalHosts]);
+  const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical') => { return splitSessionWithCurrentShellImpl(() => ({ classifyLocalShellType, direction, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessionId, sessions, splitSession, terminalSettings }), sessionId, direction); }, [splitSession, terminalSettings, discoveredShells, sessions, getSessionRestoreCwd, hostById, terminalHosts]);
 
   const copySessionWithCurrentShell = useCallback((sessionId: string) => { return copySessionWithCurrentShellImpl(() => ({ classifyLocalShellType, copySession, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessionId, sessions, terminalSettings }), sessionId); }, [copySession, terminalSettings, discoveredShells, sessions, getSessionRestoreCwd, hostById, terminalHosts]);
 

@@ -7,7 +7,7 @@ import { collectSessionIds } from '../../domain/workspace';
 import { activeTabStore } from './activeTabStore';
 import { useSessionState } from './useSessionState';
 
-test('session tabs preserve their workspace, transport source, focus and names', async (t) => {
+async function mount(t: import('node:test').TestContext) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
   const globals = {
     window: dom.window,
@@ -39,45 +39,81 @@ test('session tabs preserve their workspace, transport source, focus and names',
     return null;
   }
   await act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(Probe))));
-  const host = { id: 'ssh-1', label: 'Production', hostname: 'example.test', username: 'root', port: 22, protocol: 'ssh' as const, tags: [], os: 'linux' as const };
-  await act(async () => state.connectToHost(host));
-  const original = state!.sessions[0];
-  await act(async () => state.updateSessionStatus(original.id, 'connected'));
-  await act(async () => state.splitSession(original.id, 'vertical', { tabbed: true, inheritedCwd: '/srv/app' }));
-  assert.equal(state!.workspaces.length, 1);
-  const workspace = state!.workspaces[0];
-  const second = state!.sessions.find(s => s.id !== original.id)!;
-  assert.equal(workspace.viewMode, 'focus');
-  assert.equal(workspace.focusLayout, 'tabs');
-  assert.equal(workspace.title, 'Production');
-  assert.equal(workspace.focusedSessionId, second.id);
-  assert.equal(second.reuseConnectionFromSessionId, original.id);
-  assert.equal(second.pendingInitialCwd, undefined, 'new SSH tabs must not inject a cd command');
-  assert.equal(state!.sessions.length, 2, 'StrictMode must not duplicate sessions');
-  assert.deepEqual(collectSessionIds(workspace.root), [original.id, second.id]);
-  await act(async () => state.submitSessionRename(second.id, 'Deploy'));
-  assert.equal(state!.sessions.find(s => s.id === second.id)?.customName, 'Deploy');
-  assert.equal(state!.workspaces[0].title, 'Production');
-  await act(async () => state.splitSession(second.id, 'vertical', { tabbed: true }));
-  assert.equal(state!.workspaces.length, 1);
-  assert.equal(state!.sessions.length, 3);
-  const third = state!.sessions.find(s => s.id !== original.id && s.id !== second.id)!;
-  assert.equal(state!.workspaces[0].id, workspace.id);
-  assert.equal(state!.workspaces[0].focusedSessionId, third.id);
-  await act(async () => state.closeSession(third.id));
-  assert.ok(state!.sessions.some(s => s.id === state!.workspaces[0].focusedSessionId));
-  await act(async () => state.closeSession(second.id));
-  assert.equal(state!.workspaces.length, 1, 'the host tab stays stable with one session');
-  assert.equal(state!.sessions.length, 1);
-  assert.equal(state!.sessions[0].id, original.id);
-  assert.equal(state!.sessions[0].workspaceId, workspace.id);
-  assert.equal(state!.workspaces[0].focusedSessionId, original.id);
-  await act(async () => state.splitSession(original.id, 'horizontal'));
-  assert.equal(state!.workspaces[0].viewMode, 'split', 'the split action still opens a visible pane');
-  const split = state!.sessions.find(s => s.id !== original.id)!;
-  await act(async () => state.closeSession(split.id));
-  await act(async () => state.closeSession(original.id));
-  assert.equal(state!.workspaces.length, 0);
-  assert.equal(state!.sessions.length, 0);
+  return () => state!;
+}
+
+test('session groups keep their identity, selection and lifecycle outside workspaces', async (t) => {
+  const state = await mount(t);
+  await act(async () => state().connectToHost({ id: 'host', label: 'Production', hostname: 'example.test', username: 'root', port: 22, protocol: 'ssh', tags: [], os: 'linux' }));
+  const first = state().sessions[0];
+  const groupId = first.id;
+  await act(async () => state().updateSessionStatus(first.id, 'connected'));
+  await act(async () => state().addSessionTab(first.id, { inheritedCwd: '/srv/app' }));
+  const second = state().sessions.find(s => s.id !== first.id)!;
+  assert.equal(state().workspaces.length, 0);
+  assert.equal(state().sessions.length, 2, 'StrictMode creates exactly one new session');
+  assert.equal(second.sessionGroupId, groupId);
+  assert.equal(second.workspaceId, undefined);
+  assert.equal(second.reuseConnectionFromSessionId, first.id);
+  assert.equal(second.pendingInitialCwd, undefined);
+  assert.deepEqual(state().orderedTabs, [groupId]);
+  assert.equal(second.sessionGroupFocused, true);
+  await act(async () => state().submitSessionRename(second.id, 'Deploy'));
+  assert.equal(state().sessions.find(s => s.id === second.id)?.customName, 'Deploy');
+  await act(async () => state().selectSessionTab(first.id));
+  assert.equal(state().sessions.find(s => s.id === first.id)?.sessionGroupFocused, true);
+  assert.equal(state().sessions.find(s => s.id === second.id)?.sessionGroupFocused, false);
+  await act(async () => activeTabStore.setActiveTabId(second.id));
+  assert.equal(activeTabStore.getActiveTabId(), groupId, 'member activation from external entry points resolves to the stable group tab');
+  assert.equal(state().sessions.find(s => s.id === second.id)?.sessionGroupFocused, true);
+  await act(async () => state().closeSession(first.id));
+  assert.equal(state().sessions.length, 1);
+  assert.equal(state().sessions[0].sessionGroupId, groupId, 'closing the original member keeps the group id');
+  assert.equal(state().sessions[0].sessionGroupFocused, true);
+  assert.equal(activeTabStore.getActiveTabId(), groupId);
+  assert.deepEqual(state().orderedTabs, [groupId]);
+  await act(async () => state().addSessionTab(second.id));
+  assert.equal(state().workspaces.length, 0);
+  assert.deepEqual(state().orderedTabs, [groupId]);
+  await act(async () => state().closeSessions(state().sessions.map(s => s.id)));
+  assert.equal(state().sessions.length, 0);
+  assert.deepEqual(state().orderedTabs, []);
   assert.equal(activeTabStore.getActiveTabId(), 'vault');
+});
+
+test('group additions preserve default and custom top-level order and isolate explicit splits', async (t) => {
+  const state = await mount(t);
+  for (const id of ['first', 'second', 'third']) {
+    await act(async () => state().connectToHost({ id, label: id, hostname: id + '.test', username: 'root', port: 22, protocol: 'ssh', tags: [], os: 'linux' }));
+  }
+  const [first, second, third] = state().sessions;
+  const initialOrder = state().orderedTabs;
+  await act(async () => state().addSessionTab(first.id));
+  assert.deepEqual(state().orderedTabs, initialOrder);
+  const editor = 'editor:test';
+  await act(async () => state().reorderTabs(editor, third.id, 'before', [editor]));
+  await act(async () => state().reorderTabs(third.id, second.id, 'before', [editor]));
+  const customOrder = state().getOrderedWorkTabs([editor]);
+  await act(async () => state().addSessionTab(third.id));
+  assert.deepEqual(state().getOrderedWorkTabs([editor]), customOrder);
+  assert.equal(state().workspaces.length, 0);
+  await act(async () => state().closeSession(first.id));
+  assert.deepEqual(state().getOrderedWorkTabs([editor]), customOrder, 'closing the original member keeps the group slot among other tabs');
+  await act(async () => state().splitSession(second.id, 'horizontal'));
+  assert.equal(state().workspaces.length, 1);
+  const workspace = state().workspaces[0];
+  assert.equal(collectSessionIds(workspace.root).length, 2);
+  assert.ok(state().sessions.filter(s => s.workspaceId === workspace.id).every(s => s.sessionGroupId === undefined));
+  assert.equal(state().sessions.filter(s => s.sessionGroupId === first.id).length, 1);
+  assert.equal(state().sessions.filter(s => s.sessionGroupId === third.id).length, 2);
+  const before = state().sessions.length;
+  await act(async () => state().addSessionTab(second.id));
+  assert.equal(state().sessions.length, before, 'workspace panes cannot silently join a flat session group');
+  const firstRemaining = state().sessions.find(s => s.sessionGroupId === first.id)!;
+  const thirdGroupOrder = state().getOrderedWorkTabs([editor]).filter(id => id === third.id || id === editor);
+  await act(async () => state().createWorkspaceFromSessions(firstRemaining.id, third.id, { direction: 'vertical', position: 'right' }));
+  assert.equal(state().workspaces.length, 2);
+  assert.deepEqual(state().getOrderedWorkTabs([editor]).filter(id => id === third.id || id === editor), thirdGroupOrder);
+  assert.equal(state().sessions.filter(s => s.sessionGroupId === third.id).length, 1, 'explicit merging moves only the chosen member');
+  assert.ok(state().sessions.filter(s => s.workspaceId).every(s => !s.sessionGroupId));
 });

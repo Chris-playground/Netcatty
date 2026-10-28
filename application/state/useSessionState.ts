@@ -1,4 +1,5 @@
-import { MouseEvent,useCallback,useEffect,useMemo,useRef,useState } from 'react';
+import { MouseEvent,useCallback,useEffect,useMemo,useRef,useState,useReducer, type SetStateAction } from 'react';
+import { getSessionGroups, getSessionTabId, normalizeSessionGroups, selectSessionInGroup } from '../../domain/sessionGroup';
 import { flushSync } from 'react-dom';
 import { ConnectionLog,Host,SerialConfig,Snippet,TerminalSession,Workspace,WorkspaceNode,WorkspaceViewMode } from '../../domain/models';
 import { addLogView, getLogViewTabId, removeLogView, type LogView } from './logViewState';
@@ -221,7 +222,13 @@ export const useSessionState = ({
     ),
     payload: persistSessionRestore ? sessionRestoreStorage.read() : null,
   }), [persistSessionRestore]);
-  const [sessions, setSessions] = useState<TerminalSession[]>(initialRestoreState.sessions);
+  const [sessions, setSessions] = useReducer(
+    (prev: TerminalSession[], update: SetStateAction<TerminalSession[]>) => (
+      normalizeSessionGroups(typeof update === 'function' ? update(prev) : update)
+    ),
+    initialRestoreState.sessions,
+    normalizeSessionGroups,
+  );
   const [workspaces, setWorkspaces] = useState<Workspace[]>(initialRestoreState.workspaces);
   // Latest workspaces snapshot for synchronous existence checks outside
   // setWorkspaces updaters — React doesn't guarantee updaters run
@@ -268,6 +275,18 @@ export const useSessionState = ({
   );
   sessionsRef.current = sessions;
   tabOrderRef.current = tabOrder;
+  // Existing entry points (quick switcher, tray and internal tools) may still
+  // activate a member id. Resolve it to the stable group tab and select that
+  // member so panels and persisted tab identity stay consistent.
+  useEffect(() => activeTabStore.subscribeSync(() => {
+    const requestedId = activeTabStore.getActiveTabId();
+    const target = sessionsRef.current.find(session => session.id === requestedId);
+    if (!target || target.workspaceId || target.hiddenFromTabs) return;
+    const groupId = getSessionTabId(target);
+    if (groupId === requestedId) return;
+    setSessions(prev => selectSessionInGroup(prev, target.id));
+    setActiveTabId(groupId, { recordPrevious: false });
+  }), [setActiveTabId]);
   if (persistSessionRestore && shouldPersistSessionRestoreState(sessions, workspaces, tabOrder)) {
     hasSeenRestorableSessionRestoreStateRef.current = true;
   }
@@ -834,11 +853,16 @@ export const useSessionState = ({
       // Collapse the two session tab slots into the workspace tab so later
       // detach/close can replace `ws-*` with session ids again.
       setTabOrder((prevTabOrder) => {
+        const remainingGroups = new Set(getSessionGroups(prevSessions.filter(
+          session => session.id !== baseSessionId && session.id !== joiningSessionId,
+        )).map(group => group.id));
+        const removedTabs = [getSessionTabId(base), getSessionTabId(joining)]
+          .filter(id => !remainingGroups.has(id));
         const withoutSessions = prevTabOrder.filter(
-          (id) => id !== baseSessionId && id !== joiningSessionId,
+          (id) => !removedTabs.includes(id),
         );
         if (withoutSessions.includes(newWorkspace.id)) return withoutSessions;
-        const indexes = [baseSessionId, joiningSessionId]
+        const indexes = removedTabs
           .map((id) => prevTabOrder.indexOf(id))
           .filter((index) => index >= 0);
         const insertAt = indexes.length > 0 ? Math.min(...indexes) : withoutSessions.length;
@@ -982,6 +1006,42 @@ export const useSessionState = ({
   }, []);
 
   // Split a session to create a workspace with the same host connection
+  const addSessionTab = useCallback((sessionId: string, options?: {
+    localShellType?: TerminalSession['shellType'];
+    inheritedCwd?: string;
+  }) => {
+    const id = crypto.randomUUID();
+    setSessions(prev => {
+      if (prev.some(session => session.id === id)) return prev;
+      const source = prev.find(session => session.id === sessionId);
+      if (!source || source.workspaceId || source.hiddenFromTabs) return prev;
+      const sessionGroupId = getSessionTabId(source);
+      // Materialize the visible group order before membership changes. A group
+      // keeps its slot even when its original (first) member is later closed.
+      setTabOrder(order => buildOrderedWorkTabIds(order, [
+        ...order,
+        ...getSessionGroups(prev).map(group => group.id),
+        ...workspaces.map(workspace => workspace.id),
+        ...logViews.map(view => view.id),
+      ]));
+      const clone = createSplitTerminalSessionClone(source, {
+        id,
+        localShellType: options?.localShellType ?? source.shellType,
+        inheritedCwd: source.protocol === 'local' ? options?.inheritedCwd : undefined,
+      });
+      setActiveTabId(sessionGroupId);
+      return selectSessionInGroup([...prev, { ...clone, sessionGroupId }], id);
+    });
+    return id;
+  }, [setSessions, setActiveTabId, workspaces, logViews]);
+
+  const selectSessionTab = useCallback((sessionId: string) => {
+    const target = sessionsRef.current.find(session => session.id === sessionId);
+    if (!target || target.workspaceId || target.hiddenFromTabs) return;
+    setSessions(prev => selectSessionInGroup(prev, sessionId));
+    setActiveTabId(getSessionTabId(target));
+  }, [setSessions, setActiveTabId]);
+
   // direction: 'horizontal' = split top/bottom, 'vertical' = split left/right
   const splitSession = useCallback((
     sessionId: string,
@@ -989,7 +1049,6 @@ export const useSessionState = ({
     options?: {
       localShellType?: TerminalSession['shellType'];
       inheritedCwd?: string;
-      tabbed?: boolean;
     },
   ) => {
     const newSessionId = crypto.randomUUID();
@@ -998,17 +1057,10 @@ export const useSessionState = ({
       position: direction === 'horizontal' ? 'bottom' : 'right',
     };
     const standaloneWorkspace = createWorkspaceEntity(sessionId, newSessionId, standaloneHint);
-    if (options?.tabbed) {
-      standaloneWorkspace.viewMode = 'focus';
-      standaloneWorkspace.focusLayout = 'tabs';
-      standaloneWorkspace.focusedSessionId = newSessionId;
-    }
 
 	    setSessions(prevSessions => {
       const session = prevSessions.find(s => s.id === sessionId);
       if (!session) return prevSessions;
-      const inheritedCwd = options?.tabbed && session.protocol !== 'local'
-        ? undefined : options?.inheritedCwd;
       
       // If session is already in a workspace, split within that workspace
       if (session.workspaceId) {
@@ -1016,7 +1068,7 @@ export const useSessionState = ({
         const newSession = createSplitTerminalSessionClone(session, {
           id: newSessionId,
           localShellType: options?.localShellType,
-          inheritedCwd,
+          inheritedCwd: options?.inheritedCwd,
           workspaceId: session.workspaceId,
         });
 
@@ -1028,12 +1080,7 @@ export const useSessionState = ({
         };
         
         setWorkspaces(prevWorkspaces => {
-          const updated = insertWorkspacePaneIfMissing(prevWorkspaces, session.workspaceId, newSession.id, hint);
-          return options?.tabbed ? updated.map(ws => ws.id === session.workspaceId
-            ? { ...ws, viewMode: 'focus', focusLayout: 'tabs', focusedSessionId: newSessionId }
-            : ws) : updated.map(ws => ws.id === session.workspaceId && ws.focusLayout === 'tabs'
-              ? { ...ws, viewMode: 'split' }
-              : ws);
+          return insertWorkspacePaneIfMissing(prevWorkspaces, session.workspaceId, newSession.id, hint);
         });
         
         return addTerminalSessionIfMissing(prevSessions, newSession);
@@ -1043,12 +1090,10 @@ export const useSessionState = ({
       const newSession = createSplitTerminalSessionClone(session, {
         id: newSessionId,
         localShellType: options?.localShellType,
-        inheritedCwd,
+        inheritedCwd: options?.inheritedCwd,
       });
 
-      setWorkspaces(prev => addWorkspaceIfMissing(prev, options?.tabbed
-        ? { ...standaloneWorkspace, title: session.hostLabel, autoTitle: false }
-        : standaloneWorkspace));
+      setWorkspaces(prev => addWorkspaceIfMissing(prev, standaloneWorkspace));
       setActiveTabId(standaloneWorkspace.id);
       
       return prevSessions.map(s => {
@@ -1176,8 +1221,10 @@ export const useSessionState = ({
 	    setActiveTabId(workspace.id);
 	  }, [setActiveTabId]);
 
-  const orphanSessions = useMemo(() => sessions.filter(s => !s.workspaceId && !s.hiddenFromTabs), [sessions]);
-  const canUseGlobalBroadcast = orphanSessions.length >= 2;
+  const orphanSessions = useMemo(() => getSessionGroups(sessions).map(group => (
+    sessions.find(session => session.id === group.activeSessionId)!
+  )), [sessions]);
+  const canUseGlobalBroadcast = sessions.filter(session => !session.workspaceId && !session.hiddenFromTabs).length >= 2;
 
   // Losing the group must disarm broadcast before another tab can join it.
   // Compose-bar send target follows the toolbar switch back to active-only.
@@ -1232,11 +1279,11 @@ export const useSessionState = ({
       setActiveTabId(newSessionId);
       setTabOrder(prevTabOrder => {
         const allTabIds = [
-          ...orphanSessions.map(s => s.id),
+          ...orphanSessions.map(getSessionTabId),
           ...workspaces.map(w => w.id),
           ...logViews.map(lv => lv.id),
         ];
-        return insertCopiedTabOrderIdOnce(prevTabOrder, sessionId, newSessionId, allTabIds);
+        return insertCopiedTabOrderIdOnce(prevTabOrder, getSessionTabId(session), newSessionId, allTabIds);
       });
 
       return [...prevSessions, newSession];
@@ -1288,7 +1335,7 @@ export const useSessionState = ({
       setActiveTabId(newWorkspaceId);
       setTabOrder(prevTabOrder => {
         const allTabIds = [
-          ...orphanSessions.map(s => s.id),
+          ...orphanSessions.map(getSessionTabId),
           ...workspaces.map(w => w.id),
           ...logViews.map(lv => lv.id),
         ];
@@ -1375,7 +1422,7 @@ export const useSessionState = ({
   const isGlobalComposeSendToAll = globalComposeSendToAll;
 
   const baseWorkTabIds = useMemo(() => [
-    ...orphanSessions.map(s => s.id),
+    ...orphanSessions.map(getSessionTabId),
     ...workspaces.map(w => w.id),
     ...logViews.map(lv => lv.id),
   ], [orphanSessions, workspaces, logViews]);
@@ -1492,6 +1539,8 @@ export const useSessionState = ({
     appendLocalTerminalToWorkspace,
     updateSplitSizes,
     splitSession,
+    addSessionTab,
+    selectSessionTab,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
     reorderWorkspaceSessions,

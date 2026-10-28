@@ -1,3 +1,4 @@
+import { getSessionTabId } from '../../domain/sessionGroup';
 import React, { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { activeTabStore } from '../../application/state/activeTabStore';
@@ -714,7 +715,7 @@ export interface TerminalLayerProps {
     sessionId: string,
     tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
   ) => void;
-  onSplitSession?: (sessionId: string, direction: SplitDirection, options?: { tabbed?: boolean }) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   onConnectToHost: (host: Host) => string | void;
   onCreateLocalTerminal?: () => void;
   // Broadcast mode
@@ -826,7 +827,7 @@ interface TerminalPaneProps {
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
-  onSplitSession?: (sessionId: string, direction: SplitDirection, options?: { tabbed?: boolean }) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   isComposeSendToAll?: (workspaceId: string) => boolean;
   isGlobalBroadcastEnabled?: boolean;
@@ -1290,10 +1291,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       activeTabId: activeTabStore.getActiveTabId(),
       sessionId: session.id,
       sessionWorkspaceId: session.workspaceId,
+      sessionGroupId: session.sessionGroupId,
+      sessionGroupFocused: session.sessionGroupFocused,
       workspaceById,
       isTerminalLayerVisible,
     }),
-    [isTerminalLayerVisible, session.id, session.workspaceId, workspaceById],
+    [isTerminalLayerVisible, session.id, session.workspaceId, session.sessionGroupId, session.sessionGroupFocused, workspaceById],
   );
   const renderSnapshot = useSyncExternalStore(activeTabStore.subscribe, getRenderSnapshot, getRenderSnapshot);
   const { paneState, isFocusedPane } = parseTerminalPaneRenderSnapshot(renderSnapshot);
@@ -1381,9 +1384,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const isMagnified = isVisible
     && magnifiedPane?.target.kind === 'terminal'
     && magnifiedPane.target.sessionId === session.id
-    && magnifiedPane.tabId === (activeWorkspaceId ?? session.id);
+    && magnifiedPane.tabId === (activeWorkspaceId ?? getSessionTabId(session));
   const isCoveredByMagnification = isVisible
-    && magnifiedPane?.tabId === (activeWorkspaceId ?? session.id)
+    && magnifiedPane?.tabId === (activeWorkspaceId ?? getSessionTabId(session))
     && !isMagnified;
   const [magnifiedSurfaceBounds, setMagnifiedSurfaceBounds] = useState<{
     left: number;
@@ -1512,15 +1515,15 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const sessionAppearanceTheme = sessionAppearance.theme;
 
   const handlePaneClick = useCallback(() => {
-    const tabId = activeWorkspaceId ?? session.id;
+    const tabId = activeWorkspaceId ?? getSessionTabId(session);
     onTerminalPaneInteraction(tabId, session.id);
     if (activeWorkspaceId && !isFocusMode) {
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
     }
-  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, onTerminalPaneInteraction, session.id]);
+  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, onTerminalPaneInteraction, session]);
   const handleTogglePaneMagnification = useCallback(() => {
-    onMagnifyTerminalPane(activeWorkspaceId ?? session.id, session.id);
-  }, [activeWorkspaceId, onMagnifyTerminalPane, session.id]);
+    onMagnifyTerminalPane(activeWorkspaceId ?? getSessionTabId(session), session.id);
+  }, [activeWorkspaceId, onMagnifyTerminalPane, session]);
   const handleExpandToFocus = useCallback(() => {
     if (isMagnified) {
       handleTogglePaneMagnification();
@@ -1673,7 +1676,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onDetach={inActiveWorkspace ? handleDetach : undefined}
         onStartSessionDrag={inActiveWorkspace ? onStartSessionDrag : undefined}
         onEndSessionDrag={inActiveWorkspace ? onEndSessionDrag : undefined}
-        onDetachPointerDown={inActiveWorkspace && !(isFocusMode && layoutWorkspace?.focusLayout === 'tabs') ? handleDetachPointerDown : undefined}
+        onDetachPointerDown={inActiveWorkspace ? handleDetachPointerDown : undefined}
         onDetachDragStart={inActiveWorkspace ? handleDetachDragStart : undefined}
         onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
@@ -1745,7 +1748,7 @@ interface TerminalPanesHostProps {
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
-  onSplitSession?: (sessionId: string, direction: SplitDirection, options?: { tabbed?: boolean }) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   isComposeSendToAll?: (workspaceId: string) => boolean;
   isGlobalBroadcastEnabled?: boolean;
